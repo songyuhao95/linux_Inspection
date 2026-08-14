@@ -1,0 +1,20 @@
+# assembly-development managed state
+run/snapshots/
+run/projections/
+run/.runtime/
+.worktrees/
+*.tmp
+
+# Generated inspection outputs
+inspection-results/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
