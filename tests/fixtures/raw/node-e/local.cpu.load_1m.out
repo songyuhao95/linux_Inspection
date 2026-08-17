@@ -1,0 +1,5 @@
+# 非实测数据（fixture）：node-e local.cpu.load_1m 预录输出
+# 其余 9 个指标 .out 缺失 → DATA_MISSING（夹具不完整）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+0.52 0.44 0.39 1/210 12345
+8

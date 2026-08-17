@@ -1,0 +1,17 @@
+# 夹具：合法 override（TD §6.2 示例逐字转写，阈值来自 §6.2 原文）
+schema: threshold-override-v1
+version: 1
+# scope 与 hosts 可选：限定生效范围；缺省对全部目标生效
+scope: null
+hosts: null
+metrics:
+  # 规则按数组顺序求值，首个匹配生效；数值比较作用于 normalized_value
+  local.swap.used_percent:            # C3 unresolved 边界：现场基线可在此覆盖
+    rules:
+      - { status: WARN, op: ">", value: 0, note: "现场基线：启用 swap 监控（覆盖 C3）" }
+  local.filesystem.inode_used_percent:  # C5 缺失边界覆盖示例（值由现场提供）
+    rules:
+      - { status: WARN, op: ">=", value: 80, note: "现场基线（覆盖 C5）" }
+  local.cpu.load_1m:                    # C5 缺失边界覆盖示例（值由现场提供）
+    rules:
+      - { status: WARN, op: ">", value: 1.0, note: "持续超核数 1 倍（覆盖 C5，需现场确认）" }

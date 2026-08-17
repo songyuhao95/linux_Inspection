@@ -1,0 +1,2 @@
+# 运行时依赖（technical-design §8 选型；仅声明，T-101 不安装）
+xlsxwriter

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inspect-cli"
+version = "0.1.0"
+description = "安徽农金中间件运维巡检 CLI（local 垂直切片：10 个共同 P0 指标）"
+requires-python = ">=3.8"
+# 运行时依赖统一声明于 requirements.txt，开发依赖于 requirements-dev.txt
+# （technical-design §3 目录布局）；本文件仅承载包元数据与 pytest 配置。
+
+[tool.setuptools]
+packages = ["inspect"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

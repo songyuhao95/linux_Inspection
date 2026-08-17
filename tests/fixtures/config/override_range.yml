@@ -1,0 +1,7 @@
+# 夹具：range 判定表达式（TD §6.2 oneOf 的 range 分支）
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.memory.available_percent:
+    rules:
+      - { status: WARN, range: [10, 20], note: "现场基线：10–20% 区间告警（覆盖 C4 缺失边界）" }

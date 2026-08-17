@@ -1,0 +1,6 @@
+{
+  "schema": "host-result-v1",
+  "schema_version": 1,
+  "run_id": "run-20260814-001",
+  "inspection_id": "insp-20260814120000-node-fx01",
+  "host": { "name": "node-fx01", "ip": "<IP>", "inventory_source":

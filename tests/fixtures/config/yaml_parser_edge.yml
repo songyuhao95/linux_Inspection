@@ -1,0 +1,24 @@
+# 夹具：YAML 子集解析器边界（供 test_config.py 解析器用例）
+# 覆盖：嵌套块映射、块序列、flow 映射/序列、注释（整行/行尾）、引号转义、
+#       标量类型（int/float/bool/null/string）、行内注释、flow 内注释。
+schema: parser-edge-v1
+version: 1
+nested:
+  level_a:
+    level_b:
+      key: value
+      number: 42
+      float_value: 3.14
+      yes: true
+      no: false
+      nothing: null
+      tilde: ~
+seq:
+  - item one
+  - item two
+  - { status: OK, op: ">", value: 0 }   # flow map + 行内注释
+  - [1, 2, 3]
+flow_map: { a: 1, b: "two", c: [x, y] }
+quoted: "含空格与 # 井号的字符串"
+single: '单引号 ''转义'' 与 # 注释'
+escaped: "制表符\t换行\n反斜杠\\"

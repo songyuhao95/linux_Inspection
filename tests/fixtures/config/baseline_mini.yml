@@ -1,0 +1,23 @@
+# 夹具：合成 mini 文档基线（仅测试用，非文档基线；用于覆盖 resolve 分支：
+# 有定义边界 → document-baseline；无任何定义边界 → unresolved-document-conflict）
+schema: threshold-baseline-v1
+version: linux-common-p0-v1
+scope: test-only
+source_doc: "tests/fixtures/config/baseline_mini.yml（合成测试数据，非 MR §6 转写）"
+metrics:
+  local.test.defined:
+    name: 测试指标（有定义）
+    source_anchor: "合成测试数据：有定义边界（非文档基线）"
+    boundaries:
+      OK: { rule: "正常", rule_id: "linux-common-p0-v1.test.defined.ok", reason: null, note: null }
+      WARN: { rule: "偏高", rule_id: "linux-common-p0-v1.test.defined.warn", reason: null, note: null }
+      CRIT: { rule: "故障", rule_id: "linux-common-p0-v1.test.defined.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无配置" }
+  local.test.undefined:
+    name: 测试指标（未定义）
+    source_anchor: "合成测试数据：无任何定义边界（非文档基线）"
+    boundaries:
+      OK: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "整体未定义 → UNKNOWN" }

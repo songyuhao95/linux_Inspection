@@ -1,0 +1,4 @@
+# 非实测数据（fixture）：node-b local.cpu.load_1m 预录输出（/proc/loadavg + nproc）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+0.52 0.44 0.39 1/210 12345
+8

@@ -1,0 +1,5 @@
+# 非实测数据（fixture）：node-a local.logs.key_evidence 预录输出（tail -300 | egrep -i）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+2026-08-15T09:59:32+08:00 [ERROR] es-node-1: org.elasticsearch.transport.RemoteTransportException: connect_timeout
+2026-08-15T09:59:41+08:00 [WARN ] es-node-1: circuit_breaking_exception: [parent] Data too large
+2026-08-15T09:59:55+08:00 [ERROR] es-node-1: java.io.IOException: Connection reset by peer

@@ -1,0 +1,7 @@
+# 夹具（非法）：range 长度不为 2 —— schema maxItems/minItems 拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent:
+    rules:
+      - { status: WARN, range: [10, 20, 30], note: "range 长度 3" }

@@ -1,0 +1,2 @@
+# 非实测数据（fixture）：node-b local.port.listening 超时标记（.timeout 存在 → TIMEOUT）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机

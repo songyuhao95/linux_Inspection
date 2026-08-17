@@ -1,0 +1,64 @@
+{
+  "schema": "host-result-v1",
+  "schema_version": 1,
+  "run_id": "run-20260814-001",
+  "inspection_id": "insp-20260814120000-node-fx01",
+  "host": {
+    "name": "node-fx01",
+    "ip": "<IP>",
+    "inventory_source": "local",
+    "product_profiles": ["elasticsearch"]
+  },
+  "collected_at": "2026-08-14T12:00:00+08:00",
+  "duration_sec": 12.34,
+  "execution_status": "SUCCESS",
+  "execution_summary": {
+    "total_metrics": 1,
+    "ok": 1,
+    "warn": 0,
+    "crit": 0,
+    "unknown": 0,
+    "executed": 1,
+    "failed": 0
+  },
+  "metrics": [
+    {
+      "metric_id": "local.swap.used_percent",
+      "name": "Swap 使用率",
+      "scope": "local-common-p0-v1",
+      "status": "OK",
+      "raw_value": "0",
+      "normalized_value": 0.0,
+      "unit": "%",
+      "threshold": {
+        "layer": "document-baseline",
+        "rule_id": "linux-common-p0-v1.swap.used_percent.ok",
+        "value": "used=0（或未配置 swap）→ OK（全部手册一致）",
+        "source_anchor": "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、Rabbitmq T5R9、Rocketmq T5R9、Tomcat T5R7）；swap=0 为部署基线（ES/部署规范）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707",
+        "notes": null
+      },
+      "evidence": {
+        "command": "free -m Swap 行（used/total）或 /proc/meminfo SwapTotal/SwapFree（used/total × 100；total=0 视为未配置）",
+        "output_summary": "used=0MB total=8191MB → 0%",
+        "raw_ref": "raw/local.swap.used_percent.out",
+        "sampled_at": "2026-08-14T12:00:00+08:00"
+      },
+      "error": null,
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": [
+          "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、Rabbitmq T5R9、Rocketmq T5R9、Tomcat T5R7）；swap=0 为部署基线（ES/部署规范）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+        ],
+        "notes": null
+      }
+    }
+  ],
+  "meta": {
+    "control_endpoint": "Linux/WSL Python3",
+    "gather_facts": false,
+    "serial": 1,
+    "become_scope": "minimal",
+    "generator": "inspect.sh",
+    "generator_version": "0.1.0-draft"
+  }
+}

@@ -1,0 +1,4 @@
+# 非实测数据（fixture）：node-b local.filesystem.used_percent 预录输出（df -hT）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+Filesystem     Type      Size  Used Avail Use% Mounted on
+/dev/sda1      ext4      100G   62G   33G  66% /

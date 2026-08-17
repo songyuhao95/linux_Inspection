@@ -1,0 +1,4 @@
+# 非实测数据（fixture）：node-a local.process.present 预录输出（pgrep -fa）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+4321 /usr/bin/java -Xms1g -Xmx1g -Des.path.home=/opt/elasticsearch -Des.path.conf=/etc/elasticsearch org.elasticsearch.bootstrap.Elasticsearch
+4322 /usr/bin/java -Xms512m -Xmx512m -Dlog4j2.isThreadContextMapInheritable=true -Des.path.home=/opt/kibana org.elasticsearch.bootstrap.Elasticsearch

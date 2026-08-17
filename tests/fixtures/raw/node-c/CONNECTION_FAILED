@@ -1,0 +1,2 @@
+# 非实测数据（fixture）：node-c 连接失败标记
+# 存在该文件 → ansible_runner 模拟连接失败（主机 ERROR，无业务结论）

@@ -1,0 +1,5 @@
+# 夹具（非法）：inspect.yml 含未知顶层字段 —— load_inspect_config 必须拒绝
+schema: inspect-config-v1
+version: 1
+out_dir: out
+bogus_field: true

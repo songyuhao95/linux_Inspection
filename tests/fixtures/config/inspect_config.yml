@@ -1,0 +1,13 @@
+# 夹具：inspect.yml（TD §6.3 示例逐字转写）
+schema: inspect-config-v1
+version: 1
+out_dir: out                       # 事实源与报表输出目录（HR §5 配置边界）
+inventory: null                    # 可选的默认 inventory 路径（-i 优先级更高）
+profiles:                          # 产品 profile：进程/unit/端口/路径/关键词均属配置边界
+  elasticsearch:
+    process_pattern: "org.elasticsearch.bootstrap.Elasticsearch"
+    unit: elasticsearch
+    ports: [9200, 9300]
+    fs_paths: ["/opt/elasticsearch/data", "/opt/elasticsearch/logs"]
+    log_paths: ["/opt/elasticsearch/logs/*.log"]
+    log_keywords: ["ERROR", "master not discovered", "flood stage", "OutOfMemory"]

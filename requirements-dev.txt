@@ -1,0 +1,4 @@
+# 开发/测试依赖（technical-design §8；仅声明，T-101 不安装）
+pytest
+jsonschema
+openpyxl

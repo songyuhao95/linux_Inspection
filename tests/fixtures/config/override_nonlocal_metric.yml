@@ -1,0 +1,7 @@
+# 夹具（非法）：指标键不匹配 ^local\. —— schema propertyNames 拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  cpu.usage:
+    rules:
+      - { status: WARN, op: ">", value: 80, note: "非 local.* 指标键" }

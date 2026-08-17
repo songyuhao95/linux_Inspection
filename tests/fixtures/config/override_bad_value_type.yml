@@ -1,0 +1,7 @@
+# 夹具（非法）：value 非数值 —— schema type: number 拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent:
+    rules:
+      - { status: WARN, op: ">", value: "high", note: "value 为字符串" }

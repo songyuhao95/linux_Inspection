@@ -1,0 +1,7 @@
+# 夹具（非法）：缺 note（TD §6.2 语法约束：note 必填）—— schema 必须拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent:
+    rules:
+      - { status: WARN, op: ">", value: 0 }

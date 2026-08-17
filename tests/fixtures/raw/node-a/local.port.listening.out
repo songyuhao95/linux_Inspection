@@ -1,0 +1,5 @@
+# 非实测数据（fixture）：node-a local.port.listening 预录输出（ss -tlnp）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+LISTEN 0      511        0.0.0.0:9200      0.0.0.0:*    users:(("java",pid=4321,fd=130))
+LISTEN 0      511        0.0.0.0:9300      0.0.0.0:*    users:(("java",pid=4321,fd=131))
+LISTEN 0      128        0.0.0.0:5601      0.0.0.0:*    users:(("node",pid=4411,fd=24))

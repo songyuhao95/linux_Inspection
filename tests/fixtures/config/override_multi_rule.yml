@@ -1,0 +1,9 @@
+# 夹具：多规则顺序（TD §6.2：规则按数组顺序求值，首个匹配生效）
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent:
+    rules:
+      - { status: OK, op: "==", value: 0, note: "现场基线：swap=0 视为正常（规则 1）" }
+      - { status: WARN, op: ">", value: 0, note: "现场基线：swap>0 告警（规则 2）" }
+      - { status: CRIT, op: ">", value: 50, note: "现场基线：swap>50% 故障（规则 3）" }

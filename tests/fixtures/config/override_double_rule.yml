@@ -1,0 +1,7 @@
+# 夹具（非法）：双重判定（op+value 与 range 同时出现）—— schema 必须拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent:
+    rules:
+      - { status: WARN, op: ">", value: 0, range: [0, 10], note: "双重判定" }

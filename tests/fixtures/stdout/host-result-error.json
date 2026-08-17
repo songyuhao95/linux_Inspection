@@ -1,0 +1,33 @@
+{
+  "schema": "host-result-v1",
+  "schema_version": 1,
+  "run_id": "run-20260814-001",
+  "inspection_id": "insp-20260814120000-node-fx01",
+  "host": {
+    "name": "node-fx03",
+    "ip": "<IP>",
+    "inventory_source": "local",
+    "product_profiles": ["elasticsearch"]
+  },
+  "collected_at": "2026-08-14T12:00:00+08:00",
+  "duration_sec": 1.2,
+  "execution_status": "ERROR",
+  "execution_summary": {
+    "total_metrics": 3,
+    "ok": 0,
+    "warn": 0,
+    "crit": 0,
+    "unknown": 0,
+    "executed": 0,
+    "failed": 3
+  },
+  "metrics": [],
+  "meta": {
+    "control_endpoint": "Linux/WSL Python3",
+    "gather_facts": false,
+    "serial": 1,
+    "become_scope": "minimal",
+    "generator": "inspect.sh",
+    "generator_version": "0.1.0-draft"
+  }
+}

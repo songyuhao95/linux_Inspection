@@ -1,0 +1,444 @@
+[
+  {
+    "schema": "host-result-v1",
+    "schema_version": 1,
+    "run_id": "run-20260814-001",
+    "inspection_id": "insp-20260814120000-node-fx01",
+    "host": {
+      "name": "node-fx01",
+      "ip": "<IP>",
+      "inventory_source": "local",
+      "product_profiles": ["elasticsearch"]
+    },
+    "collected_at": "2026-08-14T12:00:00+08:00",
+    "duration_sec": 12.34,
+    "execution_status": "SUCCESS",
+    "execution_summary": {
+      "total_metrics": 4,
+      "ok": 2,
+      "warn": 1,
+      "crit": 1,
+      "unknown": 0,
+      "executed": 4,
+      "failed": 0
+    },
+    "metrics": [
+      {
+        "metric_id": "local.cpu.utilization",
+        "name": "CPU 使用率",
+        "scope": "local-common-p0-v1",
+        "status": "OK",
+        "raw_value": "12.5",
+        "normalized_value": 12.5,
+        "unit": "%",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.cpu.utilization.ok",
+          "value": "长期<70% 且波动<80%",
+          "source_anchor": "巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹bb8ff97e",
+          "notes": null
+        },
+        "evidence": {
+          "command": "top -bn1 | head -20",
+          "output_summary": "Cpu(s): 12.5% us, 5.2% sy, 82.3% id",
+          "raw_ref": "raw/local.cpu.utilization.out",
+          "sampled_at": "2026-08-14T12:00:02+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["ES 巡检手册 v1.0 表T5R3"],
+          "notes": null
+        }
+      },
+      {
+        "metric_id": "local.swap.used_percent",
+        "name": "Swap 使用率",
+        "scope": "local-common-p0-v1",
+        "status": "OK",
+        "raw_value": "0",
+        "normalized_value": 0.0,
+        "unit": "%",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.swap.used_percent.ok",
+          "value": "used=0（或未配置 swap）→ OK",
+          "source_anchor": "9 份巡检手册 P0 内存行；swap=0 为部署基线（ES/部署规范）",
+          "notes": null
+        },
+        "evidence": {
+          "command": "free -m Swap 行",
+          "output_summary": "used=0MB total=8191MB → 0%",
+          "raw_ref": "raw/local.swap.used_percent.out",
+          "sampled_at": "2026-08-14T12:00:02+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["9 份巡检手册 P0 内存行"],
+          "notes": null
+        }
+      },
+      {
+        "metric_id": "local.filesystem.used_percent",
+        "name": "磁盘使用率",
+        "scope": "local-common-p0-v1",
+        "status": "WARN",
+        "raw_value": "78",
+        "normalized_value": 78.0,
+        "unit": "%",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.filesystem.used_percent.warn",
+          "value": "75–85%",
+          "source_anchor": "巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R9/指纹bb8ff97e",
+          "notes": null
+        },
+        "evidence": {
+          "command": "df -hT /opt/elasticsearch/data /opt/elasticsearch/logs",
+          "output_summary": "/dev/mapper/vg-data 78% 已用",
+          "raw_ref": "raw/local.filesystem.used_percent.out",
+          "sampled_at": "2026-08-14T12:00:03+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["ES 巡检手册 v1.0 表T5R9"],
+          "notes": null
+        }
+      },
+      {
+        "metric_id": "local.memory.available_percent",
+        "name": "内存可用率",
+        "scope": "local-common-p0-v1",
+        "status": "CRIT",
+        "raw_value": "6.8",
+        "normalized_value": 6.8,
+        "unit": "%",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.memory.available_percent.crit",
+          "value": "<10%",
+          "source_anchor": "巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹bb8ff97e",
+          "notes": null
+        },
+        "evidence": {
+          "command": "free -m",
+          "output_summary": "Mem: available 548MB / total 8064MB → 6.8%",
+          "raw_ref": "raw/local.memory.available_percent.out",
+          "sampled_at": "2026-08-14T12:00:03+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["ES 巡检手册 v1.0 表T5R4"],
+          "notes": null
+        }
+      }
+    ],
+    "meta": {
+      "control_endpoint": "Linux/WSL Python3",
+      "gather_facts": false,
+      "serial": 1,
+      "become_scope": "minimal",
+      "generator": "inspect.sh",
+      "generator_version": "0.1.0-draft"
+    }
+  },
+  {
+    "schema": "host-result-v1",
+    "schema_version": 1,
+    "run_id": "run-20260814-001",
+    "inspection_id": "insp-20260814120000-node-fx01",
+    "host": {
+      "name": "node-fx02",
+      "ip": "<IP>",
+      "inventory_source": "local",
+      "product_profiles": ["redis"]
+    },
+    "collected_at": "2026-08-14T12:00:00+08:00",
+    "duration_sec": 15.02,
+    "execution_status": "PARTIAL",
+    "execution_summary": {
+      "total_metrics": 4,
+      "ok": 2,
+      "warn": 0,
+      "crit": 0,
+      "unknown": 2,
+      "executed": 3,
+      "failed": 1
+    },
+    "metrics": [
+      {
+        "metric_id": "local.cpu.load_1m",
+        "name": "1 分钟负载",
+        "scope": "local-common-p0-v1",
+        "status": "UNKNOWN",
+        "raw_value": "3.20",
+        "normalized_value": 3.2,
+        "unit": "load",
+        "threshold": {
+          "layer": "unresolved-document-conflict",
+          "rule_id": null,
+          "value": null,
+          "source_anchor": "9 份巡检手册 P0 内存行（见 docs/reviews/docx-source-conflicts.md C5）",
+          "notes": "load_1m 持续>核数的判据在 9 份手册间不一致，默认 UNKNOWN"
+        },
+        "evidence": {
+          "command": "cat /proc/loadavg; nproc",
+          "output_summary": "3.20 2.10 1.80 1/412 80321 (nproc=8)",
+          "raw_ref": "raw/local.cpu.load_1m.out",
+          "sampled_at": "2026-08-14T12:00:03+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["ES/Kafka/Mysql/Nacos/Rabbitmq/Rocketmq/Tomcat 巡检手册"],
+          "notes": "文档冲突 C5 unresolved：默认 UNKNOWN，外部配置可覆盖"
+        }
+      },
+      {
+        "metric_id": "local.memory.available_percent",
+        "name": "内存可用率",
+        "scope": "local-common-p0-v1",
+        "status": "OK",
+        "raw_value": "62",
+        "normalized_value": 62.0,
+        "unit": "%",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.memory.available_percent.ok",
+          "value": ">=20%",
+          "source_anchor": "巡检手册/安徽农金Redis运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹e5cf1a4d",
+          "notes": null
+        },
+        "evidence": {
+          "command": "free -m",
+          "output_summary": "Mem: available 5000MB / total 8064MB → 62%",
+          "raw_ref": "raw/local.memory.available_percent.out",
+          "sampled_at": "2026-08-14T12:00:03+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["Redis 巡检手册 v1.0 表T5R4"],
+          "notes": null
+        }
+      },
+      {
+        "metric_id": "local.swap.used_percent",
+        "name": "Swap 使用率",
+        "scope": "local-common-p0-v1",
+        "status": "OK",
+        "raw_value": "0",
+        "normalized_value": 0.0,
+        "unit": "%",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.swap.used_percent.ok",
+          "value": "used=0（或未配置 swap）→ OK",
+          "source_anchor": "9 份巡检手册 P0 内存行；swap=0 为部署基线",
+          "notes": null
+        },
+        "evidence": {
+          "command": "free -m Swap 行",
+          "output_summary": "used=0MB total=4095MB → 0%",
+          "raw_ref": "raw/local.swap.used_percent.out",
+          "sampled_at": "2026-08-14T12:00:04+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["9 份巡检手册 P0 内存行"],
+          "notes": null
+        }
+      },
+      {
+        "metric_id": "local.logs.key_evidence",
+        "name": "关键日志证据",
+        "scope": "local-common-p0-v1",
+        "status": "UNKNOWN",
+        "raw_value": null,
+        "normalized_value": null,
+        "unit": "count",
+        "threshold": {
+          "layer": null,
+          "rule_id": null,
+          "value": null,
+          "source_anchor": null,
+          "notes": null
+        },
+        "evidence": {
+          "command": "tail -300 /opt/redis/logs/redis.log | egrep -i 'ERROR|OutOfMemory'",
+          "output_summary": null,
+          "raw_ref": "raw/local.logs.key_evidence.out",
+          "sampled_at": "2026-08-14T12:00:05+08:00"
+        },
+        "error": {
+          "code": "PERMISSION_DENIED",
+          "message": "cannot read /opt/redis/logs/redis.log (permission denied)",
+          "metric_status": "UNKNOWN"
+        },
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["Redis 巡检手册 v1.0 表T5R11"],
+          "notes": "权限不足，指标 UNKNOWN，继续其余指标与主机"
+        }
+      }
+    ],
+    "meta": {
+      "control_endpoint": "Linux/WSL Python3",
+      "gather_facts": false,
+      "serial": 1,
+      "become_scope": "minimal",
+      "generator": "inspect.sh",
+      "generator_version": "0.1.0-draft"
+    }
+  },
+  {
+    "schema": "host-result-v1",
+    "schema_version": 1,
+    "run_id": "run-20260814-001",
+    "inspection_id": "insp-20260814120000-node-fx01",
+    "host": {
+      "name": "node-fx03",
+      "ip": "<IP>",
+      "inventory_source": "local",
+      "product_profiles": ["mysql"]
+    },
+    "collected_at": "2026-08-14T12:00:00+08:00",
+    "duration_sec": 11.87,
+    "execution_status": "SUCCESS",
+    "execution_summary": {
+      "total_metrics": 4,
+      "ok": 4,
+      "warn": 0,
+      "crit": 0,
+      "unknown": 0,
+      "executed": 4,
+      "failed": 0
+    },
+    "metrics": [
+      {
+        "metric_id": "local.process.present",
+        "name": "进程存在性",
+        "scope": "local-common-p0-v1",
+        "status": "OK",
+        "raw_value": "1",
+        "normalized_value": 1.0,
+        "unit": "count",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.process.present.ok",
+          "value": "匹配进程行数 >= 1",
+          "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R1/指纹67ae309b",
+          "notes": null
+        },
+        "evidence": {
+          "command": "pgrep -fa 'mysqld' || ps -ef | grep '[m]ysqld'",
+          "output_summary": "1 个匹配进程：mysqld --datadir=/opt/mysql/data",
+          "raw_ref": "raw/local.process.present.out",
+          "sampled_at": "2026-08-14T12:00:02+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": ["inventory:group_vars/all/p0_thresholds.yml (未使用)"],
+          "doc_sources": ["Mysql 巡检手册 v1.0 表T5R1"],
+          "notes": null
+        }
+      },
+      {
+        "metric_id": "local.service.active",
+        "name": "服务活跃状态",
+        "scope": "local-common-p0-v1",
+        "status": "OK",
+        "raw_value": "active",
+        "normalized_value": null,
+        "unit": "state",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.service.active.ok",
+          "value": "ActiveState=active",
+          "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R2/指纹67ae309b",
+          "notes": null
+        },
+        "evidence": {
+          "command": "systemctl is-active mysqld; systemctl show -p ActiveState,SubState mysqld",
+          "output_summary": "active; ActiveState=active SubState=running",
+          "raw_ref": "raw/local.service.active.out",
+          "sampled_at": "2026-08-14T12:00:02+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["Mysql 巡检手册 v1.0 表T5R2"],
+          "notes": null
+        }
+      },
+      {
+        "metric_id": "local.port.listening",
+        "name": "端口监听",
+        "scope": "local-common-p0-v1",
+        "status": "OK",
+        "raw_value": "3306",
+        "normalized_value": 3306.0,
+        "unit": "port",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.port.listening.ok",
+          "value": "监听且进程匹配",
+          "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹67ae309b",
+          "notes": null
+        },
+        "evidence": {
+          "command": "ss -tlnp | grep 3306",
+          "output_summary": "LISTEN 0 128 0.0.0.0:3306 users:((\"mysqld\"))",
+          "raw_ref": "raw/local.port.listening.out",
+          "sampled_at": "2026-08-14T12:00:03+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["Mysql 巡检手册 v1.0 表T5R3"],
+          "notes": null
+        }
+      },
+      {
+        "metric_id": "local.cpu.load_1m",
+        "name": "1 分钟负载",
+        "scope": "local-common-p0-v1",
+        "status": "OK",
+        "raw_value": "0.12",
+        "normalized_value": 0.12,
+        "unit": "load",
+        "threshold": {
+          "layer": "document-baseline",
+          "rule_id": "linux-common-p0-v1.cpu.load_1m.ok",
+          "value": "<= 核数",
+          "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R7/指纹67ae309b",
+          "notes": null
+        },
+        "evidence": {
+          "command": "cat /proc/loadavg; nproc",
+          "output_summary": "load average: 0.12, 0.10, 0.08 (nproc=8); 含特殊字符样例 a < b & c",
+          "raw_ref": "raw/local.cpu.load_1m.out",
+          "sampled_at": "2026-08-14T12:00:03+08:00"
+        },
+        "error": null,
+        "provenance": {
+          "config_sources": [],
+          "doc_sources": ["Mysql 巡检手册 v1.0 表T5R7"],
+          "notes": null
+        }
+      }
+    ],
+    "meta": {
+      "control_endpoint": "Linux/WSL Python3",
+      "gather_facts": false,
+      "serial": 1,
+      "become_scope": "minimal",
+      "generator": "inspect.sh",
+      "generator_version": "0.1.0-draft"
+    }
+  }
+]

@@ -1,0 +1,5 @@
+# 非实测数据（fixture）：node-a local.filesystem.inode_used_percent 预录输出（df -i）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+Filesystem      Inodes  IUsed   IFree IUse% Mounted on
+/dev/sda1      6553600  65536 6488064    1% /
+/dev/sdb1     32768000  327680 32440320    1% /data

@@ -1,0 +1,12 @@
+# 非实测数据（fixture）：node-b 能力探测预录输出（pgrep 缺失，其余 10 条可用）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+/bin/bash
+/usr/bin/ps
+/usr/sbin/ss
+/usr/bin/free
+/usr/bin/df
+/usr/bin/top
+/usr/bin/systemctl
+/usr/bin/tail
+/usr/bin/grep
+/usr/bin/nproc

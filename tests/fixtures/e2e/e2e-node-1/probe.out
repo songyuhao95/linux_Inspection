@@ -1,0 +1,13 @@
+# 非实测数据（fixture）：e2e-node-1 能力探测预录输出（全部 11 条命令可用）
+# 仅用于 T-108 e2e -i/--limit 全链路验证；不代表真实主机
+/bin/bash
+/usr/bin/pgrep
+/usr/bin/ps
+/usr/sbin/ss
+/usr/bin/free
+/usr/bin/df
+/usr/bin/top
+/usr/bin/systemctl
+/usr/bin/tail
+/usr/bin/grep
+/usr/bin/nproc

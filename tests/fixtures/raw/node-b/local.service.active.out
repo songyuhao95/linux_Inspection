@@ -1,0 +1,5 @@
+# 非实测数据（fixture）：node-b local.service.active 预录输出（systemctl）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+active
+ActiveState=active
+SubState=running

@@ -1,0 +1,137 @@
+# 运行手册（runbook）— 本地调试与兼容矩阵执行手册
+
+- 文档 ID：runbook
+- 适用：local 垂直切片（10 个共同 P0 指标）CLI 的本地调试与兼容矩阵（TD §9）执行
+- 数据流（TD §2，单向）：`采集 → normalize → 原子写 JSON → 报表`；报表只消费 JSON（RR §1）
+- 说明：本手册不包含任何需要连接目标主机或修改受控端的操作；fixture 模式零连接（TD §10.2/REQ-N-08）
+
+## 1. 快速开始
+
+```bash
+bash inspect.sh --help          # 选项表（cli-contract §2）
+bash inspect.sh --list-metrics  # 只读列出 10 个 P0 指标，不采集
+bash inspect.sh --info local.cpu.load_1m   # 单指标定义，不采集
+```
+
+无 `-H`/`-i` 时巡检本机（--local 语义，cli-contract §3）：
+
+```bash
+bash inspect.sh --local
+```
+
+**当前环境预期**：真实 ansible-playbook 执行需 G0 预检（ansible-core 版本 /
+SSH 连接参数 / become 方式，AE §8）后显式启用；未设置 `INSPECT_FIXTURE_DIR`
+时执行路径明确报 `ExecutionNotReadyError`，退出码 10（非用法错误 2），
+不产生业务结论。调试/验证请使用 fixture 调试模式（§2.2）。
+
+## 2. 本地调试（无目标主机时，TD §10）
+
+### 2.1 --local 本机自巡检
+
+控制端兼受控端即可跑通全链路；本机命令缺失 → 对应指标 UNKNOWN，链路不断。
+未设置 `INSPECT_FIXTURE_DIR` 时因真实执行未启用（§1）返回 10。
+
+### 2.2 fixture 调试模式（实现/调试专用，非用户 CLI）
+
+环境变量 `INSPECT_FIXTURE_DIR` 指向预录输出目录时，ansible_runner 从夹具
+读取 probe 与指标原始输出（模拟受控端应答），**不产生任何连接、不执行
+任何命令**；启用时 stderr 打印一行"调试模式（fixture）"声明（TD §10.2）。
+
+```bash
+INSPECT_FIXTURE_DIR=tests/fixtures/raw bash inspect.sh --local
+INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local
+```
+
+- 夹具布局（与 tests/fixtures/raw/ 同约定）：`<fixture_dir>/<主机名>/
+  {probe.out, <metric_id>.out[, .stderr/.rc/.timeout], CONNECTION_FAILED,
+  PROBE_FAILED}`；文件首部 `#` 行声明"非实测数据"并被剥离（RK-R2-06）。
+- `tests/fixtures/e2e/` 为 T-108 端到端夹具（localhost 与 e2e-node-1 两主机，
+  预期计数 OK=4 WARN=0 CRIT=0 UNKNOWN=6，executed=4 failed=6，见该目录
+  README.txt）。
+- `-H`/`-i` 与 fixture 同时出现时仍不连接任何主机（TD §10 边界）。
+- 禁止把夹具数据写成"已验证的现网结论"。
+
+### 2.3 mock inventory
+
+`tests/fixtures/inventory/hosts.yml`（INI 格式，合成样例）用于 `-i --limit`
+语义验证（不连接真实主机）：
+
+```bash
+bash inspect.sh -i tests/fixtures/inventory/hosts.yml --limit 'web*'
+bash inspect.sh -i tests/fixtures/inventory/hosts.yml --all
+```
+
+`tests/fixtures/cli/hosts.yml` 为 YAML 格式样例：inventory 层只解析严格 INI
+子集，YAML 文件会明确报 `inventory 解析失败`（退出码 10，不静默跳过）。
+
+### 2.4 单元级与 e2e
+
+```bash
+python -m pytest tests/test_render_stdout.py -q   # 解析器/渲染对夹具断言
+python -m pytest tests/test_e2e.py -q             # fixture 全链路（AC-1）
+python -m pytest tests/ -q                        # 全量回归（AC-2）
+```
+
+e2e（tests/test_e2e.py）以 fixture 模式驱动完整 CLI→采集→normalize→JSON→
+stdout/xlsx/html 链路，并含回滚演练（TD §11，见 §4）。
+
+## 3. 兼容矩阵 C1-C8 执行手册（TD §9）
+
+控制端：Windows 10 + Git Bash（本手册实测环境）或 Linux/WSL；全部命令在
+仓库根目录执行。`bash inspect.sh` 自动探测 python3→python（Windows Store
+桩 rc=49 自动跳过，TD §3 inspect.sh）。
+
+| 项 | 控制端 | 受控端 | 连接凭据 | 执行命令 | 预期 | 验证方式 |
+|----|--------|--------|----------|----------|------|----------|
+| C1 | Linux（glibc x86_64） | 本机（--local） | — | `bash inspect.sh --local` | 退出码 0 或 20（`--fail-on critical`），事实源 JSON 生成且通过 schema | 本地可验证 |
+| C2 | WSL2（Ubuntu 22.04） | 本机（--local） | — | `bash inspect.sh --local` | 同 C1 | 本地可验证 |
+| C3 | WSL1 | 本机（--local） | — | `bash inspect.sh --local` | 同 C1（WSL1 内核差异处标注意外） | 本地可验证 |
+| C4 | Linux/WSL2 | Kylin V10 x86_64 | SSH key + 普通账号 | `bash inspect.sh -H <ip>` | 事实源 JSON execution_status ∈ {SUCCESS,PARTIAL}；无业务伪造 | 待现场/G0 预检 |
+| C5 | Linux/WSL2 | Kylin V10 | SSH + 最小化 become（sudo） | 单指标需特权场景 | 特权指标正确采集或 UNKNOWN(PERMISSION_DENIED)，其余继续 | 待现场/G0 预检 |
+| C6 | Linux/WSL2 | 无 bash/无法连接主机 | — | `bash inspect.sh -H <ip>` | 单主机→退出码 10 无业务结论；多主机→PARTIAL 取最严重 | 本地可用 fixture 模拟 |
+| C7 | 任意控制端 | 无目标主机 | — | `INSPECT_FIXTURE_DIR=tests/fixtures/raw bash inspect.sh --local`（调试模式） | 全链路 fixture 通过（REQ-N-08），stderr 含"调试模式（fixture）" | 本地可验证 |
+| C8 | 任意控制端 | 无目标主机 | — | `python -m pytest tests/test_e2e.py -q` | 全绿 | 本地可验证 |
+
+C4/C5 为现场/G0 预检项：控制端 Python 3 版本、ansible-core 版本、受控端
+bash 版本、become 方式、SSH 连接参数均为 G0 预检范围（AE §8），本手册
+不承诺版本；C6 连接失败语义以 fixture 标记文件模拟（CONNECTION_FAILED →
+主机 ERROR 无业务结论；PROBE_FAILED → probe 失败 ERROR）。
+
+## 4. 回滚演练（TD §11）
+
+事实源 inspection_id 每次唯一（秒级精度），已写 JSON 不可变、不覆盖；
+报表只读 JSON 可随时重生成（修复渲染缺陷→从同一 JSON 重渲染，不重采集）。
+演练（tests/test_e2e.py 已覆盖）：
+
+```bash
+INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local   # 第一次运行
+sleep 1.1s                                                       # inspection_id 秒级精度
+INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local   # 第二次运行
+```
+
+预期：两次运行生成两个不同 inspection_id（`out/<inspection-id>/`）；旧 JSON
+未被覆盖（重跑报"inspection 已存在"且不写入）；旧 inspection 目录可独立
+重渲染三类报表（stdout 报告 / HTML / Excel）。
+
+## 5. 退出码（cli-contract §4）
+
+| 退出码 | 语义 |
+|--------|------|
+| 0 | 成功（含业务 WARN/CRIT 但未启用 --fail-on critical） |
+| 2 | 用法错误：未知选项、参数缺失、互斥、--limit/--all 缺 -i 等 |
+| 10 | 执行失败（技术）：inventory 解析失败、ExecutionNotReadyError、xlsxwriter 缺失等 |
+| 20 | 业务告警：仅 --fail-on critical 且任一指标 status=CRIT |
+
+优先级 2 > 10 > 20 > 0；xlsxwriter 未安装时 `-e` 明确报错退出码 10，
+不中断 stdout 报表与 HTML 输出。
+
+## 6. 输出与运行残留
+
+- 事实源：`out/<inspection-id>/hosts/<host>.json` + `inspection-<inspection-id>-index.json`
+  （`out_dir` 由 inspect.yml 配置，缺省 `out/`）；Excel/HTML 报表默认
+  `out/<inspection-id>.xlsx|.html`（`--xlsx-out`/`--html-out` 覆盖）。
+- 运行期临时文件：`<仓库根>/.runtime/`（临时 inventory/playbook，运行生成，
+  CLI 每次运行新建随机名文件；该目录未纳入 .gitignore，调试后请清理：
+  `rm -f .runtime/*` 后 `rmdir .runtime`）。
+- Windows 注意：控制端中文输出经 stdout/stderr 强制 UTF-8（_reconfigure_stdio）；
+  全部测试显式 utf-8 读写。

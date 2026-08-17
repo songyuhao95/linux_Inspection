@@ -1,0 +1,5 @@
+# 非实测数据（fixture）：e2e-node-1 local.swap.used_percent 预录输出（free -m）
+# 仅用于 T-108 e2e 全链路验证；不代表真实主机
+              total        used        free      shared  buff/cache   available
+Mem:          31969        4102       21133        2000        6734       26351
+Swap:          8191           0        8191

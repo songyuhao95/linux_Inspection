@@ -1,0 +1,6 @@
+# 夹具（非法）：rules 为空数组 —— schema minItems: 1 拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent:
+    rules: []

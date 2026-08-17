@@ -1,0 +1,302 @@
+{
+  "schema": "host-result-v1",
+  "schema_version": 1,
+  "run_id": "run-20260814-001",
+  "inspection_id": "insp-20260814120000-node-fx01",
+  "host": {
+    "name": "node-fx02",
+    "ip": "<IP>",
+    "inventory_source": "local",
+    "product_profiles": ["elasticsearch"]
+  },
+  "collected_at": "2026-08-14T12:00:00+08:00",
+  "duration_sec": 10.5,
+  "execution_status": "PARTIAL",
+  "execution_summary": {
+    "total_metrics": 9,
+    "ok": 1,
+    "warn": 1,
+    "crit": 1,
+    "unknown": 6,
+    "executed": 5,
+    "failed": 4
+  },
+  "metrics": [
+    {
+      "metric_id": "local.memory.available_percent",
+      "name": "可用内存百分比",
+      "scope": "local-common-p0-v1",
+      "status": "OK",
+      "raw_value": "82",
+      "normalized_value": 82.0,
+      "unit": "%",
+      "threshold": {
+        "layer": "document-baseline",
+        "rule_id": "linux-common-p0-v1.memory.available_percent.ok",
+        "value": "≥20%",
+        "source_anchor": "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8）；巡检手册 sha256[:8]: ES=bb8ff97e",
+        "notes": null
+      },
+      "evidence": {
+        "command": "free -m",
+        "output_summary": "available=26351MB total=31969MB → 82%",
+        "raw_ref": "raw/local.memory.available_percent.out",
+        "sampled_at": "2026-08-14T12:00:00+08:00"
+      },
+      "error": null,
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["9 份巡检手册 P0 内存行"],
+        "notes": null
+      }
+    },
+    {
+      "metric_id": "local.cpu.utilization",
+      "name": "CPU 使用率",
+      "scope": "local-common-p0-v1",
+      "status": "WARN",
+      "raw_value": "85.0",
+      "normalized_value": 85.0,
+      "unit": "%",
+      "threshold": {
+        "layer": "document-baseline",
+        "rule_id": "linux-common-p0-v1.cpu.utilization.warn",
+        "value": "持续>80%",
+        "source_anchor": "9 份巡检手册 P0 CPU 行（ES T5R3、Kafka T5R7、Mysql T5R7）；巡检手册 sha256[:8]: ES=bb8ff97e",
+        "notes": null
+      },
+      "evidence": {
+        "command": "top -bn1 | head -20",
+        "output_summary": "%Cpu(s): 84.2 us, 0.8 sy, 15.0 id（us+sy=85.0）; top-rows=10",
+        "raw_ref": "raw/local.cpu.utilization.out",
+        "sampled_at": "2026-08-14T12:00:01+08:00"
+      },
+      "error": null,
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["9 份巡检手册 P0 CPU 行"],
+        "notes": null
+      }
+    },
+    {
+      "metric_id": "local.process.present",
+      "name": "进程存在性",
+      "scope": "local-common-p0-v1",
+      "status": "CRIT",
+      "raw_value": "absent",
+      "normalized_value": null,
+      "unit": "count",
+      "threshold": {
+        "layer": "document-baseline",
+        "rule_id": "linux-common-p0-v1.process.present.crit",
+        "value": "进程缺失（故障）",
+        "source_anchor": "9 份运维巡检手册 §三(二)P0必看指标-服务/进程行（Kafka 手册 T5R2）；巡检手册 sha256[:8]: Kafka=0772f967",
+        "notes": null
+      },
+      "evidence": {
+        "command": "pgrep -fa 'kafka.Kafka' || ps -ef | grep '[o]rg.apache.kafka'",
+        "output_summary": "未匹配到进程（absent）",
+        "raw_ref": "raw/local.process.present.out",
+        "sampled_at": "2026-08-14T12:00:01+08:00"
+      },
+      "error": null,
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["9 份运维巡检手册 §三(二)P0服务/进程行"],
+        "notes": null
+      }
+    },
+    {
+      "metric_id": "local.swap.used_percent",
+      "name": "Swap 使用率",
+      "scope": "local-common-p0-v1",
+      "status": "UNKNOWN",
+      "raw_value": "12.5",
+      "normalized_value": 12.5,
+      "unit": "%",
+      "threshold": {
+        "layer": "unresolved-document-conflict",
+        "rule_id": null,
+        "value": null,
+        "source_anchor": "巡检手册 9 份 P0 内存行（见 docs/reviews/docx-source-conflicts.md C3）",
+        "notes": "文档冲突 C3 unresolved：swap>0 的告警判据在 9 份手册间不一致，默认 UNKNOWN，外部配置可覆盖"
+      },
+      "evidence": {
+        "command": "free -m Swap 行（used/total）或 /proc/meminfo SwapTotal/SwapFree",
+        "output_summary": "used=1024MB total=8191MB → 12.5%",
+        "raw_ref": "raw/local.swap.used_percent.out",
+        "sampled_at": "2026-08-14T12:00:01+08:00"
+      },
+      "error": null,
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["ES/Kafka/Mysql/Nacos/Rabbitmq/Rocketmq/Tomcat 巡检手册"],
+        "notes": "文档冲突 C3 unresolved：swap>0 的告警判据在 9 份手册间不一致，默认 UNKNOWN，外部配置可覆盖"
+      }
+    },
+    {
+      "metric_id": "local.cpu.load_1m",
+      "name": "系统负载",
+      "scope": "local-common-p0-v1",
+      "status": "UNKNOWN",
+      "raw_value": "3.2",
+      "normalized_value": 3.2,
+      "unit": "load",
+      "threshold": {
+        "layer": "unresolved-document-conflict",
+        "rule_id": null,
+        "value": null,
+        "source_anchor": "9 份巡检手册 P0 CPU 行正常标准（ES T5R3）；巡检手册 sha256[:8]: ES=bb8ff97e",
+        "notes": "持续>核数 → 缺失 → UNKNOWN（C5）"
+      },
+      "evidence": {
+        "command": "cat /proc/loadavg; nproc",
+        "output_summary": "load_1m=3.2 load_5m=2.9 load_15m=2.5 nproc=2",
+        "raw_ref": "raw/local.cpu.load_1m.out",
+        "sampled_at": "2026-08-14T12:00:01+08:00"
+      },
+      "error": null,
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["9 份巡检手册 P0 CPU 行"],
+        "notes": "持续>核数 → 缺失 → UNKNOWN（C5）"
+      }
+    },
+    {
+      "metric_id": "local.service.active",
+      "name": "systemd 服务状态",
+      "scope": "local-common-p0-v1",
+      "status": "UNKNOWN",
+      "raw_value": null,
+      "normalized_value": null,
+      "unit": "state",
+      "threshold": {
+        "layer": null,
+        "rule_id": null,
+        "value": null,
+        "source_anchor": null,
+        "notes": null
+      },
+      "evidence": {
+        "command": "systemctl is-active elasticsearch",
+        "output_summary": null,
+        "raw_ref": "raw/local.service.active.out",
+        "sampled_at": "2026-08-14T12:00:02+08:00"
+      },
+      "error": {
+        "code": "COMMAND_NOT_FOUND",
+        "message": "command not found: systemctl",
+        "metric_status": "UNKNOWN"
+      },
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["巡检手册 P0 服务行（Nginx T5R1、Redis T5R1）"],
+        "notes": "command not found: systemctl"
+      }
+    },
+    {
+      "metric_id": "local.port.listening",
+      "name": "端口监听",
+      "scope": "local-common-p0-v1",
+      "status": "UNKNOWN",
+      "raw_value": null,
+      "normalized_value": null,
+      "unit": "port",
+      "threshold": {
+        "layer": null,
+        "rule_id": null,
+        "value": null,
+        "source_anchor": null,
+        "notes": null
+      },
+      "evidence": {
+        "command": "ss -tlnp",
+        "output_summary": null,
+        "raw_ref": "raw/local.port.listening.out",
+        "sampled_at": "2026-08-14T12:00:02+08:00"
+      },
+      "error": {
+        "code": "TIMEOUT",
+        "message": "命令执行超时（10s）",
+        "metric_status": "UNKNOWN"
+      },
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["巡检手册 P0 端口行（ES T5R8、Kafka T5R10）"],
+        "notes": "命令执行超时（10s）"
+      }
+    },
+    {
+      "metric_id": "local.logs.key_evidence",
+      "name": "关键日志证据",
+      "scope": "local-common-p0-v1",
+      "status": "UNKNOWN",
+      "raw_value": null,
+      "normalized_value": null,
+      "unit": "count",
+      "threshold": {
+        "layer": null,
+        "rule_id": null,
+        "value": null,
+        "source_anchor": null,
+        "notes": null
+      },
+      "evidence": {
+        "command": "tail -300 /opt/redis/logs/redis.log",
+        "output_summary": null,
+        "raw_ref": "raw/local.logs.key_evidence.out",
+        "sampled_at": "2026-08-14T12:00:02+08:00"
+      },
+      "error": {
+        "code": "PERMISSION_DENIED",
+        "message": "cannot read /opt/redis/logs/redis.log (permission denied)",
+        "metric_status": "UNKNOWN"
+      },
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["Redis 巡检手册 v1.0 表T5R11"],
+        "notes": "权限不足，指标 UNKNOWN，继续其余指标与主机"
+      }
+    },
+    {
+      "metric_id": "local.filesystem.used_percent",
+      "name": "磁盘使用率",
+      "scope": "local-common-p0-v1",
+      "status": "UNKNOWN",
+      "raw_value": null,
+      "normalized_value": null,
+      "unit": "%",
+      "threshold": {
+        "layer": null,
+        "rule_id": null,
+        "value": null,
+        "source_anchor": null,
+        "notes": null
+      },
+      "evidence": {
+        "command": "df -hT /opt/elasticsearch/data /opt/elasticsearch/logs",
+        "output_summary": null,
+        "raw_ref": "raw/local.filesystem.used_percent.out",
+        "sampled_at": "2026-08-14T12:00:03+08:00"
+      },
+      "error": {
+        "code": "PARSE_FAILED",
+        "message": "df -hT 输出格式异常，无法解析 Use%",
+        "metric_status": "UNKNOWN"
+      },
+      "provenance": {
+        "config_sources": [],
+        "doc_sources": ["9 份巡检手册 P0 磁盘行（ES T5R5、Kafka T5R9）"],
+        "notes": "df -hT 输出格式异常，无法解析 Use%"
+      }
+    }
+  ],
+  "meta": {
+    "control_endpoint": "Linux/WSL Python3",
+    "gather_facts": false,
+    "serial": 1,
+    "become_scope": "minimal",
+    "generator": "inspect.sh",
+    "generator_version": "0.1.0-draft"
+  }
+}

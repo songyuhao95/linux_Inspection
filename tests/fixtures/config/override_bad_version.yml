@@ -1,0 +1,7 @@
+# 夹具（非法）：version 不匹配 —— schema const: 1 拒绝
+schema: threshold-override-v1
+version: 2
+metrics:
+  local.swap.used_percent:
+    rules:
+      - { status: WARN, op: ">", value: 0, note: "version 错误" }

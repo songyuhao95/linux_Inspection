@@ -1,0 +1,7 @@
+# 夹具（非法）：规则含未知字段（priority）—— additionalProperties: false 拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent:
+    rules:
+      - { status: WARN, op: ">", value: 0, note: "未知字段", priority: 1 }

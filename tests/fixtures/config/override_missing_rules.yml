@@ -1,0 +1,5 @@
+# 夹具（非法）：指标覆盖缺少 rules —— schema required: [rules] 拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent: {}

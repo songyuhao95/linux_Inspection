@@ -1,0 +1,3 @@
+# 非实测数据（fixture）：node-b local.cpu.utilization 预录 stderr（权限不足 → PERMISSION_DENIED）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+top: failed to get process information: Permission denied

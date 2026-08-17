@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-20260814-001",
+  "sourceContractId": "contract-T-002-v1",
+  "planId": "plan-run-20260814-001-t002",
+  "tasks": [
+    {
+      "id": "T-101",
+      "title": "CLI 入口与指标注册表（inspect.sh + cli.py + metrics.py）",
+      "contractId": "contract-T-101-v1",
+      "dependsOn": [],
+      "phase": "implement",
+      "worktree": null,
+      "ownedPaths": [
+        "inspect.sh",
+        "inspect/__init__.py",
+        "inspect/cli.py",
+        "inspect/metrics.py",
+        "pyproject.toml",
+        "requirements.txt",
+        "requirements-dev.txt",
+        "tests/test_cli.py",
+        "tests/test_metrics.py",
+        "tests/fixtures/cli/",
+        "run/reports/T-101.md"
+      ],
+      "acceptance": [
+        { "ac_id": "AC-1", "expected_exit": 0, "test_command": "bash inspect.sh -h | grep -F '退出码: 0 成功 / 2 用法错误 / 10 执行失败 / 20 业务告警'" },
+        { "ac_id": "AC-2", "expected_exit": 0, "test_command": "python -c \"import subprocess; o=subprocess.run(['bash','inspect.sh','--list-metrics'],capture_output=True,text=True).stdout; assert all(m in o for m in ['local.process.present','local.service.active','local.port.listening','local.cpu.utilization','local.cpu.load_1m','local.memory.available_percent','local.swap.used_percent','local.filesystem.used_percent','local.filesystem.inode_used_percent','local.logs.key_evidence'])\"" },
+        { "ac_id": "AC-3", "expected_exit": 2, "test_command": "bash inspect.sh --bogus >/dev/null 2>&1; test $? -eq 2 && bash inspect.sh --local -H 127.0.0.1 >/dev/null 2>&1; test $? -eq 2" },
+        { "ac_id": "AC-4", "expected_exit": 0, "test_command": "python -m pytest tests/test_cli.py -q" },
+        { "ac_id": "AC-5", "expected_exit": 0, "test_command": "python -m pytest tests/test_metrics.py -q" },
+        { "ac_id": "AC-6", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/cli.py').read_text(encoding='utf-8'); assert '--fail-on' in s and 'exit' in s\"" }
+      ],
+      "evidenceTypes": ["artifact", "documentation-validation", "structure-review", "git-diff"]
+    },
+    {
+      "id": "T-102",
+      "title": "配置层与阈值 override（config.py + 基线阈值 + override schema）",
+      "contractId": "contract-T-102-v1",
+      "dependsOn": ["T-101"],
+      "phase": "implement",
+      "worktree": null,
+      "ownedPaths": [
+        "inspect/config.py",
+        "inspect/data/thresholds/linux-common-p0-v1.yaml",
+        "inspect/schema/threshold-override-v1.schema.json",
+        "tests/test_config.py",
+        "tests/fixtures/config/",
+        "run/reports/T-102.md"
+      ],
+      "acceptance": [
+        { "ac_id": "AC-1", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/data/thresholds/linux-common-p0-v1.yaml').read_text(encoding='utf-8'); assert all(m in s for m in ['local.process.present','local.cpu.utilization','source_anchor','linux-common-p0-v1'])\"" },
+        { "ac_id": "AC-2", "expected_exit": 0, "test_command": "python -c \"import json; json.load(open('inspect/schema/threshold-override-v1.schema.json', encoding='utf-8'))\"" },
+        { "ac_id": "AC-3", "expected_exit": 0, "test_command": "python -m pytest tests/test_config.py -q" },
+        { "ac_id": "AC-4", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/config.py').read_text(encoding='utf-8'); assert 'provenance' in s and 'document-baseline' in s and 'external-config' in s\"" }
+      ],
+      "evidenceTypes": ["artifact", "documentation-validation", "structure-review", "git-diff"]
+    },
+    {
+      "id": "T-103",
+      "title": "采集执行层（inventory + ansible_runner + probe + fixture 注入）",
+      "contractId": "contract-T-103-v1",
+      "dependsOn": ["T-102"],
+      "phase": "implement",
+      "worktree": null,
+      "ownedPaths": [
+        "inspect/inventory.py",
+        "inspect/ansible_runner.py",
+        "inspect/probe.py",
+        "tests/test_inventory.py",
+        "tests/test_ansible_runner.py",
+        "tests/fixtures/inventory/",
+        "tests/fixtures/raw/",
+        "run/reports/T-103.md"
+      ],
+      "acceptance": [
+        { "ac_id": "AC-1", "expected_exit": 0, "test_command": "python -m pytest tests/test_ansible_runner.py -q" },
+        { "ac_id": "AC-2", "expected_exit": 0, "test_command": "python -m pytest tests/test_inventory.py -q" },
+        { "ac_id": "AC-3", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/ansible_runner.py').read_text(encoding='utf-8'); assert 'gather_facts' in s and 'serial' in s and 'raw' in s and 'bash -lc' in s\"" },
+        { "ac_id": "AC-4", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/probe.py').read_text(encoding='utf-8'); assert 'bash' in s and 'pgrep' in s and 'ss' in s and 'free' in s and 'df' in s\"" },
+        { "ac_id": "AC-5", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/ansible_runner.py').read_text(encoding='utf-8'); assert 'INSPECT_FIXTURE_DIR' in s\"" }
+      ],
+      "evidenceTypes": ["artifact", "documentation-validation", "structure-review", "git-diff"]
+    },
+    {
+      "id": "T-104",
+      "title": "normalize + host-result-v1 事实源（JSON Schema + 原子写 + 脱敏）",
+      "contractId": "contract-T-104-v1",
+      "dependsOn": ["T-103"],
+      "phase": "implement",
+      "worktree": null,
+      "ownedPaths": [
+        "inspect/normalize.py",
+        "inspect/fact_source.py",
+        "inspect/schema/host-result-v1.schema.json",
+        "tests/test_normalize.py",
+        "tests/test_fact_source.py",
+        "tests/fixtures/json/",
+        "run/reports/T-104.md"
+      ],
+      "acceptance": [
+        { "ac_id": "AC-1", "expected_exit": 0, "test_command": "python -m pytest tests/test_normalize.py -q" },
+        { "ac_id": "AC-2", "expected_exit": 0, "test_command": "python -m pytest tests/test_fact_source.py -q" },
+        { "ac_id": "AC-3", "expected_exit": 0, "test_command": "python -c \"import json; json.load(open('inspect/schema/host-result-v1.schema.json', encoding='utf-8')); s=open('inspect/schema/host-result-v1.schema.json',encoding='utf-8').read(); assert 'execution_status' in s and 'OK' in s and 'WARN' in s and 'CRIT' in s and 'UNKNOWN' in s\"" },
+        { "ac_id": "AC-4", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/normalize.py').read_text(encoding='utf-8'); assert 'PERMISSION_DENIED' in s and 'TIMEOUT' in s and 'PARSE_FAILED' in s\"" }
+      ],
+      "evidenceTypes": ["artifact", "documentation-validation", "structure-review", "git-diff"]
+    },
+    {
+      "id": "T-105",
+      "title": "stdout 终端渲染",
+      "contractId": "contract-T-105-v1",
+      "dependsOn": ["T-104"],
+      "phase": "implement",
+      "worktree": null,
+      "ownedPaths": [
+        "inspect/render_stdout.py",
+        "tests/test_render_stdout.py",
+        "tests/fixtures/stdout/",
+        "run/reports/T-105.md"
+      ],
+      "acceptance": [
+        { "ac_id": "AC-1", "expected_exit": 0, "test_command": "python -m pytest tests/test_render_stdout.py -q" },
+        { "ac_id": "AC-2", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/render_stdout.py').read_text(encoding='utf-8'); assert 'execution_status' in s and 'UNKNOWN' in s\"" }
+      ],
+      "evidenceTypes": ["artifact", "documentation-validation", "structure-review", "git-diff"]
+    },
+    {
+      "id": "T-106",
+      "title": "Excel 渲染（xlsxwriter 三 Sheet）",
+      "contractId": "contract-T-106-v1",
+      "dependsOn": ["T-104"],
+      "phase": "implement",
+      "worktree": null,
+      "ownedPaths": [
+        "inspect/render_xlsx.py",
+        "tests/test_render_xlsx.py",
+        "tests/fixtures/xlsx/",
+        "run/reports/T-106.md"
+      ],
+      "acceptance": [
+        { "ac_id": "AC-1", "expected_exit": 0, "test_command": "python -m pytest tests/test_render_xlsx.py -q" },
+        { "ac_id": "AC-2", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/render_xlsx.py').read_text(encoding='utf-8'); assert 'xlsxwriter' in s and 'Overview' in s and 'Errors-Evidence' in s\"" }
+      ],
+      "evidenceTypes": ["artifact", "documentation-validation", "structure-review", "git-diff"]
+    },
+    {
+      "id": "T-107",
+      "title": "离线单文件 HTML 渲染（模板 + 内嵌 JSON）",
+      "contractId": "contract-T-107-v1",
+      "dependsOn": ["T-104"],
+      "phase": "implement",
+      "worktree": null,
+      "ownedPaths": [
+        "inspect/render_html.py",
+        "inspect/templates/html-report-v1.html",
+        "tests/test_render_html.py",
+        "tests/fixtures/html/",
+        "run/reports/T-107.md"
+      ],
+      "acceptance": [
+        { "ac_id": "AC-1", "expected_exit": 0, "test_command": "python -m pytest tests/test_render_html.py -q" },
+        { "ac_id": "AC-2", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('inspect/templates/html-report-v1.html').read_text(encoding='utf-8'); assert '<link' not in s and '<script src' not in s\"" }
+      ],
+      "evidenceTypes": ["artifact", "documentation-validation", "structure-review", "git-diff"]
+    },
+    {
+      "id": "T-108",
+      "title": "端到端与本地调试路径（e2e + 回滚演练 + runbook）",
+      "contractId": "contract-T-108-v1",
+      "dependsOn": ["T-105", "T-106", "T-107"],
+      "phase": "implement",
+      "worktree": null,
+      "ownedPaths": [
+        "tests/test_e2e.py",
+        "tests/fixtures/e2e/",
+        "docs/runbook.md",
+        "run/reports/T-108.md"
+      ],
+      "acceptance": [
+        { "ac_id": "AC-1", "expected_exit": 0, "test_command": "python -m pytest tests/test_e2e.py -q" },
+        { "ac_id": "AC-2", "expected_exit": 0, "test_command": "python -m pytest tests/ -q" },
+        { "ac_id": "AC-3", "expected_exit": 0, "test_command": "python -c \"from pathlib import Path; s=Path('docs/runbook.md').read_text(encoding='utf-8'); assert 'INSPECT_FIXTURE_DIR' in s and '--local' in s\"" },
+        { "ac_id": "AC-4", "expected_exit": 0, "test_command": "bash inspect.sh --local >/dev/null 2>&1; rc=$?; test $rc -ne 2" }
+      ],
+      "evidenceTypes": ["artifact", "documentation-validation", "structure-review", "git-diff"]
+    }
+  ]
+}

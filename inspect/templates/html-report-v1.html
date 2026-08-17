@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="inspect render_html（T-107）">
+<title>$TITLE</title>
+<style>
+/* =====================================================================
+   inspect 离线单文件 HTML 报表 v1 样式（T-107）
+   全内联，零外链（无 link/script src/fetch/字体/网络请求，RR §4）；
+   色板与徽标按 RR §5：OK #2E7D32 / WARN #F9A825 / CRIT #C62828 /
+   UNKNOWN #757575；execution_status 以描边徽标区分于业务状态填充徽标。
+   ===================================================================== */
+:root {
+  --status-ok: #2E7D32;
+  --status-warn: #F9A825;
+  --status-crit: #C62828;
+  --status-unknown: #757575;
+  --bg: #f4f5f7;
+  --card-bg: #ffffff;
+  --border: #d9dce1;
+  --text: #212529;
+  --text-dim: #6c757d;
+  --nav-bg: #1f2733;
+  --nav-text: #cfd6df;
+  --nav-panel: #2a3547;
+  --accent: #4f8cc9;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* ---------------- 布局：左导航 + 右滚动区（RR §4） ---------------- */
+.layout { display: flex; min-height: 100vh; }
+.nav {
+  flex: 0 0 280px;
+  width: 280px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+  background: var(--nav-bg);
+  color: var(--nav-text);
+  padding: 16px 14px 32px;
+}
+.content { flex: 1; min-width: 0; padding: 20px 24px 48px; }
+
+/* ---------------- 左导航各块 ---------------- */
+.nav-brand { font-size: 15px; font-weight: 700; margin: 0 0 4px; color: #ffffff; }
+.nav-sub { font-size: 12px; color: #93a0b0; margin: 0 0 14px; }
+.nav-block { margin: 0 0 18px; }
+.nav-title {
+  font-size: 12px; font-weight: 700; letter-spacing: .06em;
+  color: #8fa0b3; margin: 0 0 8px; padding-bottom: 4px;
+  border-bottom: 1px solid #37424f;
+}
+.run-meta { margin: 0; }
+.run-meta dt { font-size: 11px; color: #8fa0b3; margin-top: 6px; }
+.run-meta dd { margin: 0 0 2px; font-size: 13px; color: #e6ebf1; word-break: break-all; }
+
+.filter-btn {
+  display: inline-block;
+  margin: 3px 4px 3px 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid #4a5767;
+  background: transparent;
+  color: var(--nav-text);
+  cursor: pointer;
+}
+.filter-btn:hover { border-color: #8fa0b3; }
+.filter-btn.active { border-color: #ffffff; background: var(--nav-panel); }
+.filter-btn[data-status="OK"]      { border-color: #2E7D32; color: #7fd08a; }
+.filter-btn[data-status="WARN"]    { border-color: #F9A825; color: #f4c75e; }
+.filter-btn[data-status="CRIT"]    { border-color: #C62828; color: #ef8f8f; }
+.filter-btn[data-status="UNKNOWN"] { border-color: #757575; color: #b5b5b5; }
+.filter-btn[data-status="OK"].active      { background: #2E7D32; color: #ffffff; }
+.filter-btn[data-status="WARN"].active    { background: #F9A825; color: #1f2733; }
+.filter-btn[data-status="CRIT"].active    { background: #C62828; color: #ffffff; }
+.filter-btn[data-status="UNKNOWN"].active { background: #757575; color: #ffffff; }
+
+.filter-host {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.filter-host .host-chip { float: right; }
+.filter-reset {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px dashed #4a5767;
+  background: transparent;
+  color: #93a0b0;
+  cursor: pointer;
+}
+.filter-reset:hover { color: #ffffff; border-color: #8fa0b3; }
+
+/* ---------------- 右滚动区：工具栏 + run 头部 ---------------- */
+.toolbar {
+  display: flex; align-items: center; gap: 18px;
+  margin-bottom: 14px; padding: 10px 14px;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.print-toggle { font-size: 13px; color: var(--text-dim); cursor: pointer; user-select: none; }
+.print-toggle input { margin-right: 6px; vertical-align: -1px; }
+.filter-hint { font-size: 12px; color: var(--text-dim); }
+
+.run-header {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 18px; margin-bottom: 16px;
+}
+.run-header h1 { font-size: 19px; margin: 0 0 6px; }
+.run-header .run-stream { font-size: 13px; color: var(--text-dim); margin: 0 0 8px; }
+.run-conclusion { font-size: 13px; margin: 0; }
+
+/* ---------------- 宏观卡片（每主机四状态计数 + 徽标 + 结论） ---------------- */
+.macro-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.macro-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px;
+}
+.macro-host { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.macro-counts { list-style: none; margin: 0 0 8px; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.count { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; color: #ffffff; }
+.count b { font-size: 13px; margin-left: 4px; }
+.count-ok      { background: #2E7D32; }
+.count-warn    { background: #F9A825; color: #1f2733; }
+.count-crit    { background: #C62828; }
+.count-unknown { background: #757575; }
+.macro-conclusion { font-size: 13px; margin: 0 0 6px; }
+.macro-meta { font-size: 12px; color: var(--text-dim); margin: 0; }
+
+/* ---------------- 主机详情：逐指标卡片（RR §4 字段全集） ---------------- */
+.host-section { margin-bottom: 28px; }
+.host-title { font-size: 17px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.host-meta { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; word-break: break-all; }
+
+.metric-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-left: 4px solid var(--status-unknown);
+  border-radius: 8px; padding: 12px 16px; margin-bottom: 10px;
+  cursor: pointer;
+}
+.metric-card.status-ok      { border-left-color: #2E7D32; }
+.metric-card.status-warn    { border-left-color: #F9A825; }
+.metric-card.status-crit    { border-left-color: #C62828; }
+.metric-card.status-unknown { border-left-color: #757575; }
+.metric-card.hidden, .host-section.hidden { display: none; }
+.metric-card.expanded { border-color: var(--accent); }
+
+.card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+.card-title { font-size: 14px; margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.metric-id { font-family: Consolas, "Courier New", monospace; font-weight: 700; }
+.metric-name { color: var(--text-dim); font-weight: 400; }
+.card-values {
+  display: grid; grid-template-columns: auto auto auto;
+  gap: 2px 18px; margin: 8px 0 4px; font-size: 13px;
+}
+.card-values div { display: contents; }
+.card-values dt { color: var(--text-dim); font-size: 11px; }
+.card-values dd { margin: 0; font-family: Consolas, "Courier New", monospace; }
+.card-values dd.null-value { color: #adb5bd; }
+
+.card-fields { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+.card-fields th {
+  text-align: left; width: 150px; min-width: 150px;
+  color: var(--text-dim); font-weight: 500;
+  padding: 3px 8px 3px 0; vertical-align: top;
+}
+.card-fields td { padding: 3px 0; word-break: break-all; }
+.card-fields tr { border-top: 1px dashed #eceef1; }
+.card-fields tr:first-child { border-top: none; }
+.field-null { color: #adb5bd; }
+
+/* 徽标：业务状态（填充色）与执行状态（描边）区分（RR §5） */
+.chip {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; color: #ffffff; letter-spacing: .04em;
+}
+.chip-ok      { background: #2E7D32; }
+.chip-warn    { background: #F9A825; color: #1f2733; }
+.chip-crit    { background: #C62828; }
+.chip-unknown { background: #757575; }
+.exec-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  border: 2px solid; background: var(--card-bg);
+}
+.exec-success { border-color: #2E7D32; color: #2E7D32; }
+.exec-partial { border-color: #F9A825; background: #FFF8E1; color: #8a6d00; }
+.exec-error   { border-color: #C62828; background: #FDECEA; color: #C62828; }
+
+details.card-details { margin-top: 8px; border-top: 1px dashed #eceef1; padding-top: 6px; }
+details.card-details summary {
+  cursor: pointer; color: var(--accent); font-size: 13px;
+  outline: none; user-select: none;
+}
+details.card-details summary:hover { text-decoration: underline; }
+
+footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); }
+
+/* ---------------- 打印友好（RR §4）：默认宏观摘要，详情可展开 ---------------- */
+@media print {
+  .nav, .toolbar { display: none; }
+  body { background: #ffffff; font-size: 12px; }
+  .layout { display: block; }
+  .content { padding: 0; }
+  .macro-cards { display: block; }
+  .macro-card { break-inside: avoid; margin-bottom: 10px; }
+  .host-section { margin-bottom: 16px; }
+  .metric-card { break-inside: avoid; }
+  /* 默认只打印宏观摘要：主机详情与卡内证据折叠 */
+  .host-detail, .card-details { display: none; }
+  body.print-details .host-detail { display: block; }
+  body.print-details .card-details { display: block; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- ==================== 左导航（RR §4） ==================== -->
+  <nav class="nav" aria-label="报表导航">
+    <p class="nav-brand">巡检 HTML 报表</p>
+    <p class="nav-sub">离线单文件 · 只读展示 JSON 事实源</p>
+
+    <div class="nav-block">
+      <h3 class="nav-title">Run 摘要</h3>
+      $RUN_SUMMARY
+    </div>
+
+    <div class="nav-block">
+      <h3 class="nav-title">主机列表</h3>
+      $HOST_NAV
+    </div>
+
+    <div class="nav-block">
+      <h3 class="nav-title">状态筛选</h3>
+      <div class="filter-group" id="status-filter-group">
+        $STATUS_FILTERS
+        <button type="button" class="filter-reset" id="filter-reset">清除筛选</button>
+      </div>
+    </div>
+
+    <div class="nav-block">
+      <h3 class="nav-title">指标维度</h3>
+      <div class="filter-group" id="metric-filter-group">
+        $METRIC_NAV
+      </div>
+    </div>
+  </nav>
+
+  <!-- ==================== 右滚动区 ==================== -->
+  <main class="content">
+    <div class="toolbar">
+      <label class="print-toggle">
+        <input type="checkbox" id="print-details-toggle"> 打印时包含主机详情
+      </label>
+      <span class="filter-hint">点击导航中的状态 / 主机 / 指标进行筛选；点击指标卡片展开证据与来源锚点。</span>
+    </div>
+
+    <header class="run-header">
+      $RUN_HEADER
+    </header>
+
+    <!-- 宏观卡片：每主机四状态计数 + execution_status 徽标 + 整体结论 -->
+    <section class="macro-cards" aria-label="宏观摘要卡片">
+      $MACRO_CARDS
+    </section>
+
+    <!-- 主机详情：逐指标卡片 -->
+    <section class="host-detail" aria-label="主机详情">
+      $HOST_DETAILS
+    </section>
+
+    <footer class="site-footer">生成时间：$GENERATED_AT</footer>
+  </main>
+</div>
+
+<!-- 内嵌 JSON 事实源（只读展示数据，展示层不做二次计算；RR §4 / TD §8） -->
+<script type="application/json" id="inspection-data">$DATA_JSON</script>
+<script>
+(function () {
+  "use strict";
+  /* -----------------------------------------------------------
+     T-107 过滤交互（RR §4）：仅做显隐切换，不进行任何业务计算。
+     宏观计数/结论由渲染期写入静态文本，本脚本不重新统计。
+     注意：本模板由 string.Template 渲染（占位符以美元符号开头），
+     脚本内不得出现美元符号字符，否则被识别为非法占位符。
+     ----------------------------------------------------------- */
+  var filters = { status: {}, host: {}, metric: {} };
+
+  function inFilter(set, value) {
+    var keys = Object.keys(set);
+    if (keys.length === 0) { return true; }
+    return set[value] === true;
+  }
+
+  function applyFilters() {
+    var cards = document.querySelectorAll(".metric-card");
+    var sections = document.querySelectorAll(".host-section");
+    var i, card, visible;
+    for (i = 0; i < cards.length; i += 1) {
+      card = cards[i];
+      visible = inFilter(filters.status, card.getAttribute("data-status")) &&
+                inFilter(filters.host, card.getAttribute("data-host")) &&
+                inFilter(filters.metric, card.getAttribute("data-metric-id"));
+      if (visible) { card.classList.remove("hidden"); }
+      else { card.classList.add("hidden"); }
+    }
+    for (i = 0; i < sections.length; i += 1) {
+      if (inFilter(filters.host, sections[i].getAttribute("data-host"))) {
+        sections[i].classList.remove("hidden");
+      } else {
+        sections[i].classList.add("hidden");
+      }
+    }
+  }
+
+  function bindButtons(selector, kind, attr) {
+    var buttons = document.querySelectorAll(selector);
+    var i;
+    for (i = 0; i < buttons.length; i += 1) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          var value = btn.getAttribute(attr);
+          if (!value) { return; }
+          if (filters[kind][value] === true) {
+            delete filters[kind][value];
+            btn.classList.remove("active");
+          } else {
+            filters[kind][value] = true;
+            btn.classList.add("active");
+          }
+          applyFilters();
+        });
+      })(buttons[i]);
+    }
+  }
+  bindButtons(".filter-status", "status", "data-status");
+  bindButtons(".filter-host", "host", "data-host");
+  bindButtons(".filter-metric", "metric", "data-metric-id");
+
+  var resetBtn = document.getElementById("filter-reset");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", function () {
+      filters.status = {};
+      filters.host = {};
+      filters.metric = {};
+      var actives = document.querySelectorAll(".filter-btn.active");
+      var i;
+      for (i = 0; i < actives.length; i += 1) {
+        actives[i].classList.remove("active");
+      }
+      applyFilters();
+    });
+  }
+
+  /* 点击指标卡片展开/收起证据与来源锚点（details 内部点击交给原生折叠） */
+  function bindCardToggle() {
+    var cards = document.querySelectorAll(".metric-card");
+    var i;
+    for (i = 0; i < cards.length; i += 1) {
+      (function (card) {
+        card.addEventListener("click", function (ev) {
+          if (ev.target.closest("details")) { return; }
+          var details = card.querySelector(".card-details");
+          if (details) {
+            if (details.hasAttribute("open")) { details.removeAttribute("open"); }
+            else { details.setAttribute("open", "open"); }
+          }
+          card.classList.toggle("expanded");
+        });
+      })(cards[i]);
+    }
+  }
+  bindCardToggle();
+
+  /* 打印友好：默认只打印宏观摘要；勾选后打印包含主机详情 */
+  var printToggle = document.getElementById("print-details-toggle");
+  if (printToggle) {
+    printToggle.addEventListener("change", function () {
+      if (printToggle.checked) { document.body.classList.add("print-details"); }
+      else { document.body.classList.remove("print-details"); }
+    });
+  }
+})();
+</script>
+</body>
+</html>

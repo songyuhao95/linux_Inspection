@@ -1,0 +1,8 @@
+# 非实测数据（fixture）：node-b local.cpu.utilization 预录输出（top -bn1 + ps）
+# 仅用于 T-103 ansible_runner fixture 模式验证；不代表真实主机
+top - 10:00:01 up 30 days,  2:15,  3 users,  load average: 0.52, 0.44, 0.39
+Tasks: 210 total,   1 running, 209 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  2.5 us,  0.8 sy,  0.0 ni, 96.6 id,  0.0 wa,  0.1 hi,  0.0 si,  0.0 st
+MiB Mem :  31969.7 total,  21133.2 free,   4102.1 used,   6734.4 buff/cache
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+ 4321 elastic+  20   0  6.3g  2.1g 1.3g S   4.3  6.7 320:12.33 java

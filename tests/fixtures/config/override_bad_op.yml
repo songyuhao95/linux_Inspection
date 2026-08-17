@@ -1,0 +1,7 @@
+# 夹具（非法）：op 不在 {>, >=, <, <=, ==, !=} —— schema 必须拒绝
+schema: threshold-override-v1
+version: 1
+metrics:
+  local.swap.used_percent:
+    rules:
+      - { status: WARN, op: "=~", value: 0, note: "非法 op" }
