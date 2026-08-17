@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Guarded wrapper for one inspect child process.
 #
-# Real execution is fail-closed: only runtime/bin/python3.12 is accepted and
-# Ansible is launched by that interpreter. Fixture/query paths intentionally do
-# not require the binary because they never execute Ansible or contact a host.
+# Real and fixture execution are fail-closed: every mode uses the project-local
+# runtime/bin/python3.12 interpreter. Ansible is launched by that interpreter in
+# real mode; fixture/query modes never contact a host.
 set -u
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -55,50 +55,47 @@ if [ "$is_query" -eq 0 ]; then
 fi
 
 fixture_mode="${INSPECT_FIXTURE_DIR:-}"
-if [ -n "$fixture_mode" ] || [ "$is_query" -eq 1 ]; then
-  # Fixture mode has precedence over any inherited real gate. Query mode is
-  # also non-real and must not require a runtime that cannot execute Ansible.
-  unset INSPECT_ENABLE_REAL INSPECT_ENABLE_LOCAL_REAL INSPECT_REMOTE_USER INSPECT_ASK_PASS
-  PY=""
-  for cand in "${PYTHON3:-}" python3 python; do
-    [ -n "$cand" ] || continue
-    if command -v "$cand" >/dev/null 2>&1 && \
-       "$cand" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' >/dev/null 2>&1; then
-      PY="$cand"
-      break
-    fi
-  done
-  if [ -z "$PY" ]; then
-    echo "inspect.sh: execution failed: Python 3 was not found for fixture/query mode" >&2
-    exit 10
-  fi
-else
-  # Real execution must use the repository runtime. Never probe or fall back
-  # to PATH Python, even when the project runtime has not been materialized.
-  PY="$RUNTIME_ROOT/bin/python3.12"
-  if [ ! -x "$PY" ]; then
-    echo "inspect.sh: execution failed: project-local Python 3.12 is missing; system Python fallback is forbidden" >&2
-    exit 10
-  fi
-  if ! "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)' >/dev/null 2>&1; then
-    echo "inspect.sh: execution failed: project-local Python is not 3.12.x; fallback is forbidden" >&2
-    exit 10
-  fi
+# Prefer the Linux runtime on Linux/WSL. Windows development hosts use the
+# companion project-local embeddable interpreter only for fixture/query runs;
+# neither branch searches or invokes a system Python.
+PY="$RUNTIME_ROOT/bin/python3.12"
+if [ ! -x "$PY" ] && [ -x "$RUNTIME_ROOT/bin/python3.12.exe" ]; then
+  PY="$RUNTIME_ROOT/bin/python3.12.exe"
+fi
+if [ ! -x "$PY" ]; then
+  echo "inspect.sh: execution failed: project-local Python 3.12 is missing; system Python fallback is forbidden" >&2
+  exit 10
+fi
+if ! "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)' >/dev/null 2>&1; then
+  echo "inspect.sh: execution failed: project-local Python is not 3.12.x; fallback is forbidden" >&2
+  exit 10
+fi
+if [ -z "$fixture_mode" ] && [ "$is_query" -eq 0 ]; then
   # Internal non-secret gates are scoped to this process and its child only.
   export INSPECT_ENABLE_REAL=1
   if [ "$is_local" -eq 1 ]; then
     export INSPECT_ENABLE_LOCAL_REAL=1
     unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
   fi
+else
+  # Fixture and query modes must not inherit a real-execution gate.
+  unset INSPECT_ENABLE_REAL INSPECT_ENABLE_LOCAL_REAL INSPECT_REMOTE_USER INSPECT_ASK_PASS
 fi
 
 # Never pass common password values to Ansible. INSPECT_ASK_PASS is only a
 # non-secret boolean flag and, for remote mode, remains caller-controlled.
 unset ANSIBLE_PASSWORD ANSIBLE_NET_PASSWORD SSHPASS
 export INSPECT_RUNTIME_ROOT="$RUNTIME_ROOT"
-export PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$SCRIPT_DIR"
 
 # Do not use exec: EXIT cleanup must run after normal and failed child exits.
-"$PY" -m inspect.cli "$@"
+if [[ "$PY" == *.exe ]]; then
+  # The Windows embeddable runtime puts stdlib inspect.py in python312.zip.
+  # Load this project's inspect package explicitly so its compatibility layer
+  # can then absorb the stdlib module without allowing the zip to shadow it.
+  "$PY" -c 'import importlib.util, os, runpy, sys; root=os.path.dirname(os.environ["INSPECT_RUNTIME_ROOT"]); package=os.path.join(root, "inspect"); spec=importlib.util.spec_from_file_location("inspect", os.path.join(package, "__init__.py"), submodule_search_locations=[package]); module=importlib.util.module_from_spec(spec); sys.modules["inspect"]=module; spec.loader.exec_module(module); sys.argv=["inspect.cli", *sys.argv[1:]]; runpy.run_module("inspect.cli", run_name="__main__")' "$@"
+else
+  "$PY" -m inspect.cli "$@"
+fi
 status=$?
 exit "$status"

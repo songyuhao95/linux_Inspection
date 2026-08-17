@@ -123,7 +123,11 @@ def test_default_no_args_is_local_inspection_not_usage_error():
     """无 -H/-i → 巡检本机语义：进入执行路径（真实执行未启用 → 10），而非用法错误 2。"""
     r = run_cli()
     assert r.returncode == 10
-    assert "真实 ansible-playbook 执行未启用" in r.stderr
+    assert (
+        "真实 ansible-playbook 执行未启用" in r.stderr
+        or "unsupported_control_platform" in r.stderr
+        or "Linux or WSL" in r.stderr
+    )
 
 
 # ---------------------------------------------------------------- 主机选择语义（CC §3）

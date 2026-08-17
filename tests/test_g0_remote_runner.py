@@ -14,6 +14,49 @@ from inspect import ansible_runner as ar
 from inspect import probe
 
 
+class _FakeRuntime:
+    """Synthetic dedicated runtime for callback tests; never launches Python."""
+
+    python_path = Path("runtime/bin/python3.12")
+    ansible_module = ar.runtime_contract.ANSIBLE_MODULE
+    ansible_site_packages = Path("runtime/ansible/site-packages")
+    ansible_collections_path = Path("runtime/ansible/collections")
+
+    def ansible_playbook_argv(self, args):
+        return [str(self.python_path), "-m", self.ansible_module, *map(str, args)]
+
+    def ansible_environment(self, base_env):
+        env = dict(base_env)
+        for name in (
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "PYTHONUSERBASE",
+            "VIRTUAL_ENV",
+            "ANSIBLE_CONFIG",
+            "ANSIBLE_HOME",
+            "ANSIBLE_LIBRARY",
+            "ANSIBLE_MODULE_UTILS",
+            "ANSIBLE_LOOKUP_PLUGINS",
+            "ANSIBLE_FILTER_PLUGINS",
+            "ANSIBLE_ACTION_PLUGINS",
+            "ANSIBLE_CALLBACK_PLUGINS",
+            "ANSIBLE_COLLECTIONS_PATHS",
+        ):
+            env.pop(name, None)
+        env["PYTHONNOUSERSITE"] = "1"
+        env["PYTHONPATH"] = str(self.ansible_site_packages)
+        env["ANSIBLE_COLLECTIONS_PATHS"] = str(self.ansible_collections_path)
+        return env
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_runtime(monkeypatch):
+    """Keep runner tests independent from the host's executable runtime."""
+    monkeypatch.setattr(
+        ar.runtime_contract, "resolve_runtime", lambda _root: _FakeRuntime()
+    )
+
+
 class Host:
     name = "node01"
     ip = "192.168.0.10"

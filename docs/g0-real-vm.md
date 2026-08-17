@@ -12,25 +12,28 @@
 
 ## 2. 控制端前置条件
 
-建议从 WSL2/Linux 控制端、仓库根目录执行。真实执行不会自动安装依赖：
+建议从 WSL2/Linux 控制端、仓库根目录执行。真实执行不从 PATH 查找
+Python 或 `ansible-playbook`，而是要求已经部署并校验的项目 runtime：
 
 ```bash
-python3 --version
-ansible-playbook --version
+runtime/bin/python3.12 -VV
+PYTHONNOUSERSITE=1 PYTHONPATH=runtime/ansible/site-packages \
+  runtime/bin/python3.12 -c 'import ansible, ansible.cli.playbook; print(ansible.__file__)'
 ```
 
 首次使用前应确认：
 
-1. `ansible-playbook` 来自已审核的 ansible-core 环境；
-2. 控制端可以通过 SSH 访问两台主机；
-3. 账号具备只读命令权限；
-4. 初次 smoke 不启用 `become`；
-5. 目标端具备 `/bin/bash` 和探测所需命令；
-6. 目标主机指纹已按组织规则确认；不应为了绕过提示而盲目关闭 host-key 检查。
+1. `runtime/manifest.json` 为 `status=built`，Python/Ansible 哈希已校验；
+2. 项目 runtime 中的 `ansible.cli.playbook` 能由 `runtime/bin/python3.12` 导入；
+3. 控制端可以通过 SSH 访问两台主机；
+4. 账号具备只读命令权限；
+5. 初次 smoke 不启用 `become`；
+6. 目标端具备 `/bin/bash` 和探测所需命令；
+7. 目标主机指纹已按组织规则确认；不应为了绕过提示而盲目关闭 host-key 检查。
 
 真实路径必须从 WSL/Linux 控制端运行；代码中的 `INSPECT_ALLOW_WINDOWS_REAL=1` 仅供合成单元测试，不能用于现场绕过该门禁。
 
-对于“在 VM 自身运行脚本”的单独部署流程，不使用 Windows/WSL 作为 Ansible 控制端。每台 VM 先部署到 `/data/inspect`，确认或按单独授权从其已配置原生仓库安装 `ansible-core`，然后以本机作为控制端运行 `--local`。该流程需要额外的 `INSPECT_ENABLE_LOCAL_REAL=1` 门禁，详见 [local-vm-deploy.md](local-vm-deploy.md)。
+对于“在 VM 自身运行脚本”的单独部署流程，不使用 Windows/WSL 作为 Ansible 控制端。每台 VM 先部署到 `/data/inspect`，确认项目内 `runtime/bin/python3.12` 与 bundled Ansible 已通过哈希和导入校验，然后以本机作为控制端运行 `--local`。不得安装或选择系统 Ansible；该流程需要额外的 `INSPECT_ENABLE_LOCAL_REAL=1` 门禁，详见 [local-vm-deploy.md](local-vm-deploy.md)。
 
 只有明确设置 `INSPECT_ENABLE_REAL=1` 才会进入真实 Ansible 分支；远程分支还会拒绝非 `192.168.0.10` / `192.168.0.101` 的目标，并要求显式设置远程账号。本机 local 分支必须同时设置 `INSPECT_ENABLE_LOCAL_REAL=1`，且只接受生成的 `localhost ansible_connection=local` inventory；它不接受远程账号或 `INSPECT_ASK_PASS`。
 
@@ -161,7 +164,7 @@ INSPECT_REMOTE_USER=<受控账号>
 出现以下任一情况应停止真实连接并记录为未完成：
 
 - 控制端不是已审核的 WSL/Linux 环境；
-- `ansible-playbook` 不存在或 callback 不是结构化 JSON；
+- 项目 runtime 缺失、Python/Ansible 导入失败或 callback 不是结构化 JSON；
 - 目标范围不能证明只有两台授权主机；
 - 需要关闭 host-key 检查、写入密码文件或把密码放入 argv；
 - 生成命令出现写操作、网络探测、安装、删除或服务变更；
@@ -187,7 +190,8 @@ environment reject system Ansible, inherited Python paths, user-site imports,
 and out-of-tree package resolution. Missing or invalid bundles fail closed
 with technical exit code 10.
 
-The checked-in manifest is still `not-built`; no approved offline Linux
-runtime archive was available in this worktree. Therefore no real VM/SSH or
-Ansible remote execution was claimed. The offline materializer validates the
-bundle and records its hashes when an approved archive is supplied.
+The checked-in manifest records the materialized Linux x86_64 runtime as
+`status=built`, including the Python and bundled Ansible hashes. This proves
+only that the deployable artifact was built; it is not evidence of a successful
+VM/SSH or local inspection run. Verify the artifact on each target before
+claiming VM execution.

@@ -77,9 +77,9 @@ stdout/xlsx/html 链路，并含回滚演练（TD §11，见 §4）。
 
 ## 3. 兼容矩阵 C1-C8 执行手册（TD §9）
 
-控制端：Windows 10 + Git Bash（本手册实测环境）或 Linux/WSL；全部命令在
-仓库根目录执行。`bash inspect.sh` 自动探测 python3→python（Windows Store
-桩 rc=49 自动跳过，TD §3 inspect.sh）。
+控制端：Linux/WSL（项目 runtime 已物化且通过哈希校验）；全部命令在
+仓库根目录执行。`inspect.sh` 只启动 `runtime/bin/python3.12`，所有模式
+都拒绝 PATH 中的系统 Python/Ansible。
 
 | 项 | 控制端 | 受控端 | 连接凭据 | 执行命令 | 预期 | 验证方式 |
 |----|--------|--------|----------|----------|------|----------|

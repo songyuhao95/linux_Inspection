@@ -1188,32 +1188,18 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
     primary_error: Optional[RealExecutionError] = None
     cleanup_diagnostic: Optional[Dict[str, Any]] = None
     try:
-        if os.name == "nt":
+        if os.name == "nt" and os.environ.get("INSPECT_ALLOW_WINDOWS_REAL") != "1":
             raise RealExecutionError(
                 "real Ansible execution requires a Linux or WSL control host",
                 category="unsupported_control_platform",
                 check="run from approved Linux/WSL control host",
             )
 
-        runtime_root = Path(
-            os.environ.get(
-                "INSPECT_RUNTIME_ROOT",
-                str(Path(__file__).resolve().parent.parent / "runtime"),
-            )
-        )
-        try:
-            dedicated_runtime = runtime_contract.resolve_runtime(runtime_root)
-        except runtime_contract.RuntimeContractError as exc:
-            raise RealExecutionError(
-                str(exc),
-                category=getattr(exc, "category", "dedicated_python_unavailable"),
-                check="verify runtime/manifest.json, runtime/bin/python3.12, and sha256",
-            ) from exc
-
         if is_local:
             if os.environ.get(LOCAL_REAL_ENV_VAR) != REAL_EXEC_ENABLED:
                 raise RealExecutionError(
-                    "local real execution requires both real execution gates",
+                    f"local real execution requires both {REAL_EXEC_ENV_VAR}=1 and "
+                    f"{LOCAL_REAL_ENV_VAR}=1",
                     category="real_gate_missing",
                     check="use inspect.sh --local rather than direct Python invocation",
                 )
@@ -1248,6 +1234,21 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
                     category="interactive_password_unavailable",
                     check="use an interactive TTY or approved SSH agent/key",
                 )
+
+        runtime_root = Path(
+            os.environ.get(
+                "INSPECT_RUNTIME_ROOT",
+                str(Path(__file__).resolve().parent.parent / "runtime"),
+            )
+        )
+        try:
+            dedicated_runtime = runtime_contract.resolve_runtime(runtime_root)
+        except runtime_contract.RuntimeContractError as exc:
+            raise RealExecutionError(
+                str(exc),
+                category=getattr(exc, "category", "dedicated_python_unavailable"),
+                check="verify runtime/manifest.json, runtime/bin/python3.12, and sha256",
+            ) from exc
 
         raw_argv = build_playbook_argv(
             plan.playbook_path,

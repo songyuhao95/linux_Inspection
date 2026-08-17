@@ -26,31 +26,32 @@ def test_wrapper_static_contract():
     assert "INSPECT_RUNTIME_ROOT" in source
 
 
-def test_real_mode_missing_runtime_fails_closed_without_system_fallback():
+def test_wrapper_query_uses_project_runtime_without_system_fallback():
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("bash is not available on this control host")
     env = os.environ.copy()
     env.pop("INSPECT_FIXTURE_DIR", None)
+    env["PYTHON3"] = "definitely-not-a-system-interpreter"
     proc = subprocess.run(
-        [bash, str(WRAPPER), "--local"],
+        [bash, str(WRAPPER), "--list-metrics"],
         cwd=str(ROOT),
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
-    assert proc.returncode == 10
-    assert "不会回退" in proc.stderr
-    assert "python3" not in proc.stderr.lower().replace("不会回退到系统 python", "")
+    assert proc.returncode == 0, proc.stderr
+    assert "local.cpu.utilization" in proc.stdout
 
 
-def test_fixture_gate_has_priority_in_wrapper_source():
+def test_wrapper_uses_project_runtime_for_all_modes():
     source = WRAPPER.read_text(encoding="utf-8")
-    fixture_branch = source.index('if [ -n "$fixture_mode" ]')
-    real_branch = source.index('export INSPECT_ENABLE_REAL=1')
-    assert fixture_branch < real_branch
-    assert "unset INSPECT_ENABLE_REAL INSPECT_ENABLE_LOCAL_REAL" in source
+    assert 'PY="$RUNTIME_ROOT/bin/python3.12"' in source
+    assert 'for cand in "${PYTHON3:-}" python3 python' not in source
+    assert 'export PYTHONPATH="$SCRIPT_DIR"' in source
 
 
 def test_parent_environment_is_not_modified_by_subprocess():
@@ -61,6 +62,8 @@ def test_parent_environment_is_not_modified_by_subprocess():
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     assert "sentinel" in child.stdout

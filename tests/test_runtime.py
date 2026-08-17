@@ -112,7 +112,8 @@ def test_bundled_ansible_missing_fails_closed(tmp_path, monkeypatch):
 def test_fixture_mode_is_explicit_and_non_real():
     assert runtime.is_fixture_mode({"INSPECT_FIXTURE_DIR": "tests/fixtures/e2e"})
     assert not runtime.is_fixture_mode({"INSPECT_ENABLE_REAL": "1"})
-    assert runtime.current_python_for_non_real() == sys.executable
+    expected = runtime.DEFAULT_RUNTIME_ROOT / "bin" / ("python3.12.exe" if os.name == "nt" else "python3.12")
+    assert runtime.current_python_for_non_real() == str(expected)
 
 
 def test_manifest_hash_mismatch_fails_closed(tmp_path, monkeypatch):

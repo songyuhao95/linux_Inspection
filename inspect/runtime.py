@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -178,6 +177,22 @@ def _verify_hash(path: Path, expected: Any) -> None:
         raise RuntimeContractError("project Python sha256 does not match manifest")
 
 
+def _verify_bundle_hash(root: Path, expected: Any) -> None:
+    """Verify the deterministic hash of the bundled Ansible tree."""
+    if expected in (None, ""):
+        return
+    if not isinstance(expected, str) or len(expected) != 64:
+        raise RuntimeContractError("runtime manifest Ansible bundle sha256 is invalid")
+    digest = hashlib.sha256()
+    for path in sorted(path for path in root.rglob("*") if path.is_file()):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    if digest.hexdigest().lower() != expected.lower():
+        raise RuntimeContractError("bundled Ansible sha256 does not match manifest")
+
+
 def resolve_runtime(root: Optional[Path] = None) -> RuntimeInfo:
     """Validate and return the project-local Python and bundled Ansible runtime."""
     runtime_root = Path(root) if root is not None else DEFAULT_RUNTIME_ROOT
@@ -223,6 +238,7 @@ def resolve_runtime(root: Optional[Path] = None) -> RuntimeInfo:
         collections_path = _safe_relative(runtime_root, collections_value, "ansible.collections_path")
         if not collections_path.is_dir():
             raise RuntimeContractError("bundled Ansible collections directory is missing")
+    _verify_bundle_hash(runtime_root / "ansible", ansible_meta.get("bundle_sha256"))
     _probe_ansible(python_path, ansible_site_packages, runtime_root)
     return RuntimeInfo(
         runtime_root.resolve(),
@@ -241,8 +257,9 @@ def is_fixture_mode(env: Optional[Mapping[str, str]] = None) -> bool:
 
 
 def current_python_for_non_real() -> str:
-    """Return the current interpreter only for fixture/query execution."""
-    return sys.executable
+    """Return the project interpreter path for fixture/query compatibility."""
+    name = "python3.12.exe" if os.name == "nt" else "python3.12"
+    return str(DEFAULT_RUNTIME_ROOT / "bin" / name)
 
 
 __all__ = [

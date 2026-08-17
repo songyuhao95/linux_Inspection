@@ -32,6 +32,9 @@ FIXTURE_ENV_VAR = "INSPECT_FIXTURE_DIR"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+BUNDLED_SITE = REPO_ROOT / "runtime" / "ansible" / "site-packages"
+if str(BUNDLED_SITE) not in sys.path:
+    sys.path.insert(0, str(BUNDLED_SITE))
 
 from inspect import fact_source, normalize, render_html, render_stdout, render_xlsx  # noqa: E402
 
@@ -164,22 +167,17 @@ def test_html_report_consumes_fact_source_only(tmp_path):
     assert "4 / 0 / 0 / 6" in text
 
 
-def test_excel_missing_xlsxwriter_error_path(tmp_path):
-    """xlsxwriter 未安装：-e → 退出码 10 + stderr 明确报错，不中断其余输出。
-
-    T-106 语义：Excel 渲染失败（RendererError exit_code=10）不阻断
-    stdout 报表/HTML/事实源；最终退出码 10（技术失败优先）。
-    """
+def test_excel_bundled_xlsxwriter_success(tmp_path):
+    """bundled xlsxwriter：-e 与 HTML 同时生成，事实源和报表均成功。"""
     r = run_cli("--local", "-e", "--html", cwd=tmp_path)
-    assert r.returncode == 10, f"rc={r.returncode}\n{r.stderr}"
-    assert "xlsxwriter 未安装，无法生成 Excel" in r.stderr
-    # 其余输出不中断：事实源、stdout 报表、HTML 均已产出
+    assert r.returncode == 0, f"rc={r.returncode}\n{r.stderr}"
+    assert "xlsxwriter 未安装" not in r.stderr
     assert "巡检报告" in r.stdout
     insp_id = extract_inspection_id(r.stdout)
     out = tmp_path / "out"
     assert (out / insp_id / "hosts" / "localhost.json").is_file()
     assert (out / f"{insp_id}.html").is_file()
-    assert not (out / f"{insp_id}.xlsx").exists()
+    assert (out / f"{insp_id}.xlsx").is_file()
 
 
 def test_rerun_new_inspection_id_old_json_untouched(tmp_path):
@@ -222,10 +220,7 @@ def test_old_inspection_independently_rerendered(tmp_path, monkeypatch):
     doc = json.loads(host_json.read_text(encoding="utf-8"))
     assert json.loads(m.group(1)) == [doc]
     assert "4 / 0 / 0 / 6" in text
-    # Excel：render_xlsx_file 从旧 JSON 文件独立重渲染；本环境 xlsxwriter
-    # 缺失 → JSON 校验通过后于库导入处报 RendererError（T-106 语义；
-    # 真实渲染由集成环境 TestRenderWorkbook 验证）
-    with pytest.raises(render_xlsx.RendererError, match="xlsxwriter 未安装"):
-        render_xlsx.render_xlsx_file(
-            host_json, out_path=tmp_path / "rerendered.xlsx"
-        )
+    # Excel：bundled xlsxwriter 可用，旧事实源可独立重渲染。
+    rerendered_xlsx = tmp_path / "rerendered.xlsx"
+    render_xlsx.render_xlsx_file(host_json, out_path=rerendered_xlsx)
+    assert rerendered_xlsx.is_file()

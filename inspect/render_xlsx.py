@@ -479,7 +479,11 @@ def render_xlsx(
                 f"HR §5/TD §3）: {doc['host']['name']} → {doc['inspection_id']!r} "
                 f"≠ {inspection_id!r}"
             )
-    target = Path(out_path) if out_path is not None else Path(f"{inspection_id}.xlsx")
+    target = (
+        Path(out_path)
+        if out_path is not None
+        else Path.cwd() / f"{inspection_id}.xlsx"
+    )
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:

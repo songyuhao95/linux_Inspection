@@ -13,8 +13,8 @@
 
 部署与安装是单独授权的目标机操作。只允许：
 
-1. 将 `inspect.sh` 和完整 `inspect/` 包部署到 `/data/inspect`；
-2. Ansible 不存在时，使用目标 VM 已配置的原生软件源安装 `ansible-core`；
+1. 将 `inspect.sh`、完整 `inspect/` 包和已经哈希校验的 `runtime/` 部署到 `/data/inspect`；
+2. 只运行项目内的 `runtime/bin/python3.12` 与 bundled `runtime/ansible/`，不安装或选择目标机系统 Ansible；
 3. 写入巡检自身生成的 `/data/inspect/.runtime` 和 `/data/inspect/out`。
 
 不得添加第三方软件源，不得使用 `pip`、下载脚本、`curl | bash` 或 `sshpass`。不得写密码文件、密码环境变量、密码 inventory 或把密码放进命令行。部署前保留旧版本和校验清单；部署失败时恢复旧版本。
@@ -27,16 +27,16 @@
 
 ## VM 前置检查
 
-在每台授权 VM 上分别执行只读检查：
+在每台授权 VM 上分别执行只读检查，确认项目 runtime 已部署并可执行：
 
 ```bash
-python3 --version
-command -v bash
-command -v ansible-playbook
-ansible-playbook --version
+runtime/bin/python3.12 -VV
+PYTHONNOUSERSITE=1 PYTHONPATH=runtime/ansible/site-packages \
+  runtime/bin/python3.12 -c 'import ansible, ansible.cli.playbook; print(ansible.__file__)'
+test -d runtime/ansible/collections
 ```
 
-还需确认目标端具有 `/bin/bash`、`timeout` 以及共同指标使用的探测命令。若 `ansible-playbook` 不存在，先确认当前 VM 的原生包管理器和已配置仓库，再由已授权的 root/sudo 操作安装 `ansible-core`。包管理器、仓库或权限不明确时停止，不猜测、不添加仓库。
+还需确认目标端具有 `/bin/bash`、`timeout` 以及共同指标使用的探测命令。若项目 runtime 缺失、哈希不匹配或导入路径越界，先停止并修复部署物，不得改用系统 Python/Ansible。
 
 ## 本地真实门禁
 
@@ -108,8 +108,8 @@ adding the project-owned Ansible site-packages path. If the bundle is absent,
 invalid, or resolves outside `runtime/`, inspection returns technical failure
 (code 10); it never falls back to `ansible-playbook` from `PATH`.
 
-The checked-in `runtime/manifest.json` remains `not-built` because this
-workspace does not contain an approved Linux Python 3.12 + Ansible archive.
-This is an intentional fail-closed state, not evidence of a successful real
-VM run. Materialize the reviewed archive with `tools/build-runtime.sh` before
-attempting real inspection.
+The checked-in `runtime/manifest.json` identifies the materialized Linux x86_64
+runtime (`status=built`) and records the Python and bundled Ansible hashes. A
+source checkout with `status=not-built` is not deployable; materialize an
+approved archive with `tools/build-runtime.sh` before transfer. Never hand-edit
+the manifest to claim a runtime that has not been verified.

@@ -418,3 +418,93 @@ Python 3.12 wrapper) and `8b29d05` (bundled Ansible enforcement) are now
 published on `origin/codex/python312-runtime-wrapper`. The only remaining
 working-tree changes are the pre-existing protected `run/events.ndjson` and
 untracked `.claude/`; neither was included in the commits.
+
+## 14. 2026-08-17 Kylin VM runtime-missing diagnosis
+
+### 14.1 User-provided VM evidence
+
+On `kylin01` (`192.168.0.101`), the user cloned the GitHub repository into:
+
+```text
+/data/inspect/linux_Inspection
+```
+
+They ran:
+
+```bash
+chmod +x inspect.sh
+bash inspect.sh --local
+```
+
+The wrapper returned:
+
+```text
+inspect.sh: execution failed: project-local Python 3.12 is missing; system Python fallback is forbidden
+```
+
+### 14.2 Formal failure classification
+
+Classify this incident as:
+
+```text
+DEPLOYMENT_ARTIFACT_MISSING
+```
+
+This is not an Ansible business failure, callback failure, SSH failure, target-command failure, or metric result. `inspect.sh` stopped before starting the Python CLI and before invoking Ansible.
+
+The wrapper intentionally resolves the runtime relative to itself:
+
+```text
+/data/inspect/linux_Inspection/runtime/bin/python3.12
+```
+
+The cloned source repository contains the runtime contract, resolver, materializer, and manifest placeholder, but it does not contain the materialized Linux Python 3.12 binary or bundled Ansible tree. `runtime/manifest.json` remains an intentional `status=not-built` state. Therefore the exit code 10 is expected fail-closed behavior until an approved offline runtime archive is materialized.
+
+Do not fix this by using the VM's system Python 3.7, system Ansible 2.8.8, PATH `ansible-playbook`, `pip install`, `ansible-galaxy`, `sshpass`, or by manually changing the manifest to `built`.
+
+### 14.3 Required next-session actions
+
+1. Confirm the checkout is based on the current `origin/main` containing T-109/T-110, not the historical `vm-validation-20260817@4db3582` baseline.
+2. Obtain an approved offline archive whose root contains:
+
+   ```text
+   bin/python3.12
+   ansible/site-packages/ansible/
+   ansible/collections/
+   ```
+
+3. Record and verify the archive SHA-256, exact Python 3.12 patch version, exact ansible-core version, CPU architecture, and glibc compatibility.
+4. Run `tools/build-runtime.sh <approved-archive>` in a target-compatible Linux environment. Do not use network installation or system packages.
+5. Verify `runtime/manifest.json` is generated as `built`, with matching non-null Python and Ansible bundle hashes.
+6. Verify `runtime/bin/python3.12` and `ansible.cli.playbook` import successfully from the project runtime, not from system/user site-packages.
+7. Only then run `./inspect.sh --local` on each authorized VM without manual `INSPECT_*` exports.
+8. Record per-VM sanitized exit codes, runtime versions/hashes, execution/metric counts, JSON/HTML evidence, and failure categories. A missing archive remains `blocked`; it is not a successful VM smoke.
+
+### 14.4 Evidence status
+
+- `kylin01`: blocked before Python/Ansible execution by missing project-local runtime.
+- `node01`: no new evidence in this incident.
+- No real local inspection result was produced by this run.
+- No business metric status can be inferred.
+- No password or credential was requested, stored, or included in the evidence.
+
+This section records the user's actual VM output and must not be rewritten as a successful execution. The next development/deployment session owns runtime artifact preparation and VM validation; this session remains limited to documentation and fault analysis.
+
+## 15. Project-local runtime materialized (2026-08-17)
+
+The approved offline x86_64 Linux runtime was normalized and materialized into the working tree for deployment. The source archive was the official CPython 3.12.14 Linux x86_64 standalone build; Ansible dependencies were bundled from offline wheels with ansible-core 2.18.9. No network installation, system Python, system Ansible, or target connection was used.
+
+Sanitized artifact metadata:
+
+```text
+runtime status: built
+Python build: 3.12.14
+Python SHA-256: 8f9781a98200d9ecda7e00464e4c64b1327abae788ae8e6979d5c859311410c7
+ansible-core: 2.18.9
+Ansible bundle SHA-256: 32d6eca4cbcb7cd79d8dae0602ec12c976cfc83ac795dafeb16bc9f0516d5416
+platform: Linux x86_64; target glibc compatibility remains to be verified on Kylin V10
+```
+
+The runtime bundle is intentionally symlink-free so it can be transferred from the Windows development host; the Linux materializer and target checkout must still verify executable mode and ELF/glibc compatibility. The wrapper now uses `runtime/bin/python3.12` for real, fixture, and query modes and no longer searches `PYTHON3`, `python3`, or `python` on `PATH`. It also replaces inherited `PYTHONPATH` with the project source directory.
+
+This is deployment-artifact evidence only. `kylin01` remains `DEPLOYMENT_ARTIFACT_MISSING` until the materialized runtime is transferred or pulled and successfully executed there; `node01` has no new VM evidence. No VM smoke success is claimed by this section.

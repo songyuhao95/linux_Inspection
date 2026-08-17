@@ -1,9 +1,10 @@
 ﻿# Project-local Python 3.12 and Ansible runtime
 
-`runtime/` is an offline, project-owned runtime contract. The checked-in
-manifest intentionally starts in `not-built` state until an approved archive is
-materialized. Real execution fails closed while either the Python 3.12
-interpreter or the bundled Ansible package is missing or invalid.
+`runtime/` is an offline, project-owned runtime contract. A source checkout may
+start with a `not-built` manifest until an approved archive is materialized;
+the deployable checkout in this branch records `status=built` and matching
+hashes. Real execution fails closed while either the Python 3.12 interpreter or
+the bundled Ansible package is missing or invalid.
 
 ## Required layout
 
@@ -17,7 +18,13 @@ runtime/
     collections/
 ```
 
-The interpreter must report Python `3.12.x`. The Ansible control-side package
+The Linux deployment artifact is `runtime/bin/python3.12`. This repository also
+ships a project-local Windows embeddable `runtime/bin/python3.12.exe` solely so
+fixture and query commands use a project-owned 3.12 interpreter on Windows
+workstations. It is not a substitute for the Linux runtime and cannot enable
+real VM execution from Windows.
+
+Both interpreters must report Python `3.12.x`. The Ansible control-side package
 must be `ansible-core` and must import `ansible.cli.playbook` from the
 project-local `runtime/ansible/site-packages` directory. The project does not
 look up `ansible-playbook` on `PATH`, and it does not accept an Ansible import
@@ -46,10 +53,10 @@ downloads dependencies.
 
 ## Environment and execution contract
 
-- Fixture mode (`INSPECT_FIXTURE_DIR=...`) and query-only commands do not
-  invoke Ansible and may run with the caller's interpreter for local tests.
-- Real mode requires the project-local interpreter and executes
-  `python3.12 -m ansible.cli.playbook`.
+- Fixture mode (`INSPECT_FIXTURE_DIR=...`) and query-only commands still use the
+  project-local interpreter, do not invoke Ansible, and do not contact a host.
+- Every wrapper invocation fails closed if the project-local Python 3.12 runtime
+  is missing or invalid; no system Python fallback is permitted.
 - Before spawning Ansible, the runner removes inherited Python and Ansible path
   variables (`PYTHONPATH`, `PYTHONHOME`, `VIRTUAL_ENV`, `ANSIBLE_*` plugin
   paths, and collection paths), sets `PYTHONNOUSERSITE=1`, then sets
