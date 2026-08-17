@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "status": "not-built",
+  "offline": true,
+  "platform": {
+    "os": "linux",
+    "architectures": [
+      "x86_64",
+      "aarch64"
+    ],
+    "glibc": "verify-on-target"
+  },
+  "python": {
+    "path": "bin/python3.12",
+    "version": "3.12.x",
+    "sha256": null
+  },
+  "ansible": {
+    "distribution": "ansible-core",
+    "status": "not-built",
+    "version": "from-approved-offline-archive",
+    "site_packages": "ansible/site-packages",
+    "collections_path": "ansible/collections",
+    "module": "ansible.cli.playbook",
+    "bundle_sha256": null
+  },
+  "notes": "Populate from an approved offline archive; an absent or mismatched runtime fails closed."
+}

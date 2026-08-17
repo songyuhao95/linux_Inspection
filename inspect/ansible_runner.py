@@ -25,6 +25,7 @@ cli 编排，本模块以鸭子类型消费 HostSelection）；禁止非 allow-l
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -38,6 +39,17 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from inspect import metrics as metrics_registry
 from inspect import probe as probe_mod
+
+try:
+    from inspect import runtime as runtime_contract
+except ImportError:  # stdlib inspect is not a package in isolated unit tests.
+    _runtime_spec = importlib.util.spec_from_file_location(
+        "inspect.runtime", Path(__file__).with_name("runtime.py")
+    )
+    runtime_contract = importlib.util.module_from_spec(_runtime_spec)
+    sys.modules["inspect.runtime"] = runtime_contract
+    assert _runtime_spec.loader is not None
+    _runtime_spec.loader.exec_module(runtime_contract)
 
 # --------------------------------------------------------------------------
 # 常量
@@ -152,9 +164,26 @@ class ExecutionNotReadyError(Exception):
 
 
 class RealExecutionError(Exception):
-    """真实 Ansible 执行或结构化结果回传失败（退出码 10）。"""
+    """Real Ansible execution or callback failure (exit code 10)."""
 
     exit_code = 10
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: str = "real_execution_failed",
+        check: str = "inspect sanitized diagnostics",
+        return_code: Optional[int] = None,
+    ) -> None:
+        self.category = category
+        self.return_code = return_code
+        self.check = check
+        self.cleanup_diagnostic: Optional[Dict[str, Any]] = None
+        suffix = f"; category={category}; check={check}"
+        if return_code is not None:
+            suffix += f"; return_code={return_code}"
+        super().__init__(message + suffix)
 
 
 class FixtureError(Exception):
@@ -627,6 +656,7 @@ def build_playbook_argv(
     *,
     remote_user: Optional[str] = None,
     ask_pass: bool = False,
+    executable: Optional[str] = None,
 ) -> List[str]:
     """ansible-playbook 调用 argv（执行封装；不含任何密码/密钥）。
 
@@ -634,7 +664,7 @@ def build_playbook_argv(
     真实密码只允许由 Ansible ``--ask-pass`` 从交互式终端读取，绝不作为
     Python 参数、inventory 值或 argv 内容传入。
     """
-    argv = ["ansible-playbook", str(playbook_path), "-i", str(inventory_path)]
+    argv = [executable or "ansible-playbook", str(playbook_path), "-i", str(inventory_path)]
     if limit is not None and limit != "all":
         argv += ["--limit", str(limit)]
     if remote_user:
@@ -1052,16 +1082,21 @@ def _callback_host_items(value: Any):
                 yield str(name), item
 
 
-def _load_callback_payload(stdout: str) -> Dict[str, Any]:
-    """解析 Ansible json callback；默认文本不作为事实源接受。"""
+def _load_callback_payload(stdout: str, *, return_code: Optional[int] = None) -> Dict[str, Any]:
+    """Parse the structured Ansible JSON callback without trusting plain text."""
     text = (stdout or "").strip()
     if not text:
-        raise RealExecutionError("Ansible 未返回结构化 callback 结果")
+        raise RealExecutionError(
+            "Ansible returned no structured callback",
+            category="callback_empty",
+            check="verify ANSIBLE_STDOUT_CALLBACK=json and process diagnostics",
+            return_code=return_code,
+        )
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        # 某些 callback 包装器可能在 JSON 前输出空白/诊断行；只尝试完整的
-        # JSON 行，不做宽松的任意子串提取，避免把命令输出误认为事实源。
+        # Some callback wrappers prepend diagnostics. Accept only a complete JSON
+        # line with the expected top-level shape; never extract arbitrary substrings.
         payload = None
         for line in reversed(text.splitlines()):
             line = line.strip()
@@ -1076,10 +1111,18 @@ def _load_callback_payload(stdout: str) -> Dict[str, Any]:
                 break
         if payload is None:
             raise RealExecutionError(
-                "Ansible callback 不是可解析的 JSON；已拒绝将默认文本当作事实源"
+                "Ansible callback is not valid JSON; plain text was rejected as a fact source",
+                category="callback_invalid_json",
+                check="inspect callback JSON configuration and process diagnostics",
+                return_code=return_code,
             )
     if not isinstance(payload, dict) or not isinstance(payload.get("plays"), list):
-        raise RealExecutionError("Ansible callback JSON 缺少 plays 结构")
+        raise RealExecutionError(
+            "Ansible callback JSON is missing the plays structure",
+            category="callback_schema_invalid",
+            check="inspect callback JSON schema",
+            return_code=return_code,
+        )
     return payload
 
 
@@ -1088,16 +1131,17 @@ def _callback_error_for_unreachable() -> Dict[str, str]:
     return _error(ERROR_CONNECTION_FAILED, "Ansible 报告主机不可达或连接失败（无业务结论）")
 
 
-def _cleanup_plan_files(plan: RunPlan) -> None:
-    """删除本次生成的运行期文件，不触碰用户提供的 inventory。"""
+def _cleanup_plan_files(plan: RunPlan) -> List[str]:
+    """Remove generated files without Python 3.8-only APIs."""
+    failures: List[str] = []
     for path in plan.cleanup_paths:
         try:
-            path.unlink(missing_ok=True)
+            if path.exists():
+                path.unlink()
         except OSError:
-            # 清理失败不改变已经分类的业务/技术结果；.runtime 仍受 .gitignore
-            # 保护，调用方可按路径人工清理。
-            pass
-
+            # Retain only a sanitized basename; never expose filesystem details.
+            failures.append(path.name or "runtime-file")
+    return failures
 
 def _validate_real_targets(plan: RunPlan) -> None:
     """校验 G0 真实执行只能触达已授权的两台 VM。"""
@@ -1138,65 +1182,84 @@ def _validate_local_selection(plan: RunPlan) -> None:
 
 
 def _execute_real(plan: RunPlan) -> Dict[str, Any]:
-    """显式门控的真实 Ansible 执行（G0 后使用；只读、无凭据参数）。
-
-    结果只接受 ``ANSIBLE_STDOUT_CALLBACK=json`` 的结构化 payload；原始 stderr
-    仅用于本地诊断且不会进入异常文本。远程密码由 ``--ask-pass`` 在交互终端读取；
-    本机 local 模式使用 credentialless ``ansible_connection=local``。
-    """
+    """Execute Ansible with the validated project-local Python 3.12 runtime."""
     is_local = plan.selection_kind == "local"
+    result: Optional[Dict[str, Any]] = None
+    primary_error: Optional[RealExecutionError] = None
+    cleanup_diagnostic: Optional[Dict[str, Any]] = None
     try:
-        if os.name == "nt" and os.environ.get("INSPECT_ALLOW_WINDOWS_REAL") != "1":
+        if os.name == "nt":
             raise RealExecutionError(
-                "真实执行默认要求 Linux/WSL 控制端；Windows 文件名与 Ansible transport"
-                " 未通过 G0，请从 Linux/WSL 或目标 VM 重试"
+                "real Ansible execution requires a Linux or WSL control host",
+                category="unsupported_control_platform",
+                check="run from approved Linux/WSL control host",
             )
+
+        runtime_root = Path(
+            os.environ.get(
+                "INSPECT_RUNTIME_ROOT",
+                str(Path(__file__).resolve().parent.parent / "runtime"),
+            )
+        )
+        try:
+            dedicated_runtime = runtime_contract.resolve_runtime(runtime_root)
+        except runtime_contract.RuntimeContractError as exc:
+            raise RealExecutionError(
+                str(exc),
+                category=getattr(exc, "category", "dedicated_python_unavailable"),
+                check="verify runtime/manifest.json, runtime/bin/python3.12, and sha256",
+            ) from exc
 
         if is_local:
             if os.environ.get(LOCAL_REAL_ENV_VAR) != REAL_EXEC_ENABLED:
                 raise RealExecutionError(
-                    f"本机真实执行未启用：需同时设置 {REAL_EXEC_ENV_VAR}=1 与 "
-                    f"{LOCAL_REAL_ENV_VAR}=1"
+                    "local real execution requires both real execution gates",
+                    category="real_gate_missing",
+                    check="use inspect.sh --local rather than direct Python invocation",
                 )
             _validate_local_selection(plan)
             if os.environ.get(REMOTE_USER_ENV_VAR):
                 raise RealExecutionError(
-                    f"本机 local 模式不得设置 {REMOTE_USER_ENV_VAR}"
+                    "local mode must not receive a remote user",
+                    category="local_security_boundary",
+                    check="unset INSPECT_REMOTE_USER for local mode",
                 )
             if _env_flag(ASK_PASS_ENV_VAR):
                 raise RealExecutionError(
-                    f"本机 local 模式不得启用 {ASK_PASS_ENV_VAR}；不需要 SSH 密码"
+                    "local mode must not enable ask-pass",
+                    category="local_security_boundary",
+                    check="local mode uses ansible_connection=local",
                 )
             remote_user = None
             ask_pass = False
         else:
-            # local gate never bypasses the exact two-host remote allow-list.
             _validate_real_targets(plan)
-            remote_user = _validate_remote_user(
-                os.environ.get(REMOTE_USER_ENV_VAR)
-            )
+            remote_user = _validate_remote_user(os.environ.get(REMOTE_USER_ENV_VAR))
             if remote_user is None:
                 raise RealExecutionError(
-                    f"真实远程执行必须显式设置 {REMOTE_USER_ENV_VAR}；"
-                    "未使用控制端默认账号"
+                    "remote real execution requires an explicit remote user",
+                    category="remote_user_missing",
+                    check="set only the non-secret INSPECT_REMOTE_USER value",
                 )
             ask_pass = _env_flag(ASK_PASS_ENV_VAR)
             if ask_pass and not getattr(sys.stdin, "isatty", lambda: False)():
                 raise RealExecutionError(
-                    "交互式密码模式需要控制端终端；未读取或持久化任何密码"
+                    "interactive password mode requires a controlling TTY",
+                    category="interactive_password_unavailable",
+                    check="use an interactive TTY or approved SSH agent/key",
                 )
 
-        argv = build_playbook_argv(
+        raw_argv = build_playbook_argv(
             plan.playbook_path,
             plan.inventory_file,
             plan.limit,
             remote_user=remote_user,
             ask_pass=ask_pass,
         )
-        env = os.environ.copy()
+        argv = dedicated_runtime.ansible_playbook_argv(raw_argv[1:])
+        env = dedicated_runtime.ansible_environment(os.environ)
         env["ANSIBLE_STDOUT_CALLBACK"] = ANSIBLE_STDOUT_CALLBACK
         env["ANSIBLE_RETRY_FILES_ENABLED"] = "False"
-        # 防止调用方误把密码型环境变量带入 Ansible 子进程；本工具不读取它们。
         for secret_name in ("ANSIBLE_PASSWORD", "ANSIBLE_NET_PASSWORD", "SSHPASS"):
             env.pop(secret_name, None)
 
@@ -1218,21 +1281,27 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
             )
         except FileNotFoundError as exc:
             raise RealExecutionError(
-                "找不到 ansible-playbook；请在当前 Linux/WSL 控制端安装/启用 ansible-core"
+                "Ansible executable is missing from the project runtime",
+                category="ansible_executable_missing",
+                check="install ansible-core into the approved offline runtime",
             ) from exc
         except subprocess.TimeoutExpired as exc:
             raise RealExecutionError(
-                f"Ansible 执行超过控制端总时限 {timeout}s；未重试，临时结果不作为事实源"
+                f"Ansible control process exceeded {timeout}s",
+                category="execution_timeout",
+                check="inspect sanitized callback and timeout conditions",
             ) from exc
         except OSError as exc:
             raise RealExecutionError(
-                f"Ansible 控制端执行失败（{type(exc).__name__}）"
+                "Ansible control process could not be started",
+                category="command_execution_failed",
+                check="verify the dedicated Python and Ansible runtime",
             ) from exc
 
-        payload = _load_callback_payload(completed.stdout)
-        host_results = _parse_callback_results(
-            plan, payload, time.monotonic() - started
+        payload = _load_callback_payload(
+            completed.stdout, return_code=int(completed.returncode)
         )
+        host_results = _parse_callback_results(plan, payload, time.monotonic() - started)
         result = {
             "execution_status": run_status_for_hosts(host_results),
             "hosts": host_results,
@@ -1240,13 +1309,29 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
             "process_rc": int(completed.returncode),
             "duration_sec": round(time.monotonic() - started, 3),
         }
-        # 只有 callback 无法解析或控制端异常才抛错；任务级非零 rc 由现有分类
-        # 语义处理，避免把单指标 UNKNOWN 错判成整个运行技术失败。
-        return result
+        if completed.returncode != 0:
+            result["diagnostic"] = {
+                "category": "ansible_process_failed",
+                "return_code": int(completed.returncode),
+                "check": "inspect callback and playbook/module diagnostics",
+            }
+    except RealExecutionError as exc:
+        primary_error = exc
+        raise
     finally:
-        # 包括 Windows/目标/账号/TTY/local-gate 拒绝在内的所有真实入口都清理。
-        _cleanup_plan_files(plan)
-
+        failures = _cleanup_plan_files(plan)
+        if failures:
+            cleanup_diagnostic = {
+                "category": "runtime_cleanup_failed",
+                "return_code": None,
+                "check": "remove generated runtime files manually",
+                "files": failures,
+            }
+            if primary_error is not None:
+                primary_error.cleanup_diagnostic = cleanup_diagnostic
+    if result is not None and cleanup_diagnostic is not None:
+        result["cleanup_diagnostic"] = cleanup_diagnostic
+    return result or {}
 
 def _parse_callback_results(
     plan: RunPlan, payload: Dict[str, Any], elapsed_sec: float

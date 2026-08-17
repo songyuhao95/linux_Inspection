@@ -43,9 +43,8 @@ ansible-playbook --version
 fixture 模式仍然优先且零连接。真实本地模式必须同时设置两个门控变量：
 
 ```bash
-export INSPECT_ENABLE_REAL=1
-export INSPECT_ENABLE_LOCAL_REAL=1
-unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
+# inspect.sh automatically sets these non-secret local flags in its child only.
+# It also rejects a missing/mismatched project-local Python 3.12 runtime.
 ```
 
 `--local` 生成的 inventory 必须精确包含：
@@ -63,9 +62,8 @@ localhost ansible_connection=local
 
 ```bash
 cd /data/inspect
-export INSPECT_ENABLE_REAL=1
-export INSPECT_ENABLE_LOCAL_REAL=1
-unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
+# inspect.sh automatically sets these non-secret local flags in its child only.
+# It also rejects a missing/mismatched project-local Python 3.12 runtime.
 bash inspect.sh --local --html --html-out out/local-smoke.html
 ```
 
@@ -90,3 +88,28 @@ bash inspect.sh --local --excel --xlsx-out out/local-smoke.xlsx
 报告只记录 VM 标签、授权 IP、执行时间、源清单哈希、Python/Ansible 版本、退出码、执行状态计数、指标状态计数、耗时和脱敏错误类别。不得记录密码、密钥、原始 SSH 诊断、原始 callback、原始命令输出或未脱敏日志。
 
 以下任一情况停止：Ansible 无法从已配置原生仓库安装、root/sudo 不可用、无法安全传输、生成命令不是只读、local inventory 不是精确 `localhost ansible_connection=local`、结构化 callback 不可用、出现未批准目标或需要写入业务配置。
+
+## T-110 project-local Ansible requirement
+
+The local VM deployment path must ship the complete `inspect/` tree together
+with `runtime/bin/python3.12` and `runtime/ansible/`. It must not install or
+select Ansible from the target VM's system package set. `inspect/runtime.py`
+validates the manifest, Python 3.12, the bundled `ansible.cli.playbook` module,
+and the in-tree collection path before real execution. `inspect/ansible_runner.py`
+then launches Ansible only as:
+
+```text
+runtime/bin/python3.12 -m ansible.cli.playbook ...
+```
+
+The child environment removes inherited `PYTHONPATH`, `PYTHONHOME`, virtualenv,
+Ansible configuration/plugin/collection paths, and user-site imports before
+adding the project-owned Ansible site-packages path. If the bundle is absent,
+invalid, or resolves outside `runtime/`, inspection returns technical failure
+(code 10); it never falls back to `ansible-playbook` from `PATH`.
+
+The checked-in `runtime/manifest.json` remains `not-built` because this
+workspace does not contain an approved Linux Python 3.12 + Ansible archive.
+This is an intentional fail-closed state, not evidence of a successful real
+VM run. Materialize the reviewed archive with `tools/build-runtime.sh` before
+attempting real inspection.

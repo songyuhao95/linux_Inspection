@@ -41,7 +41,9 @@ ansible-playbook --version
 一次性密码验证使用 Ansible 的交互式提示：
 
 ```bash
-export INSPECT_ENABLE_REAL=1
+# Remote mode: inspect.sh sets INSPECT_ENABLE_REAL=1 in the child.
+# Provide only the non-secret account and, if needed, INSPECT_ASK_PASS=1 for
+# Ansible's native interactive prompt; never provide a password variable.
 export INSPECT_REMOTE_USER=aqwh
 export INSPECT_ASK_PASS=1
 ```
@@ -53,7 +55,7 @@ export INSPECT_ASK_PASS=1
 真实路径还会拒绝未设置 `INSPECT_REMOTE_USER` 的调用；建议验证结束后清除门控变量：
 
 ```bash
-unset INSPECT_ENABLE_REAL INSPECT_REMOTE_USER INSPECT_ASK_PASS
+unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
 ```
 
 ## 4. 推荐执行顺序
@@ -167,3 +169,25 @@ INSPECT_REMOTE_USER=<受控账号>
 - callback 原始输出会被写入报告、事件日志或 Git。
 
 验证报告只记录主机标签、时间、版本、退出码、状态计数和失败类别，不记录密码、密钥、原始 SSH 命令、原始 callback 或未脱敏日志。
+
+## T-110: bundled Ansible is mandatory
+
+The real-runner gate now treats Ansible as part of the project runtime, not as
+an operating-system dependency. The deployable runtime must contain:
+
+```text
+runtime/bin/python3.12
+runtime/ansible/site-packages/ansible/
+runtime/ansible/collections/
+```
+
+Execution is forced through the dedicated interpreter and module entry point:
+`runtime/bin/python3.12 -m ansible.cli.playbook`. The resolver and child
+environment reject system Ansible, inherited Python paths, user-site imports,
+and out-of-tree package resolution. Missing or invalid bundles fail closed
+with technical exit code 10.
+
+The checked-in manifest is still `not-built`; no approved offline Linux
+runtime archive was available in this worktree. Therefore no real VM/SSH or
+Ansible remote execution was claimed. The offline materializer validates the
+bundle and records its hashes when an approved archive is supplied.
