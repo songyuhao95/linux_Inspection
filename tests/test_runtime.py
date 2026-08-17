@@ -1,4 +1,4 @@
-"""T-109 project-local runtime contract tests."""
+"""T-109/T-110 project-local Python and Ansible runtime contract tests."""
 import importlib.util
 import json
 import os
@@ -18,12 +18,24 @@ SPEC.loader.exec_module(runtime)
 
 def _manifest(root: Path, sha256=None):
     (root / "bin").mkdir(parents=True)
+    site = root / "ansible" / "site-packages"
+    (site / "ansible" / "cli").mkdir(parents=True)
+    (root / "ansible" / "collections").mkdir(parents=True)
+    (site / "ansible" / "__init__.py").write_text("__version__ = '2.18.0'\n", encoding="utf-8")
+    (site / "ansible" / "cli" / "playbook.py").write_text("# bundled entry point\n", encoding="utf-8")
     (root / "manifest.json").write_text(
         json.dumps(
             {
                 "schema": 1,
                 "python": {"path": "bin/python3.12", "version": "3.12.x", "sha256": sha256},
-                "ansible": {"module": "ansible.cli.playbook"},
+                "ansible": {
+                    "distribution": "ansible-core",
+                    "status": "built",
+                    "version": "2.18.0",
+                    "site_packages": "ansible/site-packages",
+                    "collections_path": "ansible/collections",
+                    "module": "ansible.cli.playbook",
+                },
             }
         ),
         encoding="utf-8",
@@ -33,6 +45,15 @@ def _manifest(root: Path, sha256=None):
     if os.name != "nt":
         python_path.chmod(python_path.stat().st_mode | stat.S_IXUSR)
     return python_path
+
+
+def _stub_probes(monkeypatch, version="3.12.4"):
+    monkeypatch.setattr(runtime, "_probe_version", lambda path: version)
+    monkeypatch.setattr(
+        runtime,
+        "_probe_ansible",
+        lambda python_path, site_packages, runtime_root: site_packages / "ansible" / "__init__.py",
+    )
 
 
 def test_missing_runtime_fails_closed(tmp_path):
@@ -53,12 +74,39 @@ def test_runtime_version_mismatch_fails_closed(tmp_path, monkeypatch):
 
 def test_runtime_success_and_same_runtime_ansible_argv(tmp_path, monkeypatch):
     python_path = _manifest(tmp_path)
-    monkeypatch.setattr(runtime, "_probe_version", lambda path: "3.12.4")
+    _stub_probes(monkeypatch)
     info = runtime.resolve_runtime(tmp_path)
     assert info.python_path == python_path.resolve()
+    assert info.ansible_site_packages == (tmp_path / "ansible" / "site-packages").resolve()
     argv = info.ansible_playbook_argv(["playbook.yml", "-i", "hosts"])
     assert argv[:3] == [str(python_path.resolve()), "-m", "ansible.cli.playbook"]
     assert "ansible-playbook" not in argv
+
+
+def test_bundled_ansible_environment_replaces_inherited_system_paths(tmp_path, monkeypatch):
+    _manifest(tmp_path)
+    _stub_probes(monkeypatch)
+    info = runtime.resolve_runtime(tmp_path)
+    env = info.ansible_environment(
+        {
+            "PATH": "/usr/bin",
+            "PYTHONPATH": "/system/site-packages",
+            "ANSIBLE_CONFIG": "/etc/ansible/ansible.cfg",
+            "ANSIBLE_COLLECTIONS_PATHS": "/system/collections",
+        }
+    )
+    assert env["PYTHONPATH"] == str(info.ansible_site_packages)
+    assert env["PYTHONNOUSERSITE"] == "1"
+    assert "ANSIBLE_CONFIG" not in env
+    assert env["ANSIBLE_COLLECTIONS_PATHS"] == str((tmp_path / "ansible" / "collections").resolve())
+
+
+def test_bundled_ansible_missing_fails_closed(tmp_path, monkeypatch):
+    _manifest(tmp_path)
+    (tmp_path / "ansible" / "site-packages" / "ansible" / "cli" / "playbook.py").unlink()
+    monkeypatch.setattr(runtime, "_probe_version", lambda path: "3.12.4")
+    with pytest.raises(runtime.RuntimeContractError, match="entry point"):
+        runtime.resolve_runtime(tmp_path)
 
 
 def test_fixture_mode_is_explicit_and_non_real():

@@ -803,3 +803,9 @@ def test_t109_fixture_wins_over_real_gate(tmp_path, monkeypatch):
 def test_t109_cleanup_source_is_python37_compatible():
     source = (_ROOT / "inspect" / "ansible_runner.py").read_text(encoding="utf-8")
     assert "unlink(missing_ok" not in source
+
+
+def test_t110_real_runner_uses_bundled_ansible_environment():
+    source = (_ROOT / "inspect" / "ansible_runner.py").read_text(encoding="utf-8")
+    assert "dedicated_runtime.ansible_environment" in source
+    assert "ansible-playbook" not in source[source.index("def _execute_real"):source.index("def _parse_callback_results")]

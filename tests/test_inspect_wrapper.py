@@ -23,6 +23,7 @@ def test_wrapper_static_contract():
     assert 'exec "$PY"' not in source
     assert "ANSIBLE_PASSWORD" in source
     assert "SSHPASS" in source
+    assert "INSPECT_RUNTIME_ROOT" in source
 
 
 def test_real_mode_missing_runtime_fails_closed_without_system_fallback():

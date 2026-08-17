@@ -379,3 +379,34 @@ The user explicitly authorized implementation and GitHub synchronization after t
 No VM/SSH/Ansible remote execution was attempted. The checked-in runtime is metadata plus an offline materializer, not a Linux binary. Before real execution, an administrator must provide and verify a compatible Python 3.12 archive with Ansible dependencies, populate `runtime/`, then independently validate the two authorized VMs. Existing G0 evidence remains blocked for `node01` and `kylin01`; no G3/G4 approval is inferred.
 
 This update does not modify `run/events.ndjson`, `.claude/`, historical reports, or historical contracts.
+
+## 12. 2026-08-17 Bundled Ansible Update (T-110)
+
+用户确认允许将当前分支推送到 `origin`。在原 T-109 项目内 Python 3.12
+runtime wrapper 基础上完成 T-110：Ansible control-side 依赖也必须位于项目
+runtime 内，真实执行固定为 `runtime/bin/python3.12 -m ansible.cli.playbook`。
+
+已完成：
+
+- 封存合同：`contract-T-110-v1`，seal hash 为
+  `sha256:c2877dfead19ba9804b7793965c622f9424f2af59e52c9a35be400e682371341`。
+- `inspect/runtime.py` 校验 manifest、Python 3.12、`ansible.cli.playbook`、
+  项目内 site-packages 和 collections 路径；缺失/越界/导入失败均 fail closed。
+- `inspect/ansible_runner.py` 清理继承的 Python/Ansible 环境变量，只向子进程
+  注入项目 runtime 的 Ansible 路径；不再依赖系统 `ansible-playbook`。
+- `tools/build-runtime.sh` 改为离线校验并物化 Python + ansible-core bundle，
+  不联网、不调用包管理器，并写入 Python 与 Ansible bundle hash。
+- 新增 `runtime/ansible/README.md`、`runtime/ansible/requirements.lock`，
+  更新 runtime、VM 部署文档和回归测试。
+
+验证结果：
+
+- assembly self-test：30/30 通过。
+- T-109/T-110 focused pytest（使用项目内临时目录规避本机 Temp 权限问题）：
+  `132 passed, 1 skipped`。
+- `runtime/manifest.json` 仍为 `not-built`，因为当前工作区没有经审批的 Linux
+  Python 3.12 + Ansible 离线归档；没有执行 VM、SSH 或远程 Ansible。
+- `run/events.ndjson` 与 `.claude/` 为受保护/既有工作区变更，未纳入本次提交。
+
+下一步：运行 `tools/build-runtime.sh` 物化经过审批的离线归档，复核 manifest
+hash 后再进行真实目标机验证；本次完成后将两个本地提交一起推送至 `origin`。

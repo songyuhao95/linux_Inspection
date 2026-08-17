@@ -1,0 +1,4 @@
+﻿# Approved offline Ansible control-side dependency contract
+# The materializer does not resolve or download this file.
+# Record the exact archive-approved version in runtime/manifest.json after build.
+ansible-core>=2.16,<2.19

@@ -1,10 +1,4 @@
-"""Project-local Python 3.12 runtime contract.
-
-The repository intentionally does not contain a platform binary. A verified,
-offline runtime archive is materialized by ``tools/build-runtime.sh``. Real
-execution must use the resulting interpreter; fixture/query execution may use
-the caller's interpreter because it never invokes Ansible or a target host.
-"""
+"""Project-local Python 3.12 and Ansible runtime contract."""
 from __future__ import annotations
 
 import hashlib
@@ -40,10 +34,39 @@ class RuntimeInfo:
     python_path: Path
     version: str
     manifest: Mapping[str, Any]
+    ansible_site_packages: Path
+    ansible_module: str = ANSIBLE_MODULE
+    ansible_collections_path: Optional[Path] = None
 
     def ansible_playbook_argv(self, args: Sequence[str]) -> list[str]:
         """Build Ansible argv through this interpreter, never through PATH."""
-        return [str(self.python_path), "-m", ANSIBLE_MODULE, *map(str, args)]
+        return [str(self.python_path), "-m", self.ansible_module, *map(str, args)]
+
+    def ansible_environment(self, base_env: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+        """Return a child environment that imports only the bundled Ansible package."""
+        env = dict(os.environ if base_env is None else base_env)
+        # Do not inherit a caller's Python installation or Ansible configuration.
+        for name in (
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "PYTHONUSERBASE",
+            "VIRTUAL_ENV",
+            "ANSIBLE_CONFIG",
+            "ANSIBLE_HOME",
+            "ANSIBLE_LIBRARY",
+            "ANSIBLE_MODULE_UTILS",
+            "ANSIBLE_LOOKUP_PLUGINS",
+            "ANSIBLE_FILTER_PLUGINS",
+            "ANSIBLE_ACTION_PLUGINS",
+            "ANSIBLE_CALLBACK_PLUGINS",
+            "ANSIBLE_COLLECTIONS_PATHS",
+        ):
+            env.pop(name, None)
+        env["PYTHONNOUSERSITE"] = "1"
+        env["PYTHONPATH"] = str(self.ansible_site_packages)
+        if self.ansible_collections_path is not None:
+            env["ANSIBLE_COLLECTIONS_PATHS"] = str(self.ansible_collections_path)
+        return env
 
 
 def _safe_relative(root: Path, value: Any, field: str) -> Path:
@@ -98,6 +121,53 @@ def _probe_version(python_path: Path) -> str:
     return _validate_version(version)
 
 
+def _probe_ansible(
+    python_path: Path, site_packages: Path, runtime_root: Path
+) -> Path:
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONPATH": str(site_packages),
+    }
+    code = (
+        "import ansible, ansible.cli.playbook; "
+        "print(ansible.__file__)"
+    )
+    try:
+        completed = subprocess.run(
+            [str(python_path), "-c", code],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeContractError("bundled Ansible import probe failed") from exc
+    if completed.returncode != 0:
+        raise RuntimeContractError(
+            "bundled Ansible is missing or its ansible.cli.playbook entry point is unavailable"
+        )
+    raw_path = completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else ""
+    if not raw_path:
+        raise RuntimeContractError("bundled Ansible import probe returned no package path")
+    ansible_path = Path(raw_path).resolve()
+    try:
+        ansible_path.relative_to(site_packages.resolve())
+    except ValueError as exc:
+        raise RuntimeContractError(
+            "Ansible resolved outside the project runtime; system Ansible is forbidden"
+        ) from exc
+    try:
+        ansible_path.relative_to(runtime_root.resolve())
+    except ValueError as exc:
+        raise RuntimeContractError("bundled Ansible path escapes runtime directory") from exc
+    return ansible_path
+
+
 def _verify_hash(path: Path, expected: Any) -> None:
     if expected in (None, ""):
         return
@@ -109,7 +179,7 @@ def _verify_hash(path: Path, expected: Any) -> None:
 
 
 def resolve_runtime(root: Optional[Path] = None) -> RuntimeInfo:
-    """Validate and return the project-local Python 3.12 runtime."""
+    """Validate and return the project-local Python and bundled Ansible runtime."""
     runtime_root = Path(root) if root is not None else DEFAULT_RUNTIME_ROOT
     manifest = _read_manifest(runtime_root)
     python_meta = manifest.get("python")
@@ -128,7 +198,41 @@ def resolve_runtime(root: Optional[Path] = None) -> RuntimeInfo:
     declared = str(python_meta.get("version", "3.12.x"))
     if not declared.startswith("3.12"):
         raise RuntimeContractError("runtime manifest declares a Python version other than 3.12.x")
-    return RuntimeInfo(runtime_root.resolve(), python_path.resolve(), version, manifest)
+
+    ansible_meta = manifest.get("ansible")
+    if not isinstance(ansible_meta, dict):
+        raise RuntimeContractError("runtime manifest is missing bundled Ansible metadata")
+    ansible_module = str(ansible_meta.get("module", ""))
+    if ansible_module != ANSIBLE_MODULE:
+        raise RuntimeContractError("runtime manifest Ansible module is unsupported")
+    ansible_site_packages = _safe_relative(
+        runtime_root, ansible_meta.get("site_packages"), "ansible.site_packages"
+    )
+    if not ansible_site_packages.is_dir():
+        raise RuntimeContractError(
+            "bundled Ansible site-packages are missing; system Ansible fallback is forbidden"
+        )
+    if not (ansible_site_packages / "ansible" / "__init__.py").is_file():
+        raise RuntimeContractError("bundled Ansible package is missing")
+    if not (ansible_site_packages / "ansible" / "cli" / "playbook.py").is_file():
+        raise RuntimeContractError("bundled Ansible playbook entry point is missing")
+
+    collections_value = ansible_meta.get("collections_path")
+    collections_path = None
+    if collections_value not in (None, ""):
+        collections_path = _safe_relative(runtime_root, collections_value, "ansible.collections_path")
+        if not collections_path.is_dir():
+            raise RuntimeContractError("bundled Ansible collections directory is missing")
+    _probe_ansible(python_path, ansible_site_packages, runtime_root)
+    return RuntimeInfo(
+        runtime_root.resolve(),
+        python_path.resolve(),
+        version,
+        manifest,
+        ansible_site_packages.resolve(),
+        ansible_module,
+        collections_path.resolve() if collections_path is not None else None,
+    )
 
 
 def is_fixture_mode(env: Optional[Mapping[str, str]] = None) -> bool:
