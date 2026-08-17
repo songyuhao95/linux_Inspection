@@ -410,3 +410,11 @@ runtime 内，真实执行固定为 `runtime/bin/python3.12 -m ansible.cli.playb
 
 下一步：运行 `tools/build-runtime.sh` 物化经过审批的离线归档，复核 manifest
 hash 后再进行真实目标机验证；本次完成后将两个本地提交一起推送至 `origin`。
+
+## 13. 2026-08-17 Push Completion
+
+The user explicitly confirmed the push to `origin`. Commits `ae07794` (project-local
+Python 3.12 wrapper) and `8b29d05` (bundled Ansible enforcement) are now
+published on `origin/codex/python312-runtime-wrapper`. The only remaining
+working-tree changes are the pre-existing protected `run/events.ndjson` and
+untracked `.claude/`; neither was included in the commits.
