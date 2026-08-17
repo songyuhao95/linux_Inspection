@@ -41,7 +41,9 @@ ansible-playbook --version
 一次性密码验证使用 Ansible 的交互式提示：
 
 ```bash
-export INSPECT_ENABLE_REAL=1
+# Remote mode: inspect.sh sets INSPECT_ENABLE_REAL=1 in the child.
+# Provide only the non-secret account and, if needed, INSPECT_ASK_PASS=1 for
+# Ansible's native interactive prompt; never provide a password variable.
 export INSPECT_REMOTE_USER=aqwh
 export INSPECT_ASK_PASS=1
 ```
@@ -53,7 +55,7 @@ export INSPECT_ASK_PASS=1
 真实路径还会拒绝未设置 `INSPECT_REMOTE_USER` 的调用；建议验证结束后清除门控变量：
 
 ```bash
-unset INSPECT_ENABLE_REAL INSPECT_REMOTE_USER INSPECT_ASK_PASS
+unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
 ```
 
 ## 4. 推荐执行顺序

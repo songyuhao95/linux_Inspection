@@ -2,3 +2,5 @@
 pytest
 jsonschema
 openpyxl
+
+# Tests run with the project runtime contract; no dependency is installed by inspect.sh.

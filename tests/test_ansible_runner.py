@@ -768,3 +768,38 @@ def test_h1h2_legit_commands_still_accepted():
         "egrep",
     ]
     ar.validate_command_specs(_specs(_PROFILE))  # 全量注册表命令不抛
+
+
+# ==========================================================================
+# T-109 runtime/diagnostic regression checks
+# ==========================================================================
+
+def test_t109_ansible_argv_can_be_bound_to_dedicated_runtime(tmp_path):
+    argv = ar.build_playbook_argv(
+        tmp_path / "playbook.yml", tmp_path / "hosts", executable="/project/runtime/bin/python3.12"
+    )
+    assert argv[0] == "/project/runtime/bin/python3.12"
+    assert "ansible-playbook" not in argv
+
+
+def test_t109_callback_diagnostics_are_sanitized():
+    with pytest.raises(ar.RealExecutionError) as ei:
+        ar._load_callback_payload("", return_code=7)
+    message = str(ei.value)
+    assert ei.value.category == "callback_empty"
+    assert ei.value.return_code == 7
+    assert "check=" in message
+    assert "password" not in message.lower()
+
+
+def test_t109_fixture_wins_over_real_gate(tmp_path, monkeypatch):
+    monkeypatch.setenv(ar.REAL_EXEC_ENV_VAR, "1")
+    monkeypatch.setenv(ar.FIXTURE_ENV_VAR, str(_FIXTURES))
+    result = ar.run(_selection([_host("node-a", "10.0.0.1")]), _specs(_PROFILE), runtime_dir=tmp_path)
+    assert result["fixture_mode"] is True
+    assert "real_mode" not in result
+
+
+def test_t109_cleanup_source_is_python37_compatible():
+    source = (_ROOT / "inspect" / "ansible_runner.py").read_text(encoding="utf-8")
+    assert "unlink(missing_ok" not in source

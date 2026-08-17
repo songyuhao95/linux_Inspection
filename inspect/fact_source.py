@@ -84,7 +84,9 @@ def atomic_write_json(
         os.replace(tmp, target)
     except OSError as exc:
         try:
-            tmp.unlink(missing_ok=True)
+            # Path.unlink(missing_ok=...) was added after Python 3.7.
+            if tmp.exists():
+                tmp.unlink()
         except OSError:
             pass
         raise FactSourceError(f"事实源写入失败: {target}（{exc}）") from exc

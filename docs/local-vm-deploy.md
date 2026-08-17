@@ -43,9 +43,8 @@ ansible-playbook --version
 fixture 模式仍然优先且零连接。真实本地模式必须同时设置两个门控变量：
 
 ```bash
-export INSPECT_ENABLE_REAL=1
-export INSPECT_ENABLE_LOCAL_REAL=1
-unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
+# inspect.sh automatically sets these non-secret local flags in its child only.
+# It also rejects a missing/mismatched project-local Python 3.12 runtime.
 ```
 
 `--local` 生成的 inventory 必须精确包含：
@@ -63,9 +62,8 @@ localhost ansible_connection=local
 
 ```bash
 cd /data/inspect
-export INSPECT_ENABLE_REAL=1
-export INSPECT_ENABLE_LOCAL_REAL=1
-unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
+# inspect.sh automatically sets these non-secret local flags in its child only.
+# It also rejects a missing/mismatched project-local Python 3.12 runtime.
 bash inspect.sh --local --html --html-out out/local-smoke.html
 ```
 

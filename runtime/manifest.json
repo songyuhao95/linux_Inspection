@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "status": "not-built",
+  "offline": true,
+  "platform": {
+    "os": "linux",
+    "architectures": ["x86_64", "aarch64"],
+    "glibc": "verify-on-target"
+  },
+  "python": {
+    "path": "bin/python3.12",
+    "version": "3.12.x",
+    "sha256": null
+  },
+  "ansible": {
+    "distribution": "ansible-core",
+    "version": "pin-in-offline-lock",
+    "module": "ansible.cli.playbook"
+  },
+  "notes": "Populate from an approved offline archive; an absent or mismatched runtime fails closed."
+}
