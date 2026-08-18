@@ -1,4 +1,5 @@
 """T-109/T-110 project-local Python and Ansible runtime contract tests."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -97,6 +98,7 @@ def test_bundled_ansible_environment_replaces_inherited_system_paths(tmp_path, m
     )
     assert env["PYTHONPATH"] == str(info.ansible_site_packages)
     assert env["PYTHONNOUSERSITE"] == "1"
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
     assert "ANSIBLE_CONFIG" not in env
     assert env["ANSIBLE_COLLECTIONS_PATHS"] == str((tmp_path / "ansible" / "collections").resolve())
 
@@ -121,3 +123,19 @@ def test_manifest_hash_mismatch_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "_probe_version", lambda path: "3.12.4")
     with pytest.raises(runtime.RuntimeContractError, match="sha256"):
         runtime.resolve_runtime(tmp_path)
+
+
+def test_bundle_hash_ignores_generated_bytecode(tmp_path):
+    root = tmp_path / "ansible"
+    root.mkdir()
+    (root / "module.py").write_text("payload\n", encoding="utf-8")
+    digest = hashlib.sha256()
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    (root / "__pycache__").mkdir()
+    (root / "__pycache__" / "module.cpython-312.pyc").write_bytes(b"generated")
+    (root / "module.pyc").write_bytes(b"generated")
+    runtime._verify_bundle_hash(root, digest.hexdigest())
