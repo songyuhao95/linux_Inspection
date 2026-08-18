@@ -23,6 +23,9 @@ PYTHONNOUSERSITE=1 PYTHONPATH=runtime/ansible/site-packages \
 
 首次使用前应确认：
 
+- Linux 目标 runtime 已包含 `runtime/lib/python3.12/site-packages/` 报表依赖；按 `runtime/report-requirements.lock` 校验版本，不要在巡检时联网安装；
+- `runtime/bin/python3.12 -c "import pandas, xlsxwriter; print(pandas.__version__)"` 可以成功执行；
+
 1. `runtime/manifest.json` 为 `status=built`，Python/Ansible 哈希已校验；
 2. 项目 runtime 中的 `ansible.cli.playbook` 能由 `runtime/bin/python3.12` 导入；
 3. 控制端可以通过 SSH 访问两台主机；

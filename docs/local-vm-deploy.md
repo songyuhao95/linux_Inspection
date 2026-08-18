@@ -91,6 +91,8 @@ bash inspect.sh --local --excel out/local-smoke.xlsx
 
 ## T-110 project-local Ansible requirement
 
+The local VM deployment path must ship the complete Linux report runtime, including `runtime/lib/python3.12/site-packages/` and `runtime/report-requirements.lock`, together with the `inspect/` tree. A fresh supported Kylin Linux checkout must not require a separate pandas/xlsxwriter installation.
+
 The local VM deployment path must ship the complete `inspect/` tree together
 with `runtime/bin/python3.12` and `runtime/ansible/`. It must not install or
 select Ansible from the target VM's system package set. `inspect/runtime.py`

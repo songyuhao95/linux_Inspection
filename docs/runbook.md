@@ -99,7 +99,7 @@ stdout/xlsx/html 链路，并含回滚演练（TD §11，见 §4）。
 
 ## 3. 兼容矩阵 C1-C8 执行手册（TD §9）
 
-控制端：Linux/WSL（项目 runtime 已物化且通过哈希校验）；全部命令在
+控制端：Linux/WSL（项目 runtime 已物化且通过哈希校验，且 Linux 报表依赖已随仓库提交）；全部命令在
 仓库根目录执行。`inspect.sh` 只启动 `runtime/bin/python3.12`，所有模式
 都拒绝 PATH 中的系统 Python/Ansible。
 
@@ -144,7 +144,7 @@ INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local   # 第二次运�
 | 10 | 执行失败（技术）：inventory 解析失败、ExecutionNotReadyError、xlsxwriter 缺失等 |
 | 20 | 业务告警：仅 --fail-on critical 且任一指标 status=CRIT |
 
-优先级 2 > 10 > 20 > 0；xlsxwriter 未安装时 `--excel` 明确报错退出码 10，
+优先级 2 > 10 > 20 > 0；Linux 项目 runtime 已内置 xlsxwriter，若仍提示缺失，先检查 runtime/site-packages 是否完整；`--excel` 明确报错退出码 10，
 不中断 stdout 报表与 HTML 输出。
 
 ## 6. 输出与运行残留

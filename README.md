@@ -20,6 +20,7 @@
 ## 当前开发状态与交接
 
 - 已完成项目内 Python 3.12 和 bundled Ansible runtime 的强制执行路径；
+- Linux x86_64/CPython 3.12 的报表依赖已随项目 runtime 提交（`pandas`、`numpy`、`xlsxwriter` 及其依赖），新 Linux 环境无需重复安装；精确版本见 `runtime/report-requirements.lock`；
 - 已完成 `--local` 本地 Linux 基础指标采集，以及远程 `-H` 的统一 JSON 事实源；
 - 当前远程认证以项目 inventory 为配置入口，公开模板不包含可用主机或真实凭据；
 - 远程真实 VM 验证按 `docs/g0-real-vm.md` 执行，部署到 VM 按 `docs/local-vm-deploy.md` 执行；

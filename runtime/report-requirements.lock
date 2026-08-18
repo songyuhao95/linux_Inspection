@@ -1,0 +1,20 @@
+# Linux report runtime dependency lock
+#
+# These packages are unpacked into runtime/lib/python3.12/site-packages and are
+# intentionally committed for the supported Kylin Linux x86_64 / CPython 3.12
+# target. `inspect.sh` never installs them at inspection time.
+#
+# The versions below are the exact versions validated on the G0 test VM.
+pandas==2.3.2
+numpy==2.2.6
+xlsxwriter==3.2.9
+python-dateutil==2.9.0.post0
+pytz==2026.3
+tzdata==2026.3
+six==1.17.0
+
+# Platform boundary:
+# - Linux: use the checked-in site-packages tree above.
+# - Windows: do not use these Linux native wheels; use the project Windows
+#   runtime/development dependency set instead.
+

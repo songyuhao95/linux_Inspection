@@ -18,6 +18,14 @@ runtime/
     collections/
 ```
 
+The Linux report renderer dependencies are also committed in
+`runtime/lib/python3.12/site-packages/`. The exact validated versions are listed
+in `runtime/report-requirements.lock`; this includes `pandas`, `numpy`,
+`xlsxwriter`, and their small pure-Python dependencies. A fresh supported Linux
+checkout therefore does not need a separate `pip install` before using
+`--excel` or `--html`. The checked-in tree is a Linux x86_64/CPython 3.12
+artifact; it must not be copied into the Windows runtime.
+
 The Linux deployment artifact is `runtime/bin/python3.12`. This repository also
 ships a project-local Windows embeddable `runtime/bin/python3.12.exe` solely so
 fixture and query commands use a project-owned 3.12 interpreter on Windows

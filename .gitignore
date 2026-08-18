@@ -23,3 +23,7 @@ Thumbs.db
 # Local inventory may contain SSH credentials and must never be committed.
 inventory/hosts.local.ini
 inventory/*.local.ini
+
+# Checked-in Linux runtime may generate bytecode during local probing; never commit it.
+runtime/lib/python3.12/site-packages/**/__pycache__/
+runtime/lib/python3.12/site-packages/**/*.py[cod]
