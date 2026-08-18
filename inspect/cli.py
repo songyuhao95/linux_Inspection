@@ -93,7 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     """cli-contract §2 选项总表（冻结集，不新增选项）。"""
     parser = InspectArgumentParser(
         prog="inspect.sh",
-        description="中间件运维巡检 CLI（local 垂直切片，10 个共同 P0 指标）："
+        description="中间件运维巡检 CLI（local 垂直切片，默认 6 个 Linux 基础指标）："
                     "只读巡检本机或远程主机，输出事实源与三类报表。",
         epilog=_HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -229,8 +229,8 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     步骤：
       1. 配置加载（inspect.yml 可选，缺省 out_dir=out）与阈值合并（文档基线）；
       2. 主机选择解析（inventory.py；-H/-i/--limit/--all，用法错误 2 / 执行失败 10）；
-      3. 指标命令规格（linux_basic 基础指标 + linux_common profile 指标；
-         无产品 profile → 4 个 profile 指标 UNSUPPORTED_PROFILE → UNKNOWN，MR §5）；
+      3. 指标命令规格：默认只选择 linux_basic 的 6 个 profile-free 基础指标；
+         未显式选择中间件模块时，linux_common 不进入执行计划；
       4. 执行：--local 走 local_runner 直接执行本机 shell，完全不调用
          Ansible；-H/--hosts 与 -i/--inventory 走 ansible_runner 的项目内
          Ansible；INSPECT_FIXTURE_DIR 两种模式均为零连接调试路径；

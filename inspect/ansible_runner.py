@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from inspect import metrics as metrics_registry
 from inspect import probe as probe_mod
-from inspect.modules import default_registry
+from inspect.modules import DEFAULT_COLLECTION_MODULE_IDS, default_registry
 
 try:
     from inspect import runtime as runtime_contract
@@ -378,20 +378,36 @@ def _substitute_template(
 def build_metric_command_specs(
     metrics: Optional[Sequence[Dict[str, Any]]] = None,
     profile: Optional[Dict[str, Any]] = None,
+    module_ids: Optional[Sequence[str]] = None,
 ) -> List[CommandSpec]:
     """由指标注册表（metrics.py）+ TD §5.2 模板构造采集命令规格列表。
 
-    - metrics=None → 全部 10 个已实现指标（metrics_registry.iter_metrics()）；
+    - metrics=None 且未提供 profile → 默认只构造
+      DEFAULT_COLLECTION_MODULE_IDS（当前为 linux_basic）的指标；
+      module_ids 可显式选择额外模块，供未来中间件适配器接入。提供
+      profile 时保留完整注册表兼容路径；完整注册表仍可通过
+      default_registry().metric_definitions() 查询，不影响 --list-metrics；
     - profile：inspect.yml profiles 中单个产品的配置（TD §6.3）：
-      提供 → 安全校验后替换占位符；缺失/未提供 → 需要 profile 的指标
-      构造 command=None + error_code=UNSUPPORTED_PROFILE（MR §5：无
-      profile 配置 → 指标 UNKNOWN，不静默跳过）；linux_basic 的基础
-      指标（CPU/负载/内存/Swap/根文件系统）始终构造命令。
+      提供 → 安全校验后替换占位符；缺失/未提供 → 对已显式选择的
+      profile 指标构造 command=None + error_code=UNSUPPORTED_PROFILE；
+      未选择的模块不会进入执行计划，也不会制造 UNKNOWN。
     - 超时取自 metrics.py 定义（timeout_sec：10s，日志类 15s，AE §7）；
     - 所需命令取自 probe.metric_required_commands（TD §5.2 数据源列）。
     """
     if metrics is None:
-        metrics = default_registry().metric_definitions()
+        if module_ids is not None:
+            selected_modules = tuple(module_ids)
+        elif profile is None:
+            # The CLI's no-profile path is a generic Linux inspection.
+            selected_modules = DEFAULT_COLLECTION_MODULE_IDS
+        else:
+            # Supplying a product profile is the explicit extension path for
+            # middleware adapters; preserve the complete registered catalog
+            # for callers that already have a profile.
+            selected_modules = tuple(
+                module.module_id for module in default_registry().iter_modules()
+            )
+        metrics = default_registry().metric_definitions(selected_modules)
     profile = profile or {}
     specs: List[CommandSpec] = []
     for m in metrics:

@@ -141,6 +141,28 @@ class TestSummaryConsistency:
 
 
 # --------------------------------------------------------------------------
+# 1A. 已执行指标值从 JSON 事实源以中文字段名输出
+# --------------------------------------------------------------------------
+
+
+class TestMetricValueOutput:
+    def test_metric_values_use_chinese_json_name_and_normalized_value(self):
+        out = render(valid_doc())
+        assert "指标结果（从 JSON 事实源读取）" in out
+        assert "Swap 使用率: 0.00 %" in out
+        assert "local.swap.used_percent" not in out
+
+    def test_unknown_metric_is_kept_in_problem_list_not_value_section(self):
+        out = render(partial_doc())
+        value_section, problem_section = out.split(
+            "失败/未知指标列表（UNKNOWN/ERROR 显式原因，RR §2）", 1
+        )
+        assert "CPU 使用率" in value_section
+        assert "systemd 服务状态" not in value_section
+        assert "local.service.active" in problem_section
+
+
+# --------------------------------------------------------------------------
 # 2. UNKNOWN/ERROR 显式原因（REQ-R-02：missing/conflict/permission/timeout）
 # --------------------------------------------------------------------------
 

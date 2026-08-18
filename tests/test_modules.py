@@ -24,6 +24,14 @@ def test_default_registry_exposes_named_linux_module_and_all_metrics():
     assert len(registry.metric_definitions()) == metrics.count_metrics()
 
 
+def test_registry_supports_explicit_collection_module_selection():
+    registry = default_registry()
+    assert registry.metric_ids(("linux_basic",)) == registry.get("linux_basic").metric_ids
+    assert registry.metric_ids(("linux_common",)) == registry.get("linux_common").metric_ids
+    with pytest.raises(ValueError, match="unknown monitor module"):
+        registry.metric_ids(("missing",))
+
+
 def test_registry_rejects_duplicate_module_and_metric_ownership():
     registry = ModuleRegistry()
     module = MonitorModule("demo", "Demo", ("local.cpu.load_1m",))

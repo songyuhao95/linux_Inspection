@@ -69,23 +69,42 @@ class ModuleRegistry:
             None,
         )
 
-    def iter_metric_definitions(self) -> Iterator[dict]:
-        # Preserve catalog order in the JSON fact source while ownership is
-        # split across independently registered monitor modules.
+    def iter_metric_definitions(
+        self, module_ids: Sequence[str] | None = None
+    ) -> Iterator[dict]:
+        """Iterate metric definitions owned by selected modules.
+
+        ``module_ids=None`` preserves the complete registered catalog for
+        read-only discovery.  Execution callers can pass an explicit module
+        list so profile-dependent middleware metrics are not implicitly
+        collected when no middleware was selected.
+        """
+        selected = (
+            tuple(self._modules)
+            if module_ids is None
+            else tuple(module_ids)
+        )
+        unknown = [module_id for module_id in selected if module_id not in self._modules]
+        if unknown:
+            raise ValueError(f"unknown monitor module(s): {unknown}")
         owned = {
             metric_id
-            for module in self._modules.values()
-            for metric_id in module.metric_ids
+            for module_id in selected
+            for metric_id in self._modules[module_id].metric_ids
         }
+        # Preserve catalog order in the JSON fact source while ownership is
+        # split across independently registered monitor modules.
         for metric in self._metric_catalog.iter_metrics():
             if metric["metric_id"] in owned:
                 yield metric
 
-    def metric_definitions(self) -> List[dict]:
-        return list(self.iter_metric_definitions())
+    def metric_definitions(self, module_ids: Sequence[str] | None = None) -> List[dict]:
+        return list(self.iter_metric_definitions(module_ids))
 
-    def metric_ids(self) -> tuple[str, ...]:
-        return tuple(metric["metric_id"] for metric in self.iter_metric_definitions())
+    def metric_ids(self, module_ids: Sequence[str] | None = None) -> tuple[str, ...]:
+        return tuple(
+            metric["metric_id"] for metric in self.iter_metric_definitions(module_ids)
+        )
 
 
 def _build_default_registry() -> ModuleRegistry:
@@ -101,6 +120,12 @@ def _build_default_registry() -> ModuleRegistry:
 
 
 DEFAULT_REGISTRY = _build_default_registry()
+
+# Only profile-free host basics are collected until a caller explicitly
+# selects a middleware module.  This keeps an unspecified inspection focused
+# and avoids manufacturing UNSUPPORTED_PROFILE results for future adapters.
+DEFAULT_COLLECTION_MODULE_IDS = ("linux_basic",)
+
 # Function form keeps the call site readable and leaves room for a future
 # configured registry without changing the runner API.
 def default_registry() -> ModuleRegistry:
@@ -108,6 +133,7 @@ def default_registry() -> ModuleRegistry:
 
 
 __all__ = [
+    "DEFAULT_COLLECTION_MODULE_IDS",
     "DEFAULT_REGISTRY",
     "ModuleRegistry",
     "MonitorModule",

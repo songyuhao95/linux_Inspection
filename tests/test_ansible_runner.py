@@ -60,8 +60,12 @@ sys.modules["inspect.metrics"] = metrics
 ar = _load_module("t103_ansible_runner", _ROOT / "inspect" / "ansible_runner.py")
 
 
+_ALL_MODULE_IDS = tuple(module.module_id for module in ar.default_registry().iter_modules())
+
+
 def _specs(profile=None):
-    return ar.build_metric_command_specs(profile=profile)
+    """Build the complete catalog for command-template tests explicitly."""
+    return ar.build_metric_command_specs(profile=profile, module_ids=_ALL_MODULE_IDS)
 
 
 def _spec(metric_id, command, timeout=10, become=False, error_code=None, error_message=None):

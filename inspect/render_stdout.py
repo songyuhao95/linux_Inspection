@@ -345,6 +345,50 @@ def render_host_summary(
     )
 
 
+def _metric_display_value(metric: Mapping[str, Any]) -> str:
+    """Format the already-normalized JSON value for terminal display."""
+    value = metric.get("normalized_value")
+    if value is None:
+        value = metric.get("raw_value")
+    if value is None:
+        text = "-"
+    elif isinstance(value, float):
+        text = f"{value:.2f}"
+    else:
+        text = str(value)
+    unit = str(metric.get("unit") or "").strip()
+    return f"{text} {unit}".rstrip()
+
+
+def render_metric_values(
+    doc: Mapping[str, Any],
+    *,
+    color: Optional[bool] = None,
+    stream: Optional[TextIO] = None,
+) -> str:
+    """Render executed metric values from one host-result-v1 JSON document.
+
+    The metric name, value and unit all come from the fact source.  Metrics
+    with a technical collection error stay in ``render_problem_list`` so the
+    value section only contains metrics for which collection produced a value.
+    """
+    lines = ["  指标结果（从 JSON 事实源读取）"]
+    shown = False
+    for metric in doc.get("metrics", []):
+        if metric.get("error") is not None:
+            continue
+        shown = True
+        status = str(metric.get("status") or STATUS_UNKNOWN)
+        name = str(metric.get("name") or metric.get("metric_id") or "-")
+        lines.append(
+            f"    {badge(status, color=color, stream=stream)} {name}: "
+            f"{_metric_display_value(metric)}"
+        )
+    if not shown:
+        lines.append("    （无已执行指标）")
+    return "\n".join(lines)
+
+
 def render_problem_list(
     docs: Sequence[Mapping[str, Any]],
     *,
@@ -429,7 +473,9 @@ def render_report(
         render_run_summary(docs, color=color, stream=stream),
         "主机摘要",
     ]
-    parts.extend(render_host_summary(d, color=color, stream=stream) for d in docs)
+    for doc in docs:
+        parts.append(render_host_summary(doc, color=color, stream=stream))
+        parts.append(render_metric_values(doc, color=color, stream=stream))
     parts.append(render_problem_list(docs, host_errors=host_errors, color=color, stream=stream))
     parts.append(render_exit_code_note())
     return "\n\n".join(parts)
@@ -489,6 +535,7 @@ __all__ = [
     "render_exit_code_note",
     "render_host_summary",
     "render_inspection_report",
+    "render_metric_values",
     "render_problem_list",
     "render_report",
     "render_run_summary",

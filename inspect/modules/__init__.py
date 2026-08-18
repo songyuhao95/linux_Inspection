@@ -6,9 +6,16 @@ the module must be registered so the execution plan remains deterministic and
 allow-list validation continues to be the single command-safety boundary.
 """
 
-from .registry import DEFAULT_REGISTRY, ModuleRegistry, MonitorModule, default_registry
+from .registry import (
+    DEFAULT_COLLECTION_MODULE_IDS,
+    DEFAULT_REGISTRY,
+    ModuleRegistry,
+    MonitorModule,
+    default_registry,
+)
 
 __all__ = [
+    "DEFAULT_COLLECTION_MODULE_IDS",
     "DEFAULT_REGISTRY",
     "ModuleRegistry",
     "MonitorModule",
