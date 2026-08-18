@@ -904,17 +904,56 @@ def _filesystem_detail_status(
     return str(JUDGERS[metric_id](detail_parsed, resolved, profile)["status"])
 
 
+def _cpu_load_detail_decision(
+    load: float,
+    parsed: Dict[str, Any],
+    resolved: Dict[str, Any],
+    profile: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """为单个负载时间窗口生成状态和人类可读判定说明。
+
+    判定仍复用现有 1 分钟负载规则：负载不高于 CPU 核数为 OK；超过核数
+    的告警等级在文档中未定义，默认 UNKNOWN。渲染层只读取这里落盘的结果。
+    """
+    detail_parsed = dict(parsed)
+    detail_parsed["load_1m"] = float(load)
+    decision = _judge_cpu_load_1m(detail_parsed, resolved, profile)
+    status = str(decision["status"])
+    if parsed.get("nproc") is None:
+        judgement = "CPU 核数无法获取：无法判定"
+    elif float(load) <= int(parsed["nproc"]):
+        judgement = "负载 <= CPU 核数：正常"
+    else:
+        judgement = "负载 > CPU 核数：告警等级未定义，暂为 UNKNOWN"
+    return {"status": status, "judgement": judgement}
+
+
 def _evidence_details(
     metric_id: str,
     parsed: Dict[str, Any],
     resolved: Dict[str, Any],
     profile: Optional[Dict[str, Any]] = None,
 ) -> Optional[List[Dict[str, Any]]]:
-    """返回带挂载点级状态的结构化证据明细。
+    """返回可直接被报表消费的结构化证据明细。
 
-    ``normalized_value``/``raw_value`` 仍由 ``max_pct`` 派生，继续承担
-    指标级聚合和阈值判定；每条明细额外保存自身状态，供报表直接读取。
+    文件系统指标保存挂载点级状态；系统负载指标保存 1/5/15 分钟窗口、
+    CPU 核数和对应判定。``normalized_value``/``raw_value`` 仍保持旧的
+    1 分钟负载兼容语义。
     """
+    if metric_id == "local.cpu.load_1m":
+        rows: List[Dict[str, Any]] = []
+        for window, key in (("1 分钟", "load_1m"), ("5 分钟", "load_5m"), ("15 分钟", "load_15m")):
+            decision = _cpu_load_detail_decision(parsed[key], parsed, resolved, profile)
+            rows.append(
+                {
+                    "window": window,
+                    "load": float(parsed[key]),
+                    "cpu_cores": parsed["nproc"],
+                    "status": decision["status"],
+                    "judgement": decision["judgement"],
+                }
+            )
+        return rows
     if metric_id not in {
         "local.filesystem.used_percent",
         "local.filesystem.inode_used_percent",
@@ -1711,11 +1750,28 @@ def _validate_evidence(evidence: Any, where: str) -> None:
         for index, detail in enumerate(details):
             detail_where = f"{where}.details[{index}]"
             if not isinstance(detail, dict):
-                _fail(detail_where, "挂载点明细必须为对象")
+                _fail(detail_where, "证据明细必须为对象")
             detail_keys = set(detail)
+            if {"window", "load", "cpu_cores", "status", "judgement"}.issubset(detail_keys):
+                required_detail_keys = {"window", "load", "cpu_cores", "status", "judgement"}
+                if detail_keys != required_detail_keys:
+                    _fail(detail_where, "系统负载明细键集不符")
+                if not isinstance(detail["window"], str) or not detail["window"]:
+                    _fail(detail_where, "window 必须为非空字符串")
+                load = detail["load"]
+                if isinstance(load, bool) or not isinstance(load, (int, float)) or load < 0:
+                    _fail(detail_where, "load 必须为非负数值")
+                cores = detail["cpu_cores"]
+                if cores is not None and (isinstance(cores, bool) or not isinstance(cores, int) or cores < 1):
+                    _fail(detail_where, "cpu_cores 必须为正整数或 null")
+                if detail["status"] not in STATUSES:
+                    _fail(detail_where, "status 必须为 OK/WARN/CRIT/UNKNOWN")
+                if not isinstance(detail["judgement"], str) or not detail["judgement"]:
+                    _fail(detail_where, "judgement 必须为非空字符串")
+                continue
             required_detail_keys = {"filesystem", "mount", "used_percent"}
             if not required_detail_keys.issubset(detail_keys) or detail_keys - required_detail_keys - {"status"}:
-                _fail(detail_where, "挂载点明细键集不符")
+                _fail(detail_where, "证据明细键集不符")
             if not isinstance(detail["filesystem"], str) or not detail["filesystem"]:
                 _fail(detail_where, "filesystem 必须为非空字符串")
             if not isinstance(detail["mount"], str) or not detail["mount"]:

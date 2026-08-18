@@ -121,7 +121,7 @@ METRICS = [
         "command": "cat /proc/loadavg；nproc（或 /proc/cpuinfo 核数）",
         "timeout_sec": 10,
         "parser": "parse_cpu_load_1m",
-        "unit": "数值（相对核数，无量纲）",
+        "unit": "1分钟系统负载（数值）",
         "source_anchor": (
             "9 份巡检手册 P0 CPU 行正常标准“load_1m 不持续高于 CPU 核数”"
             "（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8）；"

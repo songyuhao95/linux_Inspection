@@ -421,6 +421,21 @@ class TestJudgment:
         metric = normalize_one("local.cpu.load_1m", raw("node-a", "local.cpu.load_1m"))
         assert metric["status"] == "OK"
 
+    def test_load_fact_contains_all_windows_and_judgements(self):
+        metric = normalize_one("local.cpu.load_1m", raw("node-a", "local.cpu.load_1m"))
+        details = metric["evidence"]["details"]
+        assert [d["window"] for d in details] == ["1 分钟", "5 分钟", "15 分钟"]
+        assert [d["load"] for d in details] == [0.52, 0.44, 0.39]
+        assert all(d["cpu_cores"] == 8 for d in details)
+        assert all(d["status"] == "OK" for d in details)
+        assert all(d["judgement"] == "负载 <= CPU 核数：正常" for d in details)
+        doc = n.normalize_host_result(
+            host_result("node-a", [metric_result("local.cpu.load_1m", raw("node-a", "local.cpu.load_1m"))]),
+            run_id=RUN_ID,
+            collected_at=COLLECTED,
+        )
+        n.validate_host_result(doc)
+
     def test_judge_load_unknown_over_nproc(self):
         # 持续>核数 → 告警等级缺失（基线 UNKNOWN 注记）→ UNKNOWN
         metric = normalize_one("local.cpu.load_1m", "9.5 9.1 8.9 1/210 12345\n8\n")
@@ -901,6 +916,12 @@ class TestStructure:
                 assert len(metric["evidence"]["details"]) == 2
                 assert all(
                     set(detail) == {"filesystem", "mount", "used_percent", "status"}
+                    for detail in metric["evidence"]["details"]
+                )
+            elif metric["metric_id"] == "local.cpu.load_1m":
+                assert [d["window"] for d in metric["evidence"]["details"]] == ["1 分钟", "5 分钟", "15 分钟"]
+                assert all(
+                    set(detail) == {"window", "load", "cpu_cores", "status", "judgement"}
                     for detail in metric["evidence"]["details"]
                 )
             else:

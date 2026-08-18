@@ -153,6 +153,39 @@ class TestMetricValueOutput:
         assert "Swap 使用率: 0.00 %" in out
         assert "local.swap.used_percent" not in out
 
+    def test_load_metrics_render_three_windows_from_json_details(self):
+        doc = valid_doc()
+        metric = copy.deepcopy(doc["metrics"][0])
+        metric.update(
+            {
+                "metric_id": "local.cpu.load_1m",
+                "name": "系统负载",
+                "status": "OK",
+                "raw_value": "0.52",
+                "normalized_value": 0.52,
+                "unit": "1分钟系统负载（数值）",
+                "error": None,
+            }
+        )
+        metric["evidence"] = {
+            "command": "cat /proc/loadavg; nproc",
+            "output_summary": "load_1m=0.52 load_5m=0.44 load_15m=0.39 nproc=8",
+            "raw_ref": "raw/local.cpu.load_1m.out",
+            "sampled_at": doc["collected_at"],
+            "details": [
+                {"window": "1 分钟", "load": 0.52, "cpu_cores": 8, "status": "OK", "judgement": "负载 <= CPU 核数：正常"},
+                {"window": "5 分钟", "load": 0.44, "cpu_cores": 8, "status": "OK", "judgement": "负载 <= CPU 核数：正常"},
+                {"window": "15 分钟", "load": 0.39, "cpu_cores": 8, "status": "OK", "judgement": "负载 <= CPU 核数：正常"},
+            ],
+        }
+        doc["metrics"] = [metric]
+        n.validate_host_result(doc)
+        out = render(doc)
+        assert "1 分钟系统负载：0.52，负载 <= CPU 核数：正常" in out
+        assert "5 分钟系统负载：0.44，负载 <= CPU 核数：正常" in out
+        assert "15 分钟系统负载：0.39，负载 <= CPU 核数：正常" in out
+        assert "相对核数，无量纲" not in out
+
     def test_filesystem_metrics_render_each_mount_from_json_details(self):
         doc = valid_doc()
         template = copy.deepcopy(doc["metrics"][0])

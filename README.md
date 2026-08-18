@@ -55,7 +55,7 @@
 - `local.filesystem.inode_used_percent`：所有文件系统挂载点的 inode 使用率，结构与磁盘使用率相同；挂载点级状态与指标整体状态分别保存，整体状态仍按最大使用率聚合；
 - `local.memory.available_percent`：可用内存百分比；
 - `local.cpu.utilization`：`top -bn2 -d 1` 的一秒窗口 CPU 使用率；
-- `local.cpu.load_1m`：1 分钟系统负载与 CPU 核数；
+- `local.cpu.load_1m`：从同一份 `/proc/loadavg` 事实读取 1 分钟、5 分钟、15 分钟系统负载，并与 CPU 核数比较；stdout 逐行显示“负载 <= CPU 核数：正常”，JSON `evidence.details` 保存三个窗口及判定；metric 级兼容值仍为 1 分钟负载；
 - `local.swap.used_percent`：Swap 使用率。
 
 这组指标不依赖中间件 profile，在 `--local` 和远程 `-H/--hosts` 模式都复用同一套
@@ -65,7 +65,7 @@
 ## 终端指标输出
 
 终端报表读取已经落盘的 `host-result-v1` JSON，在每台主机摘要后输出已执行指标的
-中文字段名、状态、规范化值和单位，例如 `CPU 使用率: 12.34 %`。失败或未选择的
+中文字段名、状态、规范化值和单位，例如 `CPU 使用率: 12.34 %` 或 `1 分钟系统负载：0.52，负载 <= CPU 核数：正常`。失败或未选择的
 指标不伪造数值，仍在失败/未知列表中展示原因。
 
 ## 远程主机配置

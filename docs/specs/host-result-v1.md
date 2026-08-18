@@ -111,7 +111,7 @@
 | normalized_value | 否 | 规范化数值（统一单位、可比较）；无法规范化时 null |
 | unit | 是 | 单位 |
 | threshold | 是 | 阈值层 + 规则 ID + 判定值 + 来源锚点；UNKNOWN 时 value 可为 null 并注明原因（missing/conflict） |
-| evidence | 是 | 命令、输出摘要、原始输出引用、采样时间；文件系统指标可选 `details` 数组，逐挂载点保存 `filesystem`、`mount`、`used_percent` 和可选 `status`；新事实源写入挂载点级状态，旧事实源缺少该字段时展示层回退到指标整体状态 |
+| evidence | 是 | 命令、输出摘要、原始输出引用、采样时间；文件系统指标可选 `details` 数组，逐挂载点保存 `filesystem`、`mount`、`used_percent` 和可选 `status`；`local.cpu.load_1m` 可选 `details` 数组，保存 `window`、`load`、`cpu_cores`、`status`、`judgement`，覆盖 1/5/15 分钟负载；旧事实源缺少该字段时展示层回退到指标整体状态 |
 | error | 否 | 技术错误（error_code + message）；仅执行失败时非空 |
 | provenance | 是 | 配置来源、文档来源、解释性备注（含冲突/缺失说明） |
 
@@ -241,3 +241,5 @@ error code 枚举（首版）：`CONNECTION_FAILED`、`TIMEOUT`、`PERMISSION_DE
 - 状态颜色/排序约定见 docs/specs/reporting-roadmap.md。
 
 > 说明：文件系统指标的 metric 级 `status`、`raw_value` 和 `normalized_value` 仍按所有挂载点中的最大使用率聚合，用于主机摘要和阈值判定；`evidence.details[].status` 仅表示对应挂载点自身状态，报表不得把整体状态复制到每个挂载点。
+>
+> 系统负载指标的 metric 级 `status`、`raw_value` 和 `normalized_value` 保持 `load_1m` 兼容语义；`evidence.details[]` 额外保存 5 分钟和 15 分钟窗口，stdout 从事实源逐行输出“`1 分钟系统负载：值，负载 <= CPU 核数：正常`”格式，不在渲染层重新采集或判定。

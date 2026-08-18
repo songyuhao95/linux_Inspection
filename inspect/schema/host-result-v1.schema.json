@@ -89,15 +89,31 @@
         "details": {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["filesystem", "mount", "used_percent"],
-            "properties": {
-              "filesystem": { "type": "string", "minLength": 1 },
-              "mount": { "type": "string", "minLength": 1 },
-              "used_percent": { "type": "number", "minimum": 0, "maximum": 100 },
-              "status": { "enum": ["OK", "WARN", "CRIT", "UNKNOWN"] }
-            }
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["filesystem", "mount", "used_percent"],
+                "properties": {
+                  "filesystem": { "type": "string", "minLength": 1 },
+                  "mount": { "type": "string", "minLength": 1 },
+                  "used_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+                  "status": { "enum": ["OK", "WARN", "CRIT", "UNKNOWN"] }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["window", "load", "cpu_cores", "status", "judgement"],
+                "properties": {
+                  "window": { "type": "string", "minLength": 1 },
+                  "load": { "type": "number", "minimum": 0 },
+                  "cpu_cores": { "type": ["integer", "null"], "minimum": 1 },
+                  "status": { "enum": ["OK", "WARN", "CRIT", "UNKNOWN"] },
+                  "judgement": { "type": "string", "minLength": 1 }
+                }
+              }
+            ]
           }
         }
       }

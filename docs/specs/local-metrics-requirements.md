@@ -118,16 +118,16 @@
 | 字段 | 内容 |
 | --- | --- |
 | 数据源 | `/proc/loadavg` 或 `uptime`（load_1m/5m/15m）+ CPU 核数（`nproc` 或 `/proc/cpuinfo`） |
-| 计算/采样 | load_1m 相对核数；"不持续高于核数"需至少两次采样（间隔 ≥60s）确认持续性 |
-| 单位 | 数值（相对核数，无量纲） |
+| 计算/采样 | 同时采集 load_1m、load_5m、load_15m；每个窗口均与 CPU 核数比较。"不持续高于核数"需至少两次采样（间隔 ≥60s）确认持续性 |
+| 单位 | 1/5/15 分钟系统负载数值；判定描述为“负载 <= CPU 核数：正常” |
 | 来源锚点 | 9 份巡检手册 P0 CPU 行正常标准"load_1m 不持续高于 CPU 核数"（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8） |
-| 阈值层 | 文档基线：load_1m ≤ 核数 → OK；> 核数且持续：文档仅要求"排查/关注"，**未定义告警等级**（缺失边界）→ 默认 UNKNOWN，外部配置可覆盖 |
+| 阈值层 | 文档基线：每个负载窗口 ≤ 核数 → OK；> 核数且持续：文档仅要求"排查/关注"，**未定义告警等级**（缺失边界）→ 默认 UNKNOWN，外部配置可覆盖；metric 级兼容状态仍以 load_1m 为准 |
 | 适用条件 | 全部产品；核数无法获取 → 判据不可用 → UNKNOWN |
 | 权限/能力失败 | /proc 不可读 → UNKNOWN |
 | 超时 | 10s |
-| 证据 | loadavg 原始值、核数 |
+| 证据 | load_1m/load_5m/load_15m 原始值、CPU 核数及每个窗口的 status/judgement |
 | 脱敏 | 无 |
-| 文档基线 | load_1m ≤ 核数 → OK；持续 > 核数 → 等级缺失 → UNKNOWN（建议外部配置：如持续 > 核数 → WARN） |
+| 文档基线 | 每个负载窗口 ≤ 核数 → OK，并显示“负载 <= CPU 核数：正常”；持续 > 核数 → 等级缺失 → UNKNOWN（建议外部配置：如持续 > 核数 → WARN）。metric 级兼容状态仍以 load_1m 为准。 |
 
 ### 5.6 local.memory.available_percent — 可用内存百分比
 
