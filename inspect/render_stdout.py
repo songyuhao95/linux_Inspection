@@ -453,10 +453,16 @@ def render_metric_values(
         }:
             detail_lines = _filesystem_detail_lines(metric)
         if detail_lines:
-            lines.extend(
-                f"    {badge(detail_status, color=color, stream=stream)} {name}: {detail}"
-                for detail_status, detail in detail_lines
-            )
+            if metric.get("metric_id") == "local.cpu.load_1m":
+                lines.extend(
+                    f"    {badge(detail_status, color=color, stream=stream)} {detail}"
+                    for detail_status, detail in detail_lines
+                )
+            else:
+                lines.extend(
+                    f"    {badge(detail_status, color=color, stream=stream)} {name}: {detail}"
+                    for detail_status, detail in detail_lines
+                )
         else:
             lines.append(
                 f"    {badge(status, color=color, stream=stream)} {name}: "

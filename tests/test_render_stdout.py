@@ -184,6 +184,7 @@ class TestMetricValueOutput:
         assert "1 分钟系统负载：0.52，负载 <= CPU 核数：正常" in out
         assert "5 分钟系统负载：0.44，负载 <= CPU 核数：正常" in out
         assert "15 分钟系统负载：0.39，负载 <= CPU 核数：正常" in out
+        assert "系统负载: 1 分钟系统负载" not in out
         assert "相对核数，无量纲" not in out
 
     def test_filesystem_metrics_render_each_mount_from_json_details(self):
