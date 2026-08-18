@@ -409,17 +409,41 @@ def _cpu_load_detail_lines(metric: Mapping[str, Any]) -> Optional[List[tuple[str
             continue
         window = str(detail.get("window") or "系统负载")
         load = detail.get("load")
-        if isinstance(load, (int, float)) and not isinstance(load, bool):
-            value = f"{float(load):.2f}"
+        load_number = (
+            float(load)
+            if isinstance(load, (int, float)) and not isinstance(load, bool)
+            else None
+        )
+        value = f"{load_number:.2f}" if load_number is not None else "-"
+        cpu_cores = detail.get("cpu_cores")
+        cpu_cores_number = (
+            float(cpu_cores)
+            if isinstance(cpu_cores, (int, float)) and not isinstance(cpu_cores, bool)
+            else None
+        )
+        if cpu_cores_number is None:
+            cpu_cores_text = "-"
+        elif cpu_cores_number.is_integer():
+            cpu_cores_text = str(int(cpu_cores_number))
         else:
-            value = "-"
+            cpu_cores_text = f"{cpu_cores_number:.2f}"
         detail_status = detail.get("status")
         if detail_status not in STATUSES:
             detail_status = metric_status
+        ratio = None
+        if load_number is not None and cpu_cores_number is not None and cpu_cores_number > 0:
+            ratio = load_number / cpu_cores_number
+        if ratio is None:
+            ratio_text = "负载/核数=无法计算"
+        elif detail_status == STATUS_OK:
+            ratio_text = f"负载/核数<={ratio:.2f}"
+        else:
+            ratio_text = f"负载/核数={ratio:.2f}"
+        explanation = f"（{window.replace(' ', '').replace('　', '')}，CPU核数={cpu_cores_text}，{ratio_text}"
         judgement = str(detail.get("judgement") or "")
-        text = f"{window}系统负载：{value}"
-        if judgement:
-            text += f"，{judgement}"
+        if detail_status != STATUS_OK and judgement:
+            explanation += f"；{judgement}"
+        text = f"{window}系统负载：{value}{explanation}）"
         lines.append((str(detail_status), text))
     return lines
 

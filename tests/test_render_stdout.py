@@ -181,11 +181,46 @@ class TestMetricValueOutput:
         doc["metrics"] = [metric]
         n.validate_host_result(doc)
         out = render(doc)
-        assert "1 分钟系统负载：0.52，负载 <= CPU 核数：正常" in out
-        assert "5 分钟系统负载：0.44，负载 <= CPU 核数：正常" in out
-        assert "15 分钟系统负载：0.39，负载 <= CPU 核数：正常" in out
+        assert "1 分钟系统负载：0.52（1分钟，CPU核数=8，负载/核数<=0.07）" in out
+        assert "5 分钟系统负载：0.44（5分钟，CPU核数=8，负载/核数<=0.06）" in out
+        assert "15 分钟系统负载：0.39（15分钟，CPU核数=8，负载/核数<=0.05）" in out
         assert "系统负载: 1 分钟系统负载" not in out
+        assert "负载 <= CPU 核数：正常" not in out
         assert "相对核数，无量纲" not in out
+
+    def test_load_unknown_window_keeps_status_and_explains_ratio(self):
+        doc = valid_doc()
+        metric = copy.deepcopy(doc["metrics"][0])
+        metric.update(
+            {
+                "metric_id": "local.cpu.load_1m",
+                "name": "系统负载",
+                "status": "UNKNOWN",
+                "raw_value": "8.50",
+                "normalized_value": 8.5,
+                "unit": "1分钟系统负载（数值）",
+                "error": None,
+            }
+        )
+        metric["evidence"] = {
+            "command": "cat /proc/loadavg; nproc",
+            "output_summary": "load_1m=8.50 load_5m=0.44 load_15m=0.39 nproc=8",
+            "raw_ref": "raw/local.cpu.load_1m.out",
+            "sampled_at": doc["collected_at"],
+            "details": [
+                {
+                    "window": "1 分钟",
+                    "load": 8.50,
+                    "cpu_cores": 8,
+                    "status": "UNKNOWN",
+                    "judgement": "负载 > CPU 核数：告警等级未定义，暂为 UNKNOWN",
+                },
+            ],
+        }
+        doc["metrics"] = [metric]
+        n.validate_host_result(doc)
+        out = render(doc)
+        assert "[UNKN] 1 分钟系统负载：8.50（1分钟，CPU核数=8，负载/核数=1.06；负载 > CPU 核数：告警等级未定义，暂为 UNKNOWN）" in out
 
     def test_filesystem_metrics_render_each_mount_from_json_details(self):
         doc = valid_doc()

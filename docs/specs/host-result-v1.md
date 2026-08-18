@@ -242,4 +242,4 @@ error code 枚举（首版）：`CONNECTION_FAILED`、`TIMEOUT`、`PERMISSION_DE
 
 > 说明：文件系统指标的 metric 级 `status`、`raw_value` 和 `normalized_value` 仍按所有挂载点中的最大使用率聚合，用于主机摘要和阈值判定；`evidence.details[].status` 仅表示对应挂载点自身状态，报表不得把整体状态复制到每个挂载点。
 >
-> 系统负载指标的 metric 级 `status`、`raw_value` 和 `normalized_value` 保持 `load_1m` 兼容语义；`evidence.details[]` 额外保存 5 分钟和 15 分钟窗口，stdout 从事实源逐行输出“`1 分钟系统负载：值，负载 <= CPU 核数：正常`”格式，不在渲染层重新采集或判定。
+> 系统负载指标的 metric 级 `status`、`raw_value` 和 `normalized_value` 保持 `load_1m` 兼容语义；`evidence.details[]` 额外保存 5 分钟和 15 分钟窗口，stdout 从事实源逐行输出“`1 分钟系统负载：值（1分钟，CPU核数=N，负载/核数<=比值）`”格式；比值由渲染层使用 `load/cpu_cores` 计算并保留两位小数，不重新采集或改变 JSON 中的状态判定。
