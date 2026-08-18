@@ -1260,6 +1260,7 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
         argv = dedicated_runtime.ansible_playbook_argv(raw_argv[1:])
         env = dedicated_runtime.ansible_environment(os.environ)
         env["ANSIBLE_STDOUT_CALLBACK"] = ANSIBLE_STDOUT_CALLBACK
+        env["ANSIBLE_CALLBACK_PLUGINS"] = str(Path(__file__).resolve().parent / "callback_plugins")
         env["ANSIBLE_RETRY_FILES_ENABLED"] = "False"
         for secret_name in ("ANSIBLE_PASSWORD", "ANSIBLE_NET_PASSWORD", "SSHPASS"):
             env.pop(secret_name, None)

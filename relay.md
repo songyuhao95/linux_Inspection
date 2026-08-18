@@ -535,3 +535,18 @@ Fix in contract T-111:
 4. Re-run local focused tests and the authorized Kylin VM smoke test after publishing to `origin/main`.
 
 This incident was an artifact-verification failure only. It was not fixed by changing the manifest alone: the materializer and resolver now share the same canonical hash algorithm.
+
+
+## 17. T-112 structured callback follow-up (2026-08-18)
+
+After T-111 was published, the authorized Kylin smoke advanced past runtime hash verification and exposed the next independent control-plane failure:
+
+```text
+Ansible returned no structured callback; category=callback_empty; check=verify ANSIBLE_STDOUT_CALLBACK=json and process diagnostics; return_code=1
+```
+
+The bundled ansible-core 2.18.9 callback inventory contains `default`, `junit`, `minimal`, `oneline`, and `tree`, but no `json` stdout callback. The runner had required `ANSIBLE_STDOUT_CALLBACK=json` and rejected default human-readable output, so this was a missing project callback artifact rather than a system-Ansible selection issue.
+
+T-112 adds `inspect/callback_plugins/json.py`, a project-local stdout callback that emits only the bounded `plays`/`tasks`/`hosts`/`stats` shape consumed by `inspect/ansible_runner.py`. The runner explicitly sets `ANSIBLE_CALLBACK_PLUGINS` to that project directory after `runtime.ansible_environment()` removes inherited callback paths. It does not install packages, consult system Ansible, or emit credentials.
+
+The next authorized VM smoke must verify this callback reaches a structured result and then report the resulting inspection status separately from the artifact/control-plane status. No business success is claimed until that smoke completes.
