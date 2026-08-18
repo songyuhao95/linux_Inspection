@@ -11,7 +11,7 @@ requires-python = ">=3.12,<3.13"
 # （technical-design §3 目录布局）；本文件仅承载包元数据与 pytest 配置。
 
 [tool.setuptools]
-packages = ["inspect"]
+packages = ["inspect", "inspect.modules"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

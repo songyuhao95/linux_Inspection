@@ -15,7 +15,9 @@ def test_wrapper_static_contract():
     assert "runtime/bin/python3.12" in source
     assert "3.12" in source
     assert "INSPECT_ENABLE_REAL=1" in source
-    assert "INSPECT_ENABLE_LOCAL_REAL=1" in source
+    assert "INSPECT_ENABLE_LOCAL_REAL=1" not in source
+    assert "--local uses the direct project-local collector" in source
+    assert "Remote -H/--hosts and -i/--inventory use the bundled Ansible runtime" in source
     assert "trap cleanup EXIT" in source
     assert "trap 'exit 129' HUP" in source
     assert "trap 'exit 130' INT" in source

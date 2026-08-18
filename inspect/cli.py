@@ -24,6 +24,7 @@ from inspect import ansible_runner as runner_mod
 from inspect import config as config_mod
 from inspect import fact_source as fact_source_mod
 from inspect import inventory as inventory_mod
+from inspect import local_runner
 from inspect import metrics as metrics_registry
 from inspect import normalize as normalize_mod
 from inspect import render_html as html_mod
@@ -75,6 +76,11 @@ _HELP_EPILOG = """主机选择示例:
 事实源与报表输出:
   每主机生成 out/<inspection-id>/hosts/<host>.json（host-result-v1，原子写）；
   --excel/--html 生成 Excel 与离线单文件 HTML 报表（路径由 --xlsx-out/--html-out 覆盖）。
+
+执行路径:
+  --local 直接执行本机只读探测/指标命令，不调用 Ansible；
+  -H/--hosts 或 -i/--inventory 使用项目内打包的 Ansible；
+  INSPECT_FIXTURE_DIR 为两种模式共用的零连接调试路径。
 
 退出码: 0 成功 / 2 用法错误 / 10 执行失败 / 20 业务告警(--fail-on critical)
 
@@ -225,8 +231,9 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
       2. 主机选择解析（inventory.py；-H/-i/--limit/--all，用法错误 2 / 执行失败 10）；
       3. 指标命令规格（10 个共同 P0；无产品 profile → 需 profile 的 6 个
          指标 UNSUPPORTED_PROFILE → UNKNOWN，MR §5）；
-      4. 执行（ansible_runner；INSPECT_FIXTURE_DIR 调试注入零连接；未设置 →
-         ExecutionNotReadyError 10，G0 预检前置，TD §10）；
+      4. 执行：--local 走 local_runner 直接执行本机 shell，完全不调用
+         Ansible；-H/--hosts 与 -i/--inventory 走 ansible_runner 的项目内
+         Ansible；INSPECT_FIXTURE_DIR 两种模式均为零连接调试路径；
       5. normalize（host-result-v1 文档 + 主机错误明细）；
       6. 原子写事实源（fact_source；inspection_id 唯一，重跑不覆盖，TD §11）；
       7. 报表渲染只消费 JSON（RR §1）：stdout 摘要（读事实源）→ Excel
@@ -250,10 +257,16 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     specs = runner_mod.build_metric_command_specs()
     fixture_dir = os.environ.get(runner_mod.FIXTURE_ENV_VAR)
     try:
-        run_result = runner_mod.run(
-            host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir
-        )
+        if host_selection.kind == "local":
+            run_result = local_runner.run_local(
+                host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir
+            )
+        else:
+            run_result = runner_mod.run(
+                host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir
+            )
     except (
+        local_runner.LocalExecutionError,
         runner_mod.ExecutionNotReadyError,
         runner_mod.RealExecutionError,
         runner_mod.FixtureError,

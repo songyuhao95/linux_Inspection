@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from inspect import metrics as metrics_registry
 from inspect import probe as probe_mod
+from inspect.modules import default_registry
 
 try:
     from inspect import runtime as runtime_contract
@@ -390,7 +391,7 @@ def build_metric_command_specs(
     - 所需命令取自 probe.metric_required_commands（TD §5.2 数据源列）。
     """
     if metrics is None:
-        metrics = list(metrics_registry.iter_metrics())
+        metrics = default_registry().metric_definitions()
     profile = profile or {}
     specs: List[CommandSpec] = []
     for m in metrics:

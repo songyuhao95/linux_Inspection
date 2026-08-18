@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Guarded wrapper for one inspect child process.
 #
-# Real and fixture execution are fail-closed: every mode uses the project-local
-# runtime/bin/python3.12 interpreter. Ansible is launched by that interpreter in
-# real mode; fixture/query modes never contact a host.
+# Every mode uses the project-local runtime/bin/python3.12 interpreter.
+# --local executes the direct collector; remote real mode launches the bundled
+# Ansible runtime; fixture/query modes never contact a host.
 set -u
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -71,11 +71,14 @@ if ! "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12)
   exit 10
 fi
 if [ -z "$fixture_mode" ] && [ "$is_query" -eq 0 ]; then
-  # Internal non-secret gates are scoped to this process and its child only.
-  export INSPECT_ENABLE_REAL=1
   if [ "$is_local" -eq 1 ]; then
-    export INSPECT_ENABLE_LOCAL_REAL=1
-    unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
+    # --local uses the direct project-local collector; it must never enter
+    # the Ansible gate, even when a caller inherited real-execution variables.
+    unset INSPECT_ENABLE_REAL INSPECT_ENABLE_LOCAL_REAL INSPECT_REMOTE_USER INSPECT_ASK_PASS
+  else
+    # Remote -H/--hosts and -i/--inventory use the bundled Ansible runtime.
+    # The gate is scoped to this process and contains no credential value.
+    export INSPECT_ENABLE_REAL=1
   fi
 else
   # Fixture and query modes must not inherit a real-execution gate.

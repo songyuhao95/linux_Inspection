@@ -577,3 +577,17 @@ control execution: executed=4, failed=6
 ```
 
 The six UNKNOWN results were explicit `UNSUPPORTED_PROFILE` cases caused by absent local profile values; they are not evidence of a callback or dedicated-runtime failure. This confirms the project-local Python 3.12 runtime, bundled ansible-core 2.18.9, canonical Ansible bundle hash, project-local JSON callback, and fail-closed reporting path are all active on `kylin01`. It does not claim that the host has no business issues or that all metrics are configured.
+
+## 19. T-113 模块化监控与本地直采（2026-08-18）
+
+用户确认按模块化方向改造，并明确：`--local` 只用于本机测试/排查，不应经过 Ansible；只有 `-H/--hosts` 或 `-i/--inventory` 远程模式才使用项目内打包的 Ansible。
+
+本次实现结果：
+
+- 新增 `inspect/modules/` 显式模块注册表，当前注册 `linux_common`，执行器通过注册表取得指标定义；未来中间件适配器需实现 `MonitorModule` 并显式注册，不能把任意 `.sh`/`.py` 文件静默当成可执行模块。
+- 新增 `inspect/local_runner.py`：本地模式直接使用项目内 Python 启动本机 bash，复用能力探测、命令 allow-list、超时和结果分类；不生成 playbook、不生成 Ansible 执行计划、不调用 `ansible-playbook`。
+- `inspect/cli.py` 按主机选择分流：`kind=local` 使用 local runner；`kind=hosts/inventory` 继续使用 `inspect/ansible_runner.py`，由其解析并启动项目内 Ansible。
+- `inspect.sh` 在本地模式明确清除 Ansible 真实执行门禁；远程模式才设置当前子进程的 Ansible 门禁。密码环境变量继续清除，未扩大远程目标范围。
+- fixture 模式仍是零连接路径，适用于单元测试和回归验证。
+
+验收边界：本地运行成功表示本机采集链路可执行，不等于任意中间件 profile 已配置；没有 profile 的指标仍按既有契约显示 `UNKNOWN/UNSUPPORTED_PROFILE`，不得伪造业务结论。
