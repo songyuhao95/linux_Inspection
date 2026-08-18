@@ -3,7 +3,7 @@
 - 文档 ID：runbook
 - 适用：local 垂直切片（10 个共同 P0 指标）CLI 的本地调试与兼容矩阵（TD §9）执行
 - 数据流（TD §2，单向）：`采集 → normalize → 原子写 JSON → 报表`；报表只消费 JSON（RR §1）
-- 说明：本手册不包含任何需要连接目标主机或修改受控端的操作；fixture 模式零连接（TD §10.2/REQ-N-08）
+- 说明：本手册的本地/fixture 章节不连接目标主机；远程 inventory 章节只描述项目 allow-list 内的只读执行（TD §10.2/REQ-N-08）
 
 ## 1. 快速开始
 
@@ -64,7 +64,29 @@ bash inspect.sh -i tests/fixtures/inventory/hosts.yml --all
 `tests/fixtures/cli/hosts.yml` 为 YAML 格式样例：inventory 层只解析严格 INI
 子集，YAML 文件会明确报 `inventory 解析失败`（退出码 10，不静默跳过）。
 
-### 2.4 单元级与 e2e
+### 2.4 项目 inventory 远程调试
+
+`inventory/hosts.ini` 是仓库内跟踪的脱敏注释模板。真实测试前，在目标控制端
+本地编辑并取消注释主机组和认证变量；真实密码只保存在本地权限为 `600` 的文件中，
+不得提交或写入事件、JSON、报表和命令行。也可以使用被忽略的
+`inventory/hosts.local.ini`，然后通过 `-i` 显式指定。
+
+```bash
+vi inventory/hosts.ini
+chmod 600 inventory/hosts.ini
+bash inspect.sh -H inspection
+bash inspect.sh -H <host-or-ip-list>
+
+# 私有副本方式
+cp inventory/hosts.ini inventory/hosts.local.ini
+chmod 600 inventory/hosts.local.ini
+bash inspect.sh -i inventory/hosts.local.ini -H inspection
+```
+
+`--local` 不调用 Ansible；只有 `-H`/`-i` 远程模式使用项目内 Python 3.12 和 bundled
+Ansible。无默认 inventory 时才保留旧的环境变量兼容路径。
+
+### 2.5 单元级与 e2e
 
 ```bash
 python -m pytest tests/test_render_stdout.py -q   # 解析器/渲染对夹具断言

@@ -277,6 +277,77 @@ def test_resolve_hosts_selection(tmp_path):
     assert sel.inventory_file.parent == tmp_path
 
 
+
+def test_resolve_hosts_selection_comment_only_default_falls_back(tmp_path, monkeypatch):
+    public_inventory = tmp_path / "hosts.ini"
+    public_inventory.write_text(
+        "# 仅用于公开格式演示\n"
+        "# [inspection]\n"
+        "# node-01 ansible_host=192.0.2.10\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(inv, "default_inventory_path", lambda: public_inventory)
+    monkeypatch.setattr(
+        inv, "local_inventory_path", lambda: tmp_path / "hosts.local.ini"
+    )
+
+    runtime_dir = tmp_path / "runtime"
+    sel = inv.resolve_host_selection(
+        {"kind": "hosts", "hosts": ["192.0.2.10"]}, runtime_dir=runtime_dir
+    )
+
+    assert sel.kind == "hosts"
+    assert sel.inventory_file.parent == runtime_dir
+    assert [h.ip for h in sel.hosts] == ["192.0.2.10"]
+
+
+def test_resolve_hosts_selection_prefers_valid_local_inventory_over_template(
+    tmp_path, monkeypatch
+):
+    public_inventory = tmp_path / "hosts.ini"
+    public_inventory.write_text("# public template\n", encoding="utf-8")
+    local_inventory = tmp_path / "hosts.local.ini"
+    local_inventory.write_text(
+        "[inspection]\n"
+        "node-01 ansible_host=192.0.2.10\n"
+        "node-02 ansible_host=192.0.2.11\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(inv, "default_inventory_path", lambda: public_inventory)
+    monkeypatch.setattr(inv, "local_inventory_path", lambda: local_inventory)
+
+    sel = inv.resolve_host_selection(
+        {"kind": "hosts", "hosts": ["inspection"]}, runtime_dir=tmp_path / "runtime"
+    )
+
+    assert sel.kind == "inventory"
+    assert sel.inventory_file == local_inventory
+    assert sel.limit == "node-01,node-02"
+    assert [h.name for h in sel.hosts] == ["node-01", "node-02"]
+
+
+def test_resolve_hosts_selection_uses_valid_public_inventory_without_local(
+    tmp_path, monkeypatch
+):
+    public_inventory = tmp_path / "hosts.ini"
+    public_inventory.write_text(
+        "[inspection]\nnode-01 ansible_host=192.0.2.10\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(inv, "default_inventory_path", lambda: public_inventory)
+    monkeypatch.setattr(
+        inv, "local_inventory_path", lambda: tmp_path / "hosts.local.ini"
+    )
+
+    sel = inv.resolve_host_selection(
+        {"kind": "hosts", "hosts": ["192.0.2.10"]}, runtime_dir=tmp_path / "runtime"
+    )
+
+    assert sel.kind == "inventory"
+    assert sel.inventory_file == public_inventory
+    assert sel.limit == "node-01"
+    assert [(h.name, h.ip) for h in sel.hosts] == [("node-01", "192.0.2.10")]
+
 def test_resolve_hosts_selection_reuses_default_inventory_for_group_or_ip(
     tmp_path, monkeypatch
 ):
@@ -309,7 +380,6 @@ def test_resolve_hosts_selection_reuses_default_inventory_for_group_or_ip(
     assert by_ip.kind == "inventory"
     assert by_ip.limit == "node-02"
     assert [h.name for h in by_ip.hosts] == ["node-02"]
-
 
 def test_resolve_hosts_selection_empty_usage_error(tmp_path):
     with pytest.raises(inv.InventoryError) as ei:

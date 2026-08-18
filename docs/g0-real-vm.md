@@ -6,7 +6,7 @@
 
 - `node01`：`192.168.0.10`
 - `kylin01`：`192.168.0.101`
-- 远程账号：通过 `INSPECT_REMOTE_USER` 指定
+- 远程账号和认证：由项目 `inventory/hosts.ini` 的本地配置提供
 
 除上述两台主机外，不应把本说明中的真实执行门禁用于其他地址。该路径只执行项目 allow-list 中的只读命令，不执行安装、删除、停止服务、写入配置或修改业务数据的操作。
 
@@ -35,31 +35,27 @@ PYTHONNOUSERSITE=1 PYTHONPATH=runtime/ansible/site-packages \
 
 对于“在 VM 自身运行脚本”的单独部署流程，不使用 Windows/WSL 作为 Ansible 控制端。每台 VM 先部署到 `/data/inspect`，确认项目内 `runtime/bin/python3.12` 与 bundled Ansible 已通过哈希和导入校验，然后以本机作为控制端运行 `--local`。不得安装或选择系统 Ansible；该流程需要额外的 `INSPECT_ENABLE_LOCAL_REAL=1` 门禁，详见 [local-vm-deploy.md](local-vm-deploy.md)。
 
-只有明确设置 `INSPECT_ENABLE_REAL=1` 才会进入真实 Ansible 分支；远程分支还会拒绝非 `192.168.0.10` / `192.168.0.101` 的目标，并要求显式设置远程账号。本机 local 分支必须同时设置 `INSPECT_ENABLE_LOCAL_REAL=1`，且只接受生成的 `localhost ansible_connection=local` inventory；它不接受远程账号或 `INSPECT_ASK_PASS`。
+真实远程分支使用项目 runtime 和有效的本地 inventory（优先 `inventory/hosts.local.ini`，其次 `inventory/hosts.ini`）；远程分支仍会拒绝未授权目标。本机 `--local` 分支不经过远程 Ansible，只接受生成的 `localhost ansible_connection=local` inventory；它不接受远程账号或 `INSPECT_ASK_PASS`。
 
 ## 3. 凭据安全
 
-密码不写入 inventory、命令行、环境快照、代码、报告、JSON、HTML、Git 或聊天输出。
-
-一次性密码验证使用 Ansible 的交互式提示：
-
-```bash
-# Remote mode: inspect.sh sets INSPECT_ENABLE_REAL=1 in the child.
-# Provide only the non-secret account and, if needed, INSPECT_ASK_PASS=1 for
-# Ansible's native interactive prompt; never provide a password variable.
-export INSPECT_REMOTE_USER=aqwh
-export INSPECT_ASK_PASS=1
-```
-
-随后执行巡检，Ansible 会在终端提示输入密码。不要设置 `ANSIBLE_PASSWORD`、`SSHPASS`，不要把密码放入 `hosts.ini`，也不要使用 shell 命令拼接密码。若当前终端不是可交互 TTY，程序会在连接前安全退出，而不是尝试把密码写入临时文件或命令参数。
-
-更适合长期使用的方式是 SSH agent/密钥认证：不设置 `INSPECT_ASK_PASS`，由 Ansible 使用已审核的 SSH transport 配置。密钥路径和 sudo/become 策略由控制端配置管理，不写入巡检结果。
-
-真实路径还会拒绝未设置 `INSPECT_REMOTE_USER` 的调用；建议验证结束后清除门控变量：
+仓库中的 `inventory/hosts.ini` 只保留注释形式的脱敏示例。真实测试时，在控制端
+本地取消注释并填写现场主机、账号和认证变量，文件权限应为 `600`；也可以复制为
+`inventory/hosts.local.ini` 并通过 `-i` 使用。真实 inventory 不得提交到 Git。
 
 ```bash
-unset INSPECT_REMOTE_USER INSPECT_ASK_PASS
+vi inventory/hosts.ini
+chmod 600 inventory/hosts.ini
+# 默认 inventory 配置完成后直接按组或 IP 执行
+bash inspect.sh -H inspection
 ```
+
+密码只由项目内 bundled Ansible 从本地 inventory 原生读取，不进入命令行、环境快照、
+JSON、HTML、事件或聊天输出。不要设置 `ANSIBLE_PASSWORD`、`SSHPASS`，不要把密码拼接
+到 shell 命令中。若使用 SSH key/agent，可不配置密码变量。
+
+如果没有默认 inventory，旧的 `INSPECT_REMOTE_USER`/`INSPECT_ASK_PASS` 兼容路径仍可用，
+但优先使用项目 inventory，避免每次执行前设置环境变量。
 
 ## 4. 推荐执行顺序
 
@@ -141,14 +137,7 @@ fixture 模式只读取预录文件，不连接任何主机：
 INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local
 ```
 
-真实模式必须同时满足：
-
-```bash
-INSPECT_ENABLE_REAL=1
-INSPECT_REMOTE_USER=<受控账号>
-```
-
-密码认证另加 `INSPECT_ASK_PASS=1`，只在交互终端中输入。未设置真实执行门禁时，程序返回 10 并明确说明真实 `ansible-playbook` 未启用；这不是成功的 VM 测试。
+真实模式必须满足项目 runtime 校验和目标授权；默认认证来源是项目 inventory。只有在没有默认 inventory、需要兼容旧临时 inventory 路径时，才使用 `INSPECT_REMOTE_USER`，密码提示另加 `INSPECT_ASK_PASS=1`。未满足真实执行门禁时，程序返回 10 并明确说明真实 Ansible 未启用；这不是成功的 VM 测试。
 
 ## 8. UNKNOWN 与故障判读
 

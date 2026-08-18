@@ -19,6 +19,13 @@
 - SSH 仅作 Ansible transport 与诊断；不维护第二套采集逻辑。
 - 未验证的受控端命令能力在 G0 预检/能力探测时记录为待验证项。
 
+### 1.1 Inventory 与认证来源
+
+- 默认远程 inventory 优先为本地私有的 `inventory/hosts.local.ini`，其次为项目根目录的 `inventory/hosts.ini`；`-H` 可按主机组、主机名或 `ansible_host` IP 选择。
+- 仓库中的 `inventory/hosts.ini` 只能包含注释形式的脱敏示例；真实控制端应在本地填写并设置 `600` 权限，或使用被忽略的 `inventory/hosts.local.ini` 配合 `-i`。
+- Ansible 原生读取 `ansible_user`、`ansible_password`、密钥和 SSH 配置；inventory 解析器只读取主机名/IP 元数据，不把认证变量写入 JSON、事件或报表。
+- `--local` 不调用远程 Ansible；只有 `-H`/`-i` 远程模式进入本项目 bundled Ansible 执行路径。
+
 ## 2. 执行模型
 
 ```

@@ -17,11 +17,11 @@
 2. 只运行项目内的 `runtime/bin/python3.12` 与 bundled `runtime/ansible/`，不安装或选择目标机系统 Ansible；
 3. 写入巡检自身生成的 `/data/inspect/.runtime` 和 `/data/inspect/out`。
 
-不得添加第三方软件源，不得使用 `pip`、下载脚本、`curl | bash` 或 `sshpass`。不得写密码文件、密码环境变量、密码 inventory 或把密码放进命令行。部署前保留旧版本和校验清单；部署失败时恢复旧版本。
+不得添加第三方软件源，不得使用 `pip`、下载脚本、`curl | bash` 或 `sshpass`。本地 `--local` 巡检不需要远程密码、密码环境变量或远程 inventory；控制端执行远程 `-H` 时，认证配置另见 `docs/g0-real-vm.md`，真实 inventory 不随部署包提交。部署前保留旧版本和校验清单；部署失败时恢复旧版本。
 
 ## 认证与传输
 
-从控制端向 VM 传输时优先使用已审核的 SSH key/agent。密码只能在安全的交互式 SSH/SCP 提示中输入；不能把密码放在命令、脚本、环境变量或文件中。若当前控制端没有安全交互 TTY 且没有可用 key/agent，应停止传输并记录阻断，不要请求密码进入聊天或改用 `sshpass`。
+从控制端向 VM 传输时优先使用已审核的 SSH key/agent。密码只能在安全的交互式 SSH/SCP 提示中输入；不能把密码放在命令、脚本、环境变量或部署包中。若当前控制端没有安全交互 TTY 且没有可用 key/agent，应停止传输并记录阻断，不要请求密码进入聊天或改用 `sshpass`。
 
 部署包不得包含 `.git/`、`.runtime/`、`out/`、缓存、测试真实输出、inventory 凭据、密钥或报告中的敏感内容。部署前记录源文件清单和哈希，VM 上校验后再激活到 `/data/inspect`。
 
@@ -54,7 +54,7 @@ fixture 模式仍然优先且零连接。真实本地模式必须同时设置两
 localhost ansible_connection=local
 ```
 
-本地模式不需要 SSH 用户或密码，Ansible 使用 `stdin` 关闭的 credentialless local transport。`INSPECT_ENABLE_LOCAL_REAL=1` 不会扩大远程 `-H` 目标范围；远程真实路径仍只允许 `192.168.0.10` 和 `192.168.0.101`，并要求显式远程账号。
+本地模式不需要 SSH 用户或密码，Ansible 使用 `stdin` 关闭的 credentialless local transport。`INSPECT_ENABLE_LOCAL_REAL=1` 不会扩大远程 `-H` 目标范围；远程控制端的主机组和认证配置使用项目 inventory，具体见 `docs/g0-real-vm.md`。
 
 ## 执行顺序
 

@@ -1,8 +1,9 @@
 """inspect/inventory.py — 主机选择与 inventory 解析（T-103）。
 
 职责（docs/specs/technical-design.md §4 inventory.py 行 + cli-contract §3）：
-  - `-H group-or-ip[,group-or-ip...]` → 优先复用项目内
-    `inventory/hosts.ini`，按组名/主机名/IP 传给 Ansible；缺少默认文件时
+  - `-H group-or-ip[,group-or-ip...]` → 优先复用项目内有效的
+    `inventory/hosts.local.ini`，其次使用有主机的 `inventory/hosts.ini`；
+    纯注释模板视为未配置，按组名/主机名/IP 传给 Ansible；缺少有效默认文件时
     保留临时 inventory 兼容路径；
   - `--local` → 临时 inventory：`localhost ansible_connection=local`
     （控制端兼受控端，TD §10.1 / 兼容矩阵 C1）；
@@ -110,8 +111,33 @@ def default_runtime_dir() -> Path:
 
 
 def default_inventory_path() -> Path:
-    """项目默认远程 inventory：<仓库根>/inventory/hosts.ini。"""
+    """项目公开远程 inventory 模板：<仓库根>/inventory/hosts.ini。"""
     return _repo_root() / DEFAULT_INVENTORY_RELATIVE_PATH
+
+
+def local_inventory_path() -> Path:
+    """项目本地私有远程 inventory：<仓库根>/inventory/hosts.local.ini。"""
+    # Derive from default_inventory_path so tests and embedders can override the
+    # project root by monkeypatching the public default path helper.
+    return default_inventory_path().with_name("hosts.local.ini")
+
+
+def _configured_default_inventory() -> Optional[Tuple[Path, List[HostEntry], Dict[str, List[str]]]]:
+    """返回第一个有效默认 inventory；纯注释模板视为尚未配置。"""
+    for path in (local_inventory_path(), default_inventory_path()):
+        if not path.is_file():
+            continue
+        try:
+            hosts, groups = parse_inventory(path)
+        except InventoryError as exc:
+            # 公开 hosts.ini 通常是纯注释模板；空的本地模板也不应
+            # 阻断旧的临时 inventory 回退路径。其他格式错误仍显式失败。
+            if str(exc).startswith(f"{_MSG['empty']}:"):
+                continue
+            raise
+        if hosts:
+            return path, hosts, groups
+    return None
 
 
 def _parse_section_header(line: str, lineno: int, source: str) -> str:
@@ -386,9 +412,10 @@ def resolve_host_selection(
       {"kind": "inventory", "inventory": PATH, "limit": "all"|PATTERN|None}
 
     - local：临时 inventory（localhost ansible_connection=local，TD §10.1）；
-    - hosts：-H 列表 → 若存在默认 `inventory/hosts.ini`，在该文件上按
-      主机组/主机名/IP 选择并交给 Ansible；否则生成无凭据临时 inventory
-      （[all] + IP），保留旧的显式认证环境变量兼容路径；空列表 → 用法错误 2；
+    - hosts：-H 列表 → 优先使用有效的 `inventory/hosts.local.ini`，其次使用
+      有主机的 `inventory/hosts.ini`，按主机组/主机名/IP 选择并交给 Ansible；
+      纯注释模板视为未配置，随后生成无凭据临时 inventory（[all] + IP），
+      保留旧的显式认证环境变量兼容路径；空列表 → 用法错误 2；
     - inventory：解析用户 inventory（不改写），limit=None/“all”→ 全部主机
       （裸 `-i` 按 ansible 缺省语义 = 全部主机，本版本决策，见任务报告）；
       limit=PATTERN → select_hosts；路径不存在 → 用法错误 2。
@@ -404,9 +431,9 @@ def resolve_host_selection(
         if not names:
             raise InventoryError(_MSG["hosts_empty"], exit_code=EXIT_USAGE)
 
-        default_inv = default_inventory_path()
-        if default_inv.is_file():
-            all_hosts, groups = parse_inventory(default_inv)
+        configured = _configured_default_inventory()
+        if configured is not None:
+            default_inv, all_hosts, groups = configured
             requested_limit = ",".join(names)
             hosts = select_hosts(all_hosts, groups, requested_limit)
             # Ansible --limit matches inventory host names, not necessarily
@@ -451,6 +478,7 @@ __all__ = [
     "DEFAULT_INVENTORY_RELATIVE_PATH",
     "default_runtime_dir",
     "default_inventory_path",
+    "local_inventory_path",
     "parse_inventory",
     "resolve_host_selection",
     "select_hosts",
