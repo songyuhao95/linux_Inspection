@@ -67,24 +67,24 @@ bash inspect.sh -i tests/fixtures/inventory/hosts.yml --all
 ### 2.4 项目 inventory 远程调试
 
 `inventory/hosts.ini` 是仓库内跟踪的脱敏注释模板。真实测试前，在目标控制端
-本地编辑并取消注释主机组和认证变量；真实密码只保存在本地权限为 `600` 的文件中，
-不得提交或写入事件、JSON、报表和命令行。也可以使用被忽略的
-`inventory/hosts.local.ini`，然后通过 `-i` 显式指定。
+复制为被忽略的 `inventory/hosts.local.ini`，取消注释并填写主机组和认证变量；真实密码
+只保存在本地权限为 `600` 的文件中，不得提交或写入事件、JSON、报表和命令行。
 
 ```bash
-vi inventory/hosts.ini
-chmod 600 inventory/hosts.ini
+cp inventory/hosts.ini inventory/hosts.local.ini
+chmod 600 inventory/hosts.local.ini
+vi inventory/hosts.local.ini
 bash inspect.sh -H inspection
 bash inspect.sh -H <host-or-ip-list>
 
-# 私有副本方式
-cp inventory/hosts.ini inventory/hosts.local.ini
-chmod 600 inventory/hosts.local.ini
+# 也可以显式指定私有 inventory
 bash inspect.sh -i inventory/hosts.local.ini -H inspection
 ```
 
-`--local` 不调用 Ansible；只有 `-H`/`-i` 远程模式使用项目内 Python 3.12 和 bundled
-Ansible。无默认 inventory 时才保留旧的环境变量兼容路径。
+远程模式默认关闭 Ansible 自身重复的 host-key 前置检查，并让 OpenSSH 使用
+`StrictHostKeyChecking=accept-new`：首次连接自动记录指纹，已知指纹变化仍拒绝。生产环境
+仍应按组织规则核验和维护 `known_hosts`。无默认 inventory 时才保留旧的环境变量兼容路径。
+`--local` 不调用 Ansible；只有 `-H`/`-i` 远程模式使用项目内 Python 3.12 和 bundled Ansible。
 
 ### 2.5 单元级与 e2e
 

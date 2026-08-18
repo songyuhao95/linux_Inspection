@@ -25,6 +25,9 @@
 - 仓库中的 `inventory/hosts.ini` 只能包含注释形式的脱敏示例；真实控制端应在本地填写并设置 `600` 权限，或使用被忽略的 `inventory/hosts.local.ini` 配合 `-i`。
 - Ansible 原生读取 `ansible_user`、`ansible_password`、密钥和 SSH 配置；inventory 解析器只读取主机名/IP 元数据，不把认证变量写入 JSON、事件或报表。
 - `--local` 不调用远程 Ansible；只有 `-H`/`-i` 远程模式进入本项目 bundled Ansible 执行路径。
+- 远程密码 inventory 的 host-key 策略由 runner 固定为 `ANSIBLE_HOST_KEY_CHECKING=False` +
+  OpenSSH `StrictHostKeyChecking=accept-new`：允许首次连接自动登记指纹，但已知指纹变化仍失败；
+  生产部署仍应按组织规则预先核验 `known_hosts`。
 
 ## 2. 执行模型
 

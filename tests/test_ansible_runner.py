@@ -470,6 +470,45 @@ def test_build_host_result_connection_failure_no_business():
     assert r["host_error"]["code"] == ar.ERROR_CONNECTION_FAILED
 
 
+def test_parse_callback_classifies_host_key_preflight_as_connection_failure():
+    class H:
+        name, ip = "node-x", "10.0.0.9"
+
+    plan = ar.RunPlan(
+        playbook_path=Path("playbook.yml"),
+        inventory_file=Path("hosts.ini"),
+        hosts=[H()],
+        limit=None,
+        metric_specs=[_spec("local.cpu.load_1m", "cat /proc/loadavg; nproc")],
+        probe_command="probe",
+    )
+    payload = {
+        "plays": [{
+            "tasks": [{
+                "task": {"name": "probe: 能力探测（15s）"},
+                "hosts": {
+                    "node-x": {
+                        "status": "failed",
+                        "failed": True,
+                        "msg": "host key checking with sshpass",
+                    }
+                },
+            }]
+        }]
+    }
+    result = ar._parse_callback_results(plan, payload, 0.1)
+    assert result[0]["execution_status"] == ar.STATUS_ERROR
+    assert result[0]["host_error"]["code"] == ar.ERROR_CONNECTION_FAILED
+    assert result[0]["metrics"] == []
+
+
+def test_real_runner_sets_first_connect_host_key_policy():
+    source = (_ROOT / "inspect" / "ansible_runner.py").read_text(encoding="utf-8")
+    assert 'env["ANSIBLE_HOST_KEY_CHECKING"] = ANSIBLE_HOST_KEY_CHECKING' in source
+    assert 'env["ANSIBLE_SSH_COMMON_ARGS"] = ANSIBLE_SSH_COMMON_ARGS' in source
+    assert "StrictHostKeyChecking=accept-new" in source
+
+
 def test_build_host_result_probe_failed():
     class H:
         name, ip = "node-x", "10.0.0.9"

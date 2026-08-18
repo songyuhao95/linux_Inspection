@@ -104,6 +104,9 @@ bash inspect.sh -H <host-or-ip-list>
 ```
 
 `-H` 会复用项目内 inventory，认证变量由项目内 bundled Ansible 原生读取；解析器只读取
-主机名和 `ansible_host` 作为报告元数据，不会把认证变量写入 JSON、事件或报表。
+主机名和 `ansible_host` 作为报告元数据，不会把认证变量写入 JSON、事件或报表。远程模式
+默认使用 `ANSIBLE_HOST_KEY_CHECKING=False` 配合 OpenSSH
+`StrictHostKeyChecking=accept-new`：首次连接会记录主机指纹，已知指纹发生变化仍会拒绝；
+生产环境仍建议按组织规则预先核验并管理 `known_hosts`。
 
 `--local` 是本地排查模式，不经过 Ansible；只有远程 `-H` 或 `-i` 模式才调用项目内 bundled Ansible。

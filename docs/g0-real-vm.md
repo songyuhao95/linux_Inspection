@@ -29,7 +29,9 @@ PYTHONNOUSERSITE=1 PYTHONPATH=runtime/ansible/site-packages \
 4. 账号具备只读命令权限；
 5. 初次 smoke 不启用 `become`；
 6. 目标端具备 `/bin/bash` 和探测所需命令；
-7. 目标主机指纹已按组织规则确认；不应为了绕过提示而盲目关闭 host-key 检查。
+7. 目标主机指纹已按组织规则确认；runner 只对 Ansible 前置检查使用
+   `ANSIBLE_HOST_KEY_CHECKING=False`，底层 OpenSSH 仍使用 `StrictHostKeyChecking=accept-new`，
+   已知指纹变化会拒绝连接。
 
 真实路径必须从 WSL/Linux 控制端运行；代码中的 `INSPECT_ALLOW_WINDOWS_REAL=1` 仅供合成单元测试，不能用于现场绕过该门禁。
 
@@ -39,13 +41,13 @@ PYTHONNOUSERSITE=1 PYTHONPATH=runtime/ansible/site-packages \
 
 ## 3. 凭据安全
 
-仓库中的 `inventory/hosts.ini` 只保留注释形式的脱敏示例。真实测试时，在控制端
-本地取消注释并填写现场主机、账号和认证变量，文件权限应为 `600`；也可以复制为
-`inventory/hosts.local.ini` 并通过 `-i` 使用。真实 inventory 不得提交到 Git。
+仓库中的 `inventory/hosts.ini` 只保留注释形式的脱敏示例。真实测试时，在控制端复制为被忽略的 `inventory/hosts.local.ini`，取消注释并填写现场
+主机、账号和认证变量，文件权限应为 `600`。真实 inventory 不得提交到 Git。
 
 ```bash
-vi inventory/hosts.ini
-chmod 600 inventory/hosts.ini
+cp inventory/hosts.ini inventory/hosts.local.ini
+chmod 600 inventory/hosts.local.ini
+vi inventory/hosts.local.ini
 # 默认 inventory 配置完成后直接按组或 IP 执行
 bash inspect.sh -H inspection
 ```

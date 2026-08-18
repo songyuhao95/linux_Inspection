@@ -69,6 +69,11 @@ REAL_EXEC_ENABLED = "1"
 
 # 结构化 stdout callback 与本地重试文件关闭，避免把不可解析的默认文本当事实源。
 ANSIBLE_STDOUT_CALLBACK = "json"
+# 密码 inventory 的首次 SSH 连接不能依赖人工预先写入 known_hosts：Ansible
+# 自身的 host-key 检查会在 sshpass 介入前直接拒绝。关闭 Ansible 的重复检查，
+# 同时让 OpenSSH 采用 accept-new：首次连接自动记录，已知密钥变更仍拒绝。
+ANSIBLE_HOST_KEY_CHECKING = "False"
+ANSIBLE_SSH_COMMON_ARGS = "-o StrictHostKeyChecking=accept-new"
 REAL_PROCESS_TIMEOUT_GRACE_SEC = 30
 MAX_CAPTURED_ERROR_CHARS = 1200
 
@@ -1148,6 +1153,11 @@ def _callback_error_for_unreachable() -> Dict[str, str]:
     return _error(ERROR_CONNECTION_FAILED, "Ansible 报告主机不可达或连接失败（无业务结论）")
 
 
+def _callback_error_for_failed_connection() -> Dict[str, str]:
+    """分类无 rc 的 Ansible 连接前置失败（例如 sshpass/host-key 检查）。"""
+    return _error(ERROR_CONNECTION_FAILED, "Ansible 连接前置检查失败（无业务结论）")
+
+
 def _cleanup_plan_files(plan: RunPlan) -> List[str]:
     """Remove generated files without Python 3.8-only APIs."""
     failures: List[str] = []
@@ -1288,6 +1298,8 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
         env["ANSIBLE_STDOUT_CALLBACK"] = ANSIBLE_STDOUT_CALLBACK
         env["ANSIBLE_CALLBACK_PLUGINS"] = str(Path(__file__).resolve().parent / "callback_plugins")
         env["ANSIBLE_RETRY_FILES_ENABLED"] = "False"
+        env["ANSIBLE_HOST_KEY_CHECKING"] = ANSIBLE_HOST_KEY_CHECKING
+        env["ANSIBLE_SSH_COMMON_ARGS"] = ANSIBLE_SSH_COMMON_ARGS
         for secret_name in ("ANSIBLE_PASSWORD", "ANSIBLE_NET_PASSWORD", "SSHPASS"):
             env.pop(secret_name, None)
 
@@ -1392,6 +1404,12 @@ def _parse_callback_results(
                     continue
                 if raw.get("unreachable"):
                     state["host_error"] = _callback_error_for_unreachable()
+                    continue
+                # Ansible may report password/host-key/sshpass preflight failures
+                # as failed=true without rc or unreachable=true.  Do not turn
+                # that control-plane failure into a misleading PROBE_FAILED.
+                if raw.get("failed") and raw.get("rc") is None:
+                    state["host_error"] = _callback_error_for_failed_connection()
                     continue
                 if task_name.startswith("probe:"):
                     state["probe_seen"] = True
