@@ -5,7 +5,8 @@
 ## 执行路径
 
 - `inspect.sh --local`：使用项目内 Python 3.12，直接调用本机 bash 探测和指标命令；**不调用 Ansible**。
-- `inspect.sh -H <host>` / `inspect.sh -i <inventory>`：使用项目内 Python 3.12 启动项目内打包的 Ansible；不依赖系统 Python/Ansible。
+- `inspect.sh -H <group-or-host>`：优先使用项目内 `inventory/hosts.ini`，按主机组、主机名或 IP 选择目标，再使用项目内 Python 3.12 启动项目内打包的 Ansible；没有默认 inventory 时保留临时 inventory 兼容路径。
+- `inspect.sh -i <inventory>`：使用指定 inventory 和项目内打包的 Ansible；不依赖系统 Python/Ansible。
 - `INSPECT_FIXTURE_DIR=...`：两种模式都使用预录 fixture，零连接、零 Ansible。
 
 ## 监控模块扩展
@@ -43,3 +44,26 @@
 终端报表读取已经落盘的 `host-result-v1` JSON，在每台主机摘要后输出已执行指标的
 中文字段名、状态、规范化值和单位，例如 `CPU 使用率: 12.34 %`。失败或未选择的
 指标不伪造数值，仍在失败/未知列表中展示原因。
+
+## 远程主机配置
+
+远程巡检不需要每次设置 `INSPECT_REMOTE_USER` 或 `INSPECT_ASK_PASS`。复制
+`inventory/hosts.ini.example` 为 `inventory/hosts.ini`，在其中配置主机组、
+`ansible_user` 和 `ansible_password`：
+
+```bash
+cp inventory/hosts.ini.example inventory/hosts.ini
+chmod 600 inventory/hosts.ini
+# 编辑 inventory/hosts.ini，替换 REPLACE_WITH_REAL_PASSWORD
+```
+
+`inventory/hosts.ini` 已加入 `.gitignore`，真实密码不会进入 Git。执行时可直接使用
+主机组或 IP，`-H` 会复用该 inventory，认证变量由项目内 Ansible 原生读取：
+
+```bash
+bash inspect.sh -H inspection
+bash inspect.sh -H 192.0.2.10,192.0.2.11
+```
+
+`-i <inventory>` 仍可用于指定其他 inventory。inventory 解析器只读取主机名和
+`ansible_host` 作为报告元数据，不会把认证变量写入 JSON、事件或报表。

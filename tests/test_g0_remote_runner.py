@@ -288,6 +288,28 @@ def test_real_execution_requires_explicit_remote_user(tmp_path, monkeypatch):
         ar._execute_real(_plan(tmp_path))
 
 
+def test_inventory_configured_auth_does_not_require_remote_env(
+    tmp_path, monkeypatch
+):
+    plan = _plan(tmp_path)
+    plan.selection_kind = "inventory"
+    payload = json.dumps(_payload(), ensure_ascii=False)
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = list(argv)
+        return SimpleNamespace(stdout=payload, returncode=0)
+
+    monkeypatch.setenv(ar.REAL_EXEC_ENV_VAR, "1")
+    monkeypatch.setenv("INSPECT_ALLOW_WINDOWS_REAL", "1")
+    monkeypatch.delenv(ar.REMOTE_USER_ENV_VAR, raising=False)
+    monkeypatch.delenv(ar.ASK_PASS_ENV_VAR, raising=False)
+    monkeypatch.setattr(ar.subprocess, "run", fake_run)
+    ar._execute_real(plan)
+    assert "--user" not in seen["argv"]
+    assert "--ask-pass" not in seen["argv"]
+
+
 def test_real_execution_cleans_generated_runtime_files(tmp_path, monkeypatch):
     plan = _plan(tmp_path)
     generated = tmp_path / "generated-playbook.yml"

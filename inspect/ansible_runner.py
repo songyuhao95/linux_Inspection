@@ -1238,11 +1238,20 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
         else:
             _validate_real_targets(plan)
             remote_user = _validate_remote_user(os.environ.get(REMOTE_USER_ENV_VAR))
-            if remote_user is None:
+            # A user-provided inventory is allowed to carry ansible_user,
+            # ansible_password, SSH key, or SSH-config based authentication.
+            # The parser never reads those values; Ansible receives the
+            # original inventory file and resolves them itself.  Generated
+            # -H inventories still require the legacy explicit user path.
+            if remote_user is None and plan.selection_kind != "inventory":
                 raise RealExecutionError(
-                    "remote real execution requires an explicit remote user",
+                    "remote real execution requires an explicit remote user or "
+                    "inventory-configured authentication",
                     category="remote_user_missing",
-                    check="set only the non-secret INSPECT_REMOTE_USER value",
+                    check=(
+                        "configure inventory/hosts.ini (or -i inventory) with "
+                        "Ansible auth, or set only INSPECT_REMOTE_USER"
+                    ),
                 )
             ask_pass = _env_flag(ASK_PASS_ENV_VAR)
             if ask_pass and not getattr(sys.stdin, "isatty", lambda: False)():

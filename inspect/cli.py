@@ -69,7 +69,8 @@ class InspectArgumentParser(argparse.ArgumentParser):
 
 _HELP_EPILOG = """主机选择示例:
   inspect.sh                                          # 巡检本机（无 -H/-i 时默认本机）
-  inspect.sh -H 10.0.0.11,10.0.0.12                   # 巡检指定主机（逗号分隔）
+  inspect.sh -H inspection                                   # 使用默认 inventory 主机组
+  inspect.sh -H 10.0.0.11,10.0.0.12                         # 按主机名/IP选择（逗号分隔）
   inspect.sh -i inventory/hosts.yml --limit 'db*'     # inventory 主机模式
   inspect.sh -i inventory/hosts.yml --all             # inventory 全部主机
 
@@ -99,8 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "-H", "--hosts", metavar="ip1,ip2",
-        help="巡检指定主机（逗号分隔；缺省巡检本机）",
+        "-H", "--hosts", metavar="group-or-ip[,group-or-ip]",
+        help=(
+            "按默认 inventory/hosts.ini 的主机组、主机名或 IP 巡检；"
+            "无默认 inventory 时生成临时主机列表"
+        ),
     )
     parser.add_argument("-i", "--inventory", metavar="PATH", help="使用已有 inventory")
     parser.add_argument(

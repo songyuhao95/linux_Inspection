@@ -1,7 +1,9 @@
 """inspect/inventory.py — 主机选择与 inventory 解析（T-103）。
 
 职责（docs/specs/technical-design.md §4 inventory.py 行 + cli-contract §3）：
-  - `-H ip1,ip2` → 在 .runtime/ 生成临时 inventory（`[all]` + 主机列表）；
+  - `-H group-or-ip[,group-or-ip...]` → 优先复用项目内
+    `inventory/hosts.ini`，按组名/主机名/IP 传给 Ansible；缺少默认文件时
+    保留临时 inventory 兼容路径；
   - `--local` → 临时 inventory：`localhost ansible_connection=local`
     （控制端兼受控端，TD §10.1 / 兼容矩阵 C1）；
   - `-i PATH` → 解析已有 inventory（严格 INI 子集），`--limit PATTERN` /
@@ -18,8 +20,9 @@
 安全边界（RK-R3-04 / AE §4.3）：本模块**不读取任何凭据**——解析
 inventory 时仅提取主机名与 ansible_host（用于展示 IP），
 ansible_user / ansible_ssh_private_key_file / ansible_password 等
-认证变量一律忽略（不进入任何结果对象）；凭据由 ansible/ssh 原生
-机制管理，工具不读取；`[group:vars]` 段整体跳过。
+认证变量一律忽略（不进入任何结果对象）。inventory 原文件会原样交给
+项目内 Ansible，由 Ansible 原生机制读取认证变量；本模块不把凭据写入
+结果对象、JSON、事件或报表；`[group:vars]` 段整体跳过。
 
 严格 INI 子集（本版本支持，超出即解析错误）：
   - `[组名]` 段、`[组:vars]` 段（内容跳过）、`[组:children]` 段（组级联）；
@@ -44,6 +47,7 @@ EXIT_EXEC = 10
 
 # TD §3 目录布局：.runtime/ 临时 inventory/playbook/raw 输出（.gitignore）
 RUNTIME_DIR_NAME = ".runtime"
+DEFAULT_INVENTORY_RELATIVE_PATH = Path("inventory") / "hosts.ini"
 
 # inventory 解析错误分类消息前缀
 _MSG = {
@@ -103,6 +107,11 @@ def _repo_root() -> Path:
 def default_runtime_dir() -> Path:
     """默认运行期目录：<仓库根>/.runtime（TD §3）。"""
     return _repo_root() / RUNTIME_DIR_NAME
+
+
+def default_inventory_path() -> Path:
+    """项目默认远程 inventory：<仓库根>/inventory/hosts.ini。"""
+    return _repo_root() / DEFAULT_INVENTORY_RELATIVE_PATH
 
 
 def _parse_section_header(line: str, lineno: int, source: str) -> str:
@@ -377,7 +386,9 @@ def resolve_host_selection(
       {"kind": "inventory", "inventory": PATH, "limit": "all"|PATTERN|None}
 
     - local：临时 inventory（localhost ansible_connection=local，TD §10.1）；
-    - hosts：-H 列表 → 临时 inventory（[all] + IP）；空列表 → 用法错误 2；
+    - hosts：-H 列表 → 若存在默认 `inventory/hosts.ini`，在该文件上按
+      主机组/主机名/IP 选择并交给 Ansible；否则生成无凭据临时 inventory
+      （[all] + IP），保留旧的显式认证环境变量兼容路径；空列表 → 用法错误 2；
     - inventory：解析用户 inventory（不改写），limit=None/“all”→ 全部主机
       （裸 `-i` 按 ansible 缺省语义 = 全部主机，本版本决策，见任务报告）；
       limit=PATTERN → select_hosts；路径不存在 → 用法错误 2。
@@ -392,6 +403,23 @@ def resolve_host_selection(
         names = [str(h).strip() for h in raw if str(h).strip()]
         if not names:
             raise InventoryError(_MSG["hosts_empty"], exit_code=EXIT_USAGE)
+
+        default_inv = default_inventory_path()
+        if default_inv.is_file():
+            all_hosts, groups = parse_inventory(default_inv)
+            requested_limit = ",".join(names)
+            hosts = select_hosts(all_hosts, groups, requested_limit)
+            # Ansible --limit matches inventory host names, not necessarily
+            # ansible_host address values.  Resolve IP/group input first and
+            # pass the selected inventory aliases to Ansible.
+            limit = ",".join(host.name for host in hosts)
+            return HostSelection(
+                kind="inventory",
+                inventory_file=default_inv,
+                hosts=hosts,
+                limit=limit,
+            )
+
         hosts = [HostEntry(name=n, ip=n) for n in names]
         inv = write_temp_inventory(hosts, runtime_dir, local=False)
         return HostSelection(kind="hosts", inventory_file=inv, hosts=hosts)
@@ -420,7 +448,9 @@ __all__ = [
     "HostSelection",
     "InventoryError",
     "RUNTIME_DIR_NAME",
+    "DEFAULT_INVENTORY_RELATIVE_PATH",
     "default_runtime_dir",
+    "default_inventory_path",
     "parse_inventory",
     "resolve_host_selection",
     "select_hosts",

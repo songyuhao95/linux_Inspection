@@ -277,6 +277,40 @@ def test_resolve_hosts_selection(tmp_path):
     assert sel.inventory_file.parent == tmp_path
 
 
+def test_resolve_hosts_selection_reuses_default_inventory_for_group_or_ip(
+    tmp_path, monkeypatch
+):
+    default_inventory = tmp_path / "hosts.ini"
+    default_inventory.write_text(
+        "[inspection]\n"
+        "node-01 ansible_host=192.0.2.10\n"
+        "node-02 ansible_host=192.0.2.11\n"
+        "[inspection:vars]\n"
+        "ansible_user=aqwh\n"
+        "ansible_password=not-a-test-secret\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(inv, "default_inventory_path", lambda: default_inventory)
+
+    by_group = inv.resolve_host_selection(
+        {"kind": "hosts", "hosts": ["inspection"]}, runtime_dir=tmp_path / "rt"
+    )
+    assert by_group.kind == "inventory"
+    assert by_group.inventory_file == default_inventory
+    assert by_group.limit == "node-01,node-02"
+    assert [(h.name, h.ip) for h in by_group.hosts] == [
+        ("node-01", "192.0.2.10"),
+        ("node-02", "192.0.2.11"),
+    ]
+
+    by_ip = inv.resolve_host_selection(
+        {"kind": "hosts", "hosts": ["192.0.2.11"]}, runtime_dir=tmp_path / "rt2"
+    )
+    assert by_ip.kind == "inventory"
+    assert by_ip.limit == "node-02"
+    assert [h.name for h in by_ip.hosts] == ["node-02"]
+
+
 def test_resolve_hosts_selection_empty_usage_error(tmp_path):
     with pytest.raises(inv.InventoryError) as ei:
         inv.resolve_host_selection({"kind": "hosts", "hosts": []}, runtime_dir=tmp_path)
