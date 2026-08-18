@@ -99,7 +99,7 @@ METRICS = [
     {
         "metric_id": "local.cpu.utilization",
         "name": "CPU 使用率",
-        "command": "top -bn1 | head -20；ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -10",
+        "command": "top -bn2 -d 1 | grep 'Cpu(s)' | tail -1；ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -10",
         "timeout_sec": 10,
         "parser": "parse_cpu_utilization",
         "unit": "%",
@@ -177,7 +177,7 @@ METRICS = [
     {
         "metric_id": "local.filesystem.used_percent",
         "name": "磁盘使用率",
-        "command": "df -hT <profile 路径…>（数据/日志/备份目录；多目录按文件系统取最大值）",
+        "command": "df -P -T /（根文件系统；按文件系统取最大值）",
         "timeout_sec": 10,
         "parser": "parse_filesystem_used_percent",
         "unit": "%",
@@ -192,12 +192,12 @@ METRICS = [
                       "C6（ES >90% 严重告警层并入 CRIT）"],
         "doc_baseline": "<75% → OK（Nginx/Tomcat <80%，C1）；75–85% → WARN（关注）；"
                         ">85% → CRIT（告警）；>95% → CRIT（故障风险）",
-        "unknown_conditions": "目录不可读 → UNKNOWN",
+        "unknown_conditions": "根文件系统不可读或 df 不可用 → UNKNOWN",
     },
     {
         "metric_id": "local.filesystem.inode_used_percent",
         "name": "inode 使用率",
-        "command": "df -i <profile 路径…>（多目录按文件系统取最大值）",
+        "command": "df -P -i /（根文件系统；按文件系统取最大值）",
         "timeout_sec": 10,
         "parser": "parse_filesystem_inode_used_percent",
         "unit": "%",
@@ -211,7 +211,7 @@ METRICS = [
         "conflicts": ["C5（≥80% 仅描述“接近耗尽”未给数值边界）"],
         "doc_baseline": "<80% → OK（全部手册一致）；≥80% → 缺失 → UNKNOWN"
                         "（外部配置可覆盖）",
-        "unknown_conditions": "df 不可用、≥80% 无外部配置 → UNKNOWN",
+        "unknown_conditions": "根文件系统不可读、df 不可用、≥80% 无外部配置 → UNKNOWN",
     },
     {
         "metric_id": "local.logs.key_evidence",

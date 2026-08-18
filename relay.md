@@ -591,3 +591,22 @@ The six UNKNOWN results were explicit `UNSUPPORTED_PROFILE` cases caused by abse
 - fixture 模式仍是零连接路径，适用于单元测试和回归验证。
 
 验收边界：本地运行成功表示本机采集链路可执行，不等于任意中间件 profile 已配置；没有 profile 的指标仍按既有契约显示 `UNKNOWN/UNSUPPORTED_PROFILE`，不得伪造业务结论。
+
+
+## 20. T-114 Linux 主机基础指标模块（2026-08-18）
+
+用户要求在当前模块化架构上先补齐 Linux 主机基础指标，并把采集结果继续保存为 JSON
+事实源，供后续报表消费。本次实现已完成代码与本地 focused tests，待授权 Kylin VM
+smoke 验证后再记录真实运行证据：
+
+- 新增 `inspect/modules/linux_basic.py`，显式拥有 CPU、负载、内存、Swap、根文件系统磁盘和 inode 六个 profile-free 指标；
+- `inspect/modules/linux_common.py` 收敛为进程、systemd 服务、端口、关键日志四个需要产品 profile 的指标；
+- registry 保持指标目录原有顺序，避免改变 `host-result-v1` JSON 与报表消费顺序；
+- CPU 命令改为 `top -bn2 -d 1 | grep 'Cpu(s)' | tail -1`，使用一秒采样窗口，而不是单次快照；
+- 磁盘与 inode 默认检查根文件系统 `/`，不再因为缺少 middleware profile 而 UNKNOWN；
+- 本地和远程执行路径共用命令模板、probe、解析器、四状态判定和 JSON 事实源；没有新增
+  CLI 选项，也没有改变 `host-result-v1` schema。
+
+验收重点：Kylin 上的 `bash inspect.sh --local` 应显示基础指标已执行并在
+`out/<inspection_id>/hosts/localhost.json` 中出现；profile 未配置的四项仍应按既有契约
+显示 `UNKNOWN/UNSUPPORTED_PROFILE`。未完成 VM smoke 前，不把本节描述为真实主机验证成功。

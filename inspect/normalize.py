@@ -352,7 +352,7 @@ _PS_HEADER_RE = re.compile(r"^\s*PID\s+COMMAND\s+%CPU\s+%MEM")
 
 
 def parse_cpu_utilization(output: str) -> Dict[str, Any]:
-    """top -bn1 + ps 输出 → us/sy 与 us+sy、Top 进程行数（MR §5.4）。
+    """top -bn2 -d 1 + ps 输出 → 一秒采样窗口内的 us/sy、us+sy 与 Top 进程行数（MR §5.4）。
 
     输入基准（fixtures/raw/node-a/local.cpu.utilization.out）：
       `%Cpu(s):  2.5 us,  0.8 sy, ...` → us+sy=3.3。

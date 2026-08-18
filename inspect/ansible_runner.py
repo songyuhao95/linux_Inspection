@@ -240,7 +240,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "anchor": "MR §5.3 端口行 + TD §5.2 local.port.listening",
     },
     "local.cpu.utilization": {
-        "command": "top -bn1 | head -20; ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -10",
+        "command": "top -bn2 -d 1 | grep 'Cpu(s)' | tail -1; ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -10",
         "profile_keys": (),
         "become": False,
         "anchor": "MR §5.4 CPU 行 + TD §5.2 local.cpu.utilization",
@@ -264,14 +264,14 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "anchor": "MR §5.5 内存行 + TD §5.2 local.swap.used_percent",
     },
     "local.filesystem.used_percent": {
-        "command": "df -hT {fs_paths}",
-        "profile_keys": ("fs_paths",),
+        "command": "df -P -T /",
+        "profile_keys": (),
         "become": False,
         "anchor": "MR §5.6 磁盘行 + TD §5.2 local.filesystem.used_percent",
     },
     "local.filesystem.inode_used_percent": {
-        "command": "df -i {fs_paths}",
-        "profile_keys": ("fs_paths",),
+        "command": "df -P -i /",
+        "profile_keys": (),
         "become": False,
         "anchor": "MR §5.6 磁盘行 + TD §5.2 local.filesystem.inode_used_percent",
     },
@@ -385,8 +385,8 @@ def build_metric_command_specs(
     - profile：inspect.yml profiles 中单个产品的配置（TD §6.3）：
       提供 → 安全校验后替换占位符；缺失/未提供 → 需要 profile 的指标
       构造 command=None + error_code=UNSUPPORTED_PROFILE（MR §5：无
-      profile 配置 → 指标 UNKNOWN，不静默跳过）；不需要 profile 的
-      指标（cpu/load/内存/swap 等）始终构造命令。
+      profile 配置 → 指标 UNKNOWN，不静默跳过）；linux_basic 的基础
+      指标（CPU/负载/内存/Swap/根文件系统）始终构造命令。
     - 超时取自 metrics.py 定义（timeout_sec：10s，日志类 15s，AE §7）；
     - 所需命令取自 probe.metric_required_commands（TD §5.2 数据源列）。
     """

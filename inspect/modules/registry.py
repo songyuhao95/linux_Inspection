@@ -70,31 +70,33 @@ class ModuleRegistry:
         )
 
     def iter_metric_definitions(self) -> Iterator[dict]:
-        for module in self._modules.values():
-            for metric_id in module.metric_ids:
-                metric = self._metric_catalog.get_metric(metric_id)
-                if metric is None:  # defensive: register() already validates this
-                    raise RuntimeError(f"registered metric disappeared: {metric_id}")
+        # Preserve catalog order in the JSON fact source while ownership is
+        # split across independently registered monitor modules.
+        owned = {
+            metric_id
+            for module in self._modules.values()
+            for metric_id in module.metric_ids
+        }
+        for metric in self._metric_catalog.iter_metrics():
+            if metric["metric_id"] in owned:
                 yield metric
 
     def metric_definitions(self) -> List[dict]:
         return list(self.iter_metric_definitions())
 
     def metric_ids(self) -> tuple[str, ...]:
-        return tuple(
-            metric_id
-            for module in self._modules.values()
-            for metric_id in module.metric_ids
-        )
+        return tuple(metric["metric_id"] for metric in self.iter_metric_definitions())
 
 
 def _build_default_registry() -> ModuleRegistry:
     # Import after the registry classes exist so each built-in module remains
     # a separate, reviewable registration file.
-    from .linux_common import MODULE
+    from .linux_basic import MODULE as BASIC_MODULE
+    from .linux_common import MODULE as COMMON_MODULE
 
     registry = ModuleRegistry()
-    registry.register(MODULE)
+    registry.register(COMMON_MODULE)
+    registry.register(BASIC_MODULE)
     return registry
 
 

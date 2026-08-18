@@ -173,8 +173,8 @@ def test_playbook_no_unsupported_profile_tasks():
     specs = _specs({})
     unsupported = [s for s in specs if s.error_code == ar.ERROR_UNSUPPORTED_PROFILE]
     supported = [s for s in specs if s.error_code is None]
-    assert len(unsupported) == 6
-    assert len(supported) == 4
+    assert len(unsupported) == 4
+    assert len(supported) == 6
     pb = ar.generate_playbook(specs)
     for s in unsupported:
         assert s.metric_id not in pb
@@ -291,7 +291,7 @@ def test_profile_rejects_bad_ports():
 
 def test_profile_rejects_relative_or_quoted_paths():
     with pytest.raises(ar.CommandConfigError, match="路径"):
-        _specs({"fs_paths": ["/data; echo x"]})
+        _specs({"log_paths": ["/data; echo x"], "log_keywords": ["err"]})
     with pytest.raises(ar.CommandConfigError, match="路径"):
         _specs({"log_paths": ["var/log/x.log"], "log_keywords": ["err"]})
 
@@ -316,8 +316,6 @@ def test_profile_missing_marks_unsupported():
         "local.process.present",
         "local.service.active",
         "local.port.listening",
-        "local.filesystem.used_percent",
-        "local.filesystem.inode_used_percent",
         "local.logs.key_evidence",
     }
     for s in specs:
@@ -341,7 +339,7 @@ def test_profile_root_path_allowed():
                     "unit": "x.service", "log_paths": ["/a/*.log"],
                     "log_keywords": ["err"]})
     s = next(x for x in specs if x.metric_id == "local.filesystem.used_percent")
-    assert s.command == "df -hT /"
+    assert s.command == "df -P -T /"
 
 
 # ==========================================================================
