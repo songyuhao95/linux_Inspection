@@ -550,3 +550,30 @@ The bundled ansible-core 2.18.9 callback inventory contains `default`, `junit`, 
 T-112 adds `inspect/callback_plugins/json.py`, a project-local stdout callback that emits only the bounded `plays`/`tasks`/`hosts`/`stats` shape consumed by `inspect/ansible_runner.py`. The runner explicitly sets `ANSIBLE_CALLBACK_PLUGINS` to that project directory after `runtime.ansible_environment()` removes inherited callback paths. It does not install packages, consult system Ansible, or emit credentials.
 
 The next authorized VM smoke must verify this callback reaches a structured result and then report the resulting inspection status separately from the artifact/control-plane status. No business success is claimed until that smoke completes.
+
+
+## 18. T-112 authorized Kylin smoke result (2026-08-18)
+
+After commit `59e704e` was pulled with `git pull --ff-only origin main`, the authorized command:
+
+```bash
+bash inspect.sh --local
+```
+
+returned exit code `0`. The run produced structured callback data and a fact source/report at:
+
+```text
+out/insp-20260818095236-localhost/
+inspection_id=insp-20260818095236-localhost
+```
+
+Sanitized result summary:
+
+```text
+hosts: 1
+execution_status: PARTIAL
+metrics: total=10, OK=4, UNKNOWN=6, WARN=0, CRIT=0
+control execution: executed=4, failed=6
+```
+
+The six UNKNOWN results were explicit `UNSUPPORTED_PROFILE` cases caused by absent local profile values; they are not evidence of a callback or dedicated-runtime failure. This confirms the project-local Python 3.12 runtime, bundled ansible-core 2.18.9, canonical Ansible bundle hash, project-local JSON callback, and fail-closed reporting path are all active on `kylin01`. It does not claim that the host has no business issues or that all metrics are configured.
