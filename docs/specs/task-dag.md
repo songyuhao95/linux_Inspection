@@ -158,7 +158,7 @@ T-101 CLI 入口与指标注册表 ──▶ T-102 配置层与阈值 override
 
 ## 9. T-106 — Excel 渲染
 
-- 目标：render_xlsx.py（xlsxwriter；三 Sheet Overview/Local/Errors-Evidence；RR §3 布局；UNKNOWN 不混入 OK 计数；文件名 `<inspection-id>.xlsx`，`--xlsx-out` 覆盖）。
+- 目标：render_xlsx.py（xlsxwriter；三 Sheet Overview/Local/Errors-Evidence；RR §3 布局；UNKNOWN 不混入 OK 计数；文件名 `<inspection-id>.xlsx`，`--excel PATH` 覆盖）。
 - depends_on：[T-104]
 - owned_paths：
   - inspect/render_xlsx.py
@@ -170,7 +170,7 @@ T-101 CLI 入口与指标注册表 ──▶ T-102 配置层与阈值 override
   - AC-1 三 Sheet 存在且列/行内容符合 RR §3（REQ-R-03）
   - AC-2 状态计数与 JSON 一致、UNKNOWN 不混入 OK（REQ-R-03/08）
   - AC-3 xlsxwriter 缺失→明确报错退出码 10（REQ-N-06 负向）
-  - AC-4 文件名与 --xlsx-out 覆盖（REQ-R-04）
+  - AC-4 文件名与 --excel PATH 覆盖（REQ-R-04）
   - AC-5 `python -m pytest tests/test_render_xlsx.py -q` 全绿
 - 证据类型：artifact、documentation-validation、structure-review、git-diff
 

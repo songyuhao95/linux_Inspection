@@ -144,14 +144,14 @@ INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local   # 第二次运�
 | 10 | 执行失败（技术）：inventory 解析失败、ExecutionNotReadyError、xlsxwriter 缺失等 |
 | 20 | 业务告警：仅 --fail-on critical 且任一指标 status=CRIT |
 
-优先级 2 > 10 > 20 > 0；xlsxwriter 未安装时 `-e` 明确报错退出码 10，
+优先级 2 > 10 > 20 > 0；xlsxwriter 未安装时 `--excel` 明确报错退出码 10，
 不中断 stdout 报表与 HTML 输出。
 
 ## 6. 输出与运行残留
 
 - 事实源：`out/<inspection-id>/hosts/<host>.json` + `inspection-<inspection-id>-index.json`
-  （`out_dir` 由 inspect.yml 配置，缺省 `out/`）；Excel/HTML 报表默认
-  `out/<inspection-id>.xlsx|.html`（`--xlsx-out`/`--html-out` 覆盖）。
+  （`out_dir` 由 inspect.yml 配置，缺省 `out/`）；`--excel`/`--html` 无 PATH 时将
+  报表写入 `Path.cwd()/<inspection-id>.xlsx|.html`，提供 PATH 时直接使用给定路径。
 - 运行期临时文件：`<仓库根>/.runtime/`（临时 inventory/playbook，运行生成，
   CLI 每次运行新建随机名文件；该目录未纳入 .gitignore，调试后请清理：
   `rm -f .runtime/*` 后 `rmdir .runtime`）。

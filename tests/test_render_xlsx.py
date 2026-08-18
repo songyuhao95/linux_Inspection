@@ -5,7 +5,7 @@
     常量 + 夹具样本结构断言，xlsxwriter 缺失环境下仍可运行）；
   - 四状态色板常量（RR §5：#2E7D32/#F9A825/#C62828/#757575）；
   - 状态计数与 JSON execution_summary 一致；UNKNOWN 独立计数、不混入 OK；
-  - 文件名 `<inspection-id>.xlsx` 与 out_path（`--xlsx-out` 语义）覆盖；
+  - 文件名 `<inspection-id>.xlsx` 与 out_path（CLI `--excel PATH` 语义）覆盖；
   - xlsxwriter 缺失 → RendererError(exit_code=10)（TD §8 负向测试，
     通过 sys.modules 置 None 在任意环境确定性触发，缺省环境可运行）；
   - 损坏/结构不完整 JSON → RendererError(exit_code=10)；
@@ -637,7 +637,7 @@ class TestRenderWorkbook:
         out = rx.render_xlsx(ok_doc(), tmp_path / "custom" / "my-report.xlsx")
         assert out == tmp_path / "custom" / "my-report.xlsx"
         assert out.is_file()
-        # --xlsx-out 覆盖语义：不生成默认 <inspection-id>.xlsx
+        # --excel PATH 覆盖语义：不生成默认 <inspection-id>.xlsx
         assert not (tmp_path / "insp-20260814120000-node-fx01.xlsx").exists()
 
     def test_render_xlsx_file_happy_path(self, tmp_path):

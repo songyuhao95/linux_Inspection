@@ -18,7 +18,7 @@ host-result-v1.md §8，REQ-R-03/04/07/08）：
     CRIT #C62828 / UNKNOWN #757575；CRIT 值红色字体（用户需求：达到
     告警阈值的值红色字体）；UNKNOWN 独立计数、不混入 OK 计数；
     execution_status（SUCCESS/PARTIAL/ERROR）以徽标样式区分于业务状态。
-  - 文件名 `<inspection-id>.xlsx`；out_path（`--xlsx-out` 语义）可覆盖
+  - 文件名 `<inspection-id>.xlsx`；out_path（CLI `--excel PATH` 语义）可覆盖
     （函数参数语义，CLI 接线由集成阶段完成）。
   - xlsxwriter 为 requirements.txt 已声明运行时依赖但本任务不安装：
     import 缺失 → RendererError（exit_code=10，cli-contract §4 执行失败
@@ -458,7 +458,7 @@ def render_xlsx(
     - docs：单份 host-result-v1 文档，或同一次巡检的多主机文档序列
       （共享 inspection_id；Overview"主机×状态汇总"逐主机一行）；
     - out_path：None → `<inspection_id>.xlsx`（相对当前目录，RR §3
-      文件名契约）；给定路径（`--xlsx-out` 语义）→ 覆盖默认路径；
+      文件名契约）；给定路径（CLI `--excel PATH` 语义）→ 覆盖默认路径；
     - 文档结构/计数不一致 → RendererError（exit_code=10）；xlsxwriter
       缺失 → RendererError（exit_code=10，明确报错不静默跳过）；
     - 返回实际写入的文件路径。

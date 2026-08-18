@@ -93,11 +93,10 @@ bash inspect.sh -H 192.168.0.10,192.168.0.101
 ```bash
 bash inspect.sh -H 192.168.0.10,192.168.0.101 --html
 bash inspect.sh -H 192.168.0.10,192.168.0.101 --excel
-bash inspect.sh -H 192.168.0.10,192.168.0.101 --excel --html \
-  --xlsx-out out/vm-check.xlsx --html-out out/vm-check.html
+bash inspect.sh -H 192.168.0.10,192.168.0.101 --excel out/vm-check.xlsx --html out/vm-check.html
 ```
 
-Excel 依赖 `xlsxwriter`。程序不会自动安装依赖；若缺少该依赖，JSON/stdout/HTML 仍按既有编排执行，Excel 项报告技术失败并使用退出码 10 语义。
+Excel 依赖 `pandas` 与 `xlsxwriter`。程序不会自动安装依赖；若缺少该依赖，JSON/stdout/HTML 仍按既有编排执行，Excel 项报告技术失败并使用退出码 10 语义。
 
 ## 5. 输出与回滚
 
@@ -106,8 +105,8 @@ Excel 依赖 `xlsxwriter`。程序不会自动安装依赖；若缺少该依赖�
 ```text
 out/<inspection-id>/hosts/<host>.json
 out/<inspection-id>/inspection-<inspection-id>-index.json
-out/<inspection-id>.xlsx
-out/<inspection-id>.html
+Path.cwd()/<inspection-id>.xlsx
+Path.cwd()/<inspection-id>.html
 ```
 
 JSON 是唯一事实源。stdout、Excel、HTML 只消费已落盘 JSON，不重新连接主机、不重新采集。每次运行产生新的 `inspection_id`，旧 JSON 不覆盖；旧 JSON 可以独立重新渲染。

@@ -1,5 +1,6 @@
-# 运行时依赖（technical-design §8 选型；仅声明，T-101 不安装）
-xlsxwriter
+# 运行时依赖（technical-design §8 选型；由项目 runtime 构建/部署流程安装）
+pandas>=2.2,<3
+xlsxwriter>=3.2,<4
 
 # Real execution is built offline into runtime/; this range is the supported 3.12 control-side matrix.
 ansible-core>=2.16,<2.19

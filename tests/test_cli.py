@@ -6,6 +6,8 @@
 
 import subprocess
 import sys
+
+import pytest
 from argparse import Namespace
 from pathlib import Path
 
@@ -193,16 +195,54 @@ def test_missing_inventory_file_exit_2():
     assert "inventory 文件不存在" in r.stderr
 
 
-def test_xlsx_out_requires_excel_exit_2():
-    """--xlsx-out 无 --excel → 用法错误 2。"""
-    r = run_cli("--xlsx-out", "report.xlsx")
-    assert r.returncode == 2
+def test_excel_without_path_is_accepted():
+    """--excel 可省略 PATH，空字符串表示使用当前工作目录。"""
+    ns = cli.build_parser().parse_args(["--excel"])
+    assert ns.excel == ""
 
 
-def test_html_out_requires_html_exit_2():
-    """--html-out 无 --html → 用法错误 2。"""
-    r = run_cli("--html-out", "report.html")
-    assert r.returncode == 2
+def test_excel_with_explicit_path_is_accepted():
+    """--excel PATH 直接携带 Excel 输出路径。"""
+    ns = cli.build_parser().parse_args(["--excel", "report.xlsx"])
+    assert ns.excel == "report.xlsx"
+
+
+def test_html_without_path_is_accepted():
+    """--html 可省略 PATH，空字符串表示使用当前工作目录。"""
+    ns = cli.build_parser().parse_args(["--html"])
+    assert ns.html == ""
+
+
+def test_html_with_explicit_path_is_accepted():
+    """--html PATH 直接携带 HTML 输出路径。"""
+    ns = cli.build_parser().parse_args(["--html", "report.html"])
+    assert ns.html == "report.html"
+
+
+def test_report_output_paths_default_to_cwd_and_preserve_explicit_path(monkeypatch):
+    """缺省路径使用 cwd，显式路径不被 out_dir 或 cwd 改写。"""
+    expected_cwd = Path("C:/tmp/inspect-cli")
+    monkeypatch.setattr(cli.Path, "cwd", staticmethod(lambda: expected_cwd))
+    assert cli._report_output_path("", "inspection-1", ".xlsx") == (
+        expected_cwd / "inspection-1.xlsx"
+    )
+    assert cli._report_output_path("reports/report.xlsx", "inspection-1", ".xlsx") == Path(
+        "reports/report.xlsx"
+    )
+
+
+def test_xlsx_out_is_rejected():
+    """旧参数 --xlsx-out 不再注册或接受。"""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--xlsx-out", "report.xlsx"])
+    assert exc_info.value.code == 2
+
+
+def test_html_out_is_rejected():
+    """旧参数 --html-out 不再注册或接受。"""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--html-out", "report.html"])
+    assert exc_info.value.code == 2
 
 
 def test_query_with_inspection_args_exit_2():

@@ -32,6 +32,18 @@
 - `inspect.sh -i <inventory>`：使用指定 inventory 和项目内打包的 Ansible；不依赖系统 Python/Ansible。
 - `INSPECT_FIXTURE_DIR=...`：两种模式都使用预录 fixture，零连接、零 Ansible。
 
+### 报表输出
+
+使用 `--excel [PATH]` 和 `--html [PATH]` 生成报表。省略 `PATH` 时，文件写入
+当前工作目录（`Path.cwd()`）；提供 `PATH` 时直接使用给定路径。例如：
+
+```bash
+bash inspect.sh --local --excel --html
+bash inspect.sh --local --excel reports/local.xlsx --html reports/local.html
+```
+
+旧参数 `--xlsx-out` 和 `--html-out` 已移除，不再被 CLI 接受。
+
 ## 监控模块扩展
 
 监控模块注册在 `inspect/modules/`，统一通过 `MonitorModule` 和 `ModuleRegistry` 暴露指标。当前内置模块为 `linux_basic`（Linux 主机基础指标）和 `linux_common`（需要产品 profile 的通用指标）。以后新增中间件时，应：

@@ -51,6 +51,19 @@ See `runtime/ansible/README.md` and
 range. The lock file is descriptive; the materializer never resolves or
 downloads dependencies.
 
+## Report CLI usage
+
+The report flags are `--excel [PATH]` and `--html [PATH]`. When `PATH` is
+omitted, the report is written to `Path.cwd()` using the inspection ID as the
+filename; when supplied, the path is used directly. For example:
+
+```bash
+bash inspect.sh --local --excel --html
+bash inspect.sh --local --excel reports/local.xlsx --html reports/local.html
+```
+
+The legacy `--xlsx-out` and `--html-out` options are no longer accepted.
+
 ## Environment and execution contract
 
 - Fixture mode (`INSPECT_FIXTURE_DIR=...`) and query-only commands still use the

@@ -77,8 +77,8 @@ out/<inspection-id>/
 ├── hosts/<host>.json                  # 每主机 host-result-v1 JSON（原子写）
 ├── raw/<metric_id>.out                # 原始输出（本地保留，不进报表）
 ├── inspection-<inspection-id>-index.json   # 汇总索引（可选，引用各主机 sha256）
-├── <inspection-id>.xlsx               # Excel（--xlsx-out 可覆盖）
-└── <inspection-id>.html               # 离线单文件 HTML（--html-out 可覆盖）
+├── <inspection-id>.xlsx               # Excel（--excel PATH 可覆盖）
+└── <inspection-id>.html               # 离线单文件 HTML（--html PATH 可覆盖）
 ```
 
 输出目录为配置边界（HR §5"文件命名/目录属配置边界"），由 inspect.yml 的 `out_dir` 提供，默认 `out/`；不新增 CLI 选项（CC §2 选项表为冻结集）。

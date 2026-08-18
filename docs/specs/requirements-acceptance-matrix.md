@@ -52,7 +52,7 @@
 
 | ID | 需求 | G1 来源 | 验收方法 | 可执行验证命令 | 负责任务 |
 | --- | --- | --- | --- | --- | --- |
-| REQ-C-01 | 全部选项：-h/--help、-H/--hosts、-i/--inventory、--limit、--local、--all、--list-metrics、--info、-e/--excel、--xlsx-out、--html、--html-out、--fail-on critical | CC §2 | 帮助输出含全部选项与退出码表；argparse 单元测试 | `bash inspect.sh -h` + `python -m pytest tests/test_cli.py -q` | T-101 |
+| REQ-C-01 | 全部选项：-h/--help、-H/--hosts、-i/--inventory、--limit、--local、--all、--list-metrics、--info、-e/--excel [PATH]、--html [PATH]、--fail-on critical | CC §2 | 帮助输出含全部选项与退出码表；argparse 单元测试 | `bash inspect.sh -h` + `python -m pytest tests/test_cli.py -q` | T-101 |
 | REQ-C-02 | 主机选择语义：无参数→本机（--local）；-H 逗号列表；-i+--limit；-i+--all；--local 与 -H/-i 互斥→用法错误 2 | CC §3 | 互斥与选择语义单元测试 + 退出码断言 | `python -m pytest tests/test_cli.py -q`（test_host_selection） | T-101 |
 | REQ-C-03 | 退出码：0 成功 / 2 用法错误 / 10 技术执行失败 / 20 仅 --fail-on critical 时业务 CRIT；技术失败优先于业务告警；部分主机失败取最严重 | CC §4 | 以 fixture JSON 驱动退出码映射测试（0/2/10/20 全覆盖） | `python -m pytest tests/test_cli.py -q`（test_exit_codes） | T-101 |
 | REQ-C-04 | --list-metrics / --info 只读本地定义，不采集不连接；未实现的中间件选择明确报"不支持"退出码 2 | CC §2/§3；PB §4.8/§4.10 | 输出含 10 个共同 P0 指标 ID；未知/不支持参数→2 | `python -c "import subprocess; o=subprocess.run(['bash','inspect.sh','--list-metrics'],capture_output=True,text=True).stdout; assert all(m in o for m in ['local.process.present','local.cpu.utilization','local.cpu.load_1m','local.service.active','local.port.listening','local.memory.available_percent','local.swap.used_percent','local.filesystem.used_percent','local.filesystem.inode_used_percent','local.logs.key_evidence'])"` | T-101 |
@@ -80,7 +80,7 @@
 | REQ-R-01 | stdout：run 摘要、主机摘要（execution_status、状态计数）、失败/未知指标列表、退出码说明；顺序先全局后逐主机 | RR §2 | 渲染输出断言（内容与顺序） | `python -m pytest tests/test_render_stdout.py -q` | T-105 |
 | REQ-R-02 | UNKNOWN 与 ERROR 必须显式展示原因（missing/conflict/permission/timeout），不得静默过滤 | RR §2/§6.2 | 含 UNKNOWN 样本渲染断言 | 同上（test_unknown_visible） | T-105 |
 | REQ-R-03 | Excel 三 Sheet：Overview / Local / Errors-Evidence；每主机每指标一行含 threshold/evidence/provenance；UNKNOWN 不混入 OK 计数 | RR §3 | 生成文件 Sheet 名与单元格断言（zipfile/openpyxl 只读校验） | `python -m pytest tests/test_render_xlsx.py -q` | T-106 |
-| REQ-R-04 | Excel 文件名 `<inspection-id>.xlsx`；--xlsx-out 可覆盖 | RR §3.2；CC §2 | 文件名断言 | 同上（test_filename） | T-106 |
+| REQ-R-04 | Excel 文件名 `<inspection-id>.xlsx`；`--excel PATH` 可覆盖 | RR §3.2；CC §2 | 文件名断言 | 同上（test_filename） | T-106 |
 | REQ-R-05 | HTML 离线单文件：CSS/JS 全内联、数据以 JSON 内嵌、无外部依赖可离线打开 | RR §4 | 无 `<link`/`<script src`/fetch 外链文本断言 + 内嵌 JSON 与事实源一致断言 | `python -m pytest tests/test_render_html.py -q` | T-107 |
 | REQ-R-06 | HTML 布局：左导航（run 摘要/主机列表/状态筛选）、右滚动区（宏观卡片→主机详情逐指标卡片含 evidence/error/provenance）、打印友好 | RR §4 | 模板结构与占位符断言 | 同上（test_layout） | T-107 |
 | REQ-R-07 | 四状态颜色与徽标：OK #2E7D32 / WARN #F9A825 / CRIT #C62828 / UNKNOWN #757575；execution_status 以徽标区分 | RR §5 | 颜色值断言（stdout 可选/HTML 必含） | 同上（test_palette） | T-105/T-107 |

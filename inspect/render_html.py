@@ -9,7 +9,7 @@
     二次计算——宏观计数/整体结论/维度列表均在渲染期计算为静态文本，
     浏览器 JS 只做显隐过滤）；
   - 文件名默认 `<inspection-id>.html`（TD §3 布局）；`out_path` 参数
-    覆盖（对应 CLI `--html-out`，函数参数语义，cli-contract §2）；
+    覆盖（对应 CLI `--html PATH`，函数参数语义，cli-contract §2）；
   - 不可信文本（evidence 命令/日志片段、error.message、threshold
     source_anchor、provenance 备注、主机名等）一律 HTML 转义
     （html.escape quote=True）；内嵌 JSON 中 "</" 转义为 "<\\/" 防止
@@ -455,7 +455,7 @@ def render_html(
 ) -> Path:
     """渲染入口：host-result-v1 文档列表 → 离线单文件 HTML。
 
-    参数（函数参数语义，对应 CLI `--html` / `--html-out`，cli-contract §2）：
+    参数（函数参数语义，对应 CLI `--html [PATH]`，cli-contract §2）：
       - docs：只读消费的 host-result-v1 文档列表（同一 inspection_id）；
       - out_path：输出文件路径；缺省 `<inspection_id>.html`（当前目录，
         TD §3 布局 `<inspection-id>.html`）；提供时覆盖默认文件名；

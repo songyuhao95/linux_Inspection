@@ -76,7 +76,8 @@ _HELP_EPILOG = """主机选择示例:
 
 事实源与报表输出:
   每主机生成 out/<inspection-id>/hosts/<host>.json（host-result-v1，原子写）；
-  --excel/--html 生成 Excel 与离线单文件 HTML 报表（路径由 --xlsx-out/--html-out 覆盖）。
+  --excel [PATH]/--html [PATH] 生成 Excel 与离线单文件 HTML 报表；
+  未提供 PATH 时写入当前工作目录，提供 PATH 时直接使用该路径。
 
 执行路径:
   --local 直接执行本机只读探测/指标命令，不调用 Ansible；
@@ -116,10 +117,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--list-metrics", action="store_true", help="列出已实现指标，不采集",
     )
     parser.add_argument("--info", metavar="METRIC_ID", help="显示指标定义，不采集")
-    parser.add_argument("-e", "--excel", action="store_true", help="生成 Excel 报表")
-    parser.add_argument("--xlsx-out", metavar="PATH", help="Excel 输出路径")
-    parser.add_argument("--html", action="store_true", help="生成离线单文件 HTML 报表")
-    parser.add_argument("--html-out", metavar="PATH", help="HTML 输出路径")
+    parser.add_argument(
+        "-e", "--excel", nargs="?", const="", metavar="PATH",
+        help="生成 Excel 报表；可选输出路径（缺省写入当前工作目录）",
+    )
+    parser.add_argument(
+        "--html", nargs="?", const="", metavar="PATH",
+        help="生成离线单文件 HTML 报表；可选输出路径（缺省写入当前工作目录）",
+    )
     parser.add_argument(
         "--fail-on", dest="fail_on", nargs="?", const="critical",
         choices=("critical",),
@@ -139,14 +144,10 @@ def validate_args(ns: argparse.Namespace) -> List[str]:
         errors.append("--limit 仅可与 --inventory 一起使用")
     if ns.all and not ns.inventory:
         errors.append("--all 仅可与 --inventory 一起使用")
-    if ns.xlsx_out and not ns.excel:
-        errors.append("--xlsx-out 需与 --excel 一起使用")
-    if ns.html_out and not ns.html:
-        errors.append("--html-out 需与 --html 一起使用")
     query = ns.list_metrics or bool(ns.info)
     if query and (
         ns.hosts or ns.inventory or ns.local or ns.limit or ns.all
-        or ns.excel or ns.html or ns.fail_on or ns.xlsx_out or ns.html_out
+        or ns.excel is not None or ns.html is not None or ns.fail_on
     ):
         errors.append("--list-metrics/--info 为只读查询，不与其他巡检/报表参数共用")
     if ns.list_metrics and ns.info:
@@ -241,8 +242,8 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
       5. normalize（host-result-v1 文档 + 主机错误明细）；
       6. 原子写事实源（fact_source；inspection_id 唯一，重跑不覆盖，TD §11）；
       7. 报表渲染只消费 JSON（RR §1）：stdout 摘要（读事实源）→ Excel
-         （-e/--xlsx-out；xlsxwriter 缺失按 T-106 语义报错退出码 10，
-         不中断其余输出）→ HTML（--html/--html-out）；
+         （-e/--excel [PATH]；xlsxwriter 缺失按 T-106 语义报错退出码 10，
+         不中断其余输出）→ HTML（--html [PATH]）；
       8. 退出码：2 > 10 > 20 > 0（cli-contract §4）。
     """
     try:
@@ -325,8 +326,8 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     except fact_source_mod.FactSourceError as exc:
         return _fail(exc)
 
-    if ns.excel:
-        xlsx_path = Path(ns.xlsx_out) if ns.xlsx_out else out_dir / f"{inspection_id}.xlsx"
+    if ns.excel is not None:
+        xlsx_path = _report_output_path(ns.excel, inspection_id, ".xlsx")
         try:
             xlsx_mod.render_xlsx(facts_docs, out_path=xlsx_path)
         except xlsx_mod.RendererError as exc:
@@ -335,8 +336,8 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
         else:
             print(f"Excel 报表: {xlsx_path}")
 
-    if ns.html:
-        html_path = Path(ns.html_out) if ns.html_out else out_dir / f"{inspection_id}.html"
+    if ns.html is not None:
+        html_path = _report_output_path(ns.html, inspection_id, ".html")
         try:
             html_mod.render_html(facts_docs, out_path=html_path)
         except html_mod.RenderHtmlError as exc:
@@ -355,6 +356,18 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
         has_crit=has_crit,
         fail_on_critical=ns.fail_on,
     )
+
+
+def _report_output_path(option_value: Optional[str], inspection_id: str, suffix: str) -> Path:
+    """Resolve an optional report path without changing renderer APIs.
+
+    ``argparse`` stores an omitted optional value as the empty string. In that
+    case the report filename is rooted at the process working directory;
+    otherwise the caller's path is used directly, including relative paths.
+    """
+    if option_value:
+        return Path(option_value)
+    return Path.cwd() / f"{inspection_id}{suffix}"
 
 
 def main(argv: Optional[List[str]] = None) -> int:

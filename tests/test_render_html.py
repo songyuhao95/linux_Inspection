@@ -21,7 +21,7 @@
   - 打印友好：@media print 默认只打印宏观摘要，print-details 开关
     展开主机详情（REQ-R-06）；
   - 文件名 `<inspection-id>.html` 与 out_path 覆盖（TD §3 / cli-contract
-    §2 `--html-out` 函数参数语义）；
+    §2 `--html PATH` 函数参数语义）；
   - 宏观卡片计数与 execution_summary 一致、UNKNOWN 可见（REQ-R-08 渲染
     期一致性 + RR §6.2）；
   - 渲染失败：空输入/混合 inspection_id/模板缺失/输入损坏 →
@@ -482,7 +482,7 @@ class TestPrintFriendly:
 
 
 # --------------------------------------------------------------------------
-# 8. 文件名（TD §3 / cli-contract §2 --html-out 函数参数语义）
+# 8. 文件名（TD §3 / cli-contract §2 --html PATH 函数参数语义）
 # --------------------------------------------------------------------------
 
 

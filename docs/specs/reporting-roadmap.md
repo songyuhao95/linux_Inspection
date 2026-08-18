@@ -7,11 +7,11 @@
 
 ## 1. 数据流（唯一事实源）
 
-```
+---
 采集（Ansible raw/script）→ normalize → 原子写 host-result-v1 JSON
         ↓（报表只消费 JSON，不二次采集）
   stdout 终端摘要 / Excel 多 Sheet / 离线单文件 HTML
-```
+---
 
 - **版本化 JSON 是唯一事实源**：报表阶段只读 JSON；任何报表与事实源不一致时以 JSON 为准。
 - 报表之间不允许相互引用非 JSON 数据；不出现在 JSON 中的数据不得出现在报表中。
@@ -19,7 +19,7 @@
 ## 2. stdout 终端输出
 
 - 内容：run/合同摘要、主机摘要（execution_status、各状态计数）、失败/未知指标列表、退出码说明。
-- 顺序：先全局，后逐主机；`UNKNOWN` 与 `ERROR` 必须显式展示原因（missing/conflict/permission/timeout）。
+- 顺序：先全局，后逐主机；-UNKNOWN- 与 -ERROR- 必须显式展示原因（missing/conflict/permission/timeout）。
 - 彩色化可选（四状态颜色与 HTML 一致，见第 5 节）；无颜色环境下以符号/缩写区分。
 
 ## 3. Excel 报表（首版 Sheet 规划）
@@ -31,8 +31,7 @@
 | Errors-Evidence | 所有 error 非空的指标与主机：error.code、message、command、output_summary；以及文档冲突/缺失导致的 UNKNOWN 清单 |
 
 - 首版三 Sheet（Overview / Local / Errors-Evidence），后续按产品 profile 增加 Sheet。
-- 状态以文字+背景色呈现（第 5 节色板）；`UNKNOWN` 不混入 OK 计数。
-- 文件名：`<inspection-id>.xlsx`（`--xlsx-out` 可覆盖路径）。
+- 文件名：`<inspection-id>.xlsx`（`--excel PATH` 可覆盖路径）。
 
 ## 4. HTML 报表（离线单文件）
 
@@ -52,12 +51,12 @@
 | CRIT | 告警/故障 | 红 #C62828 | CRIT（fault 高亮） |
 | UNKNOWN | 无规则/冲突/权限/缺失 | 灰 #757575 | UNKNOWN |
 
-- `execution_status`（SUCCESS/PARTIAL/ERROR）以徽标区分于业务状态，避免混淆（如 PARTIAL 灰黄边框 + 业务状态彩色填充）。
+- -execution_status-（SUCCESS/PARTIAL/ERROR）以徽标区分于业务状态，避免混淆（如 PARTIAL 灰黄边框 + 业务状态彩色填充）。
 
 ## 6. 一致性要求
 
 1. 所有报表由同一份 JSON 渲染；同一 inspection 的三类报表状态计数必须一致。
-2. `UNKNOWN` 必须在报表中可见（不得静默过滤）；`ERROR`/技术失败必须可见（Errors-Evidence）。
+2. -UNKNOWN- 必须在报表中可见（不得静默过滤）；-ERROR-/技术失败必须可见（Errors-Evidence）。
 3. 阈值规则与来源锚点随指标展示，便于审计（对应 evidence_types 的 source-traceability）。
 4. 报表不含凭据与明文 IP；脱敏规则同 host-result-v1.md 第 3 节。
 

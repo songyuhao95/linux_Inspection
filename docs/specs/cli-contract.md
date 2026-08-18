@@ -25,10 +25,8 @@
 | `--all` | 无 | 巡检 inventory 中全部主机（等价 `--limit all`） |
 | `--list-metrics` | 无 | 列出已实现指标清单（ID、名称、阈值层、来源锚点），不采集不连接 |
 | `--info METRIC_ID` | 指标 ID | 显示单个指标定义（数据源/单位/阈值层/来源/冲突备注），不采集 |
-| `-e`, `--excel` | 无 | 生成 Excel 报表（路径由 `--xlsx-out` 指定或默认输出目录） |
-| `--xlsx-out` | PATH | Excel 输出文件路径 |
-| `--html` | 无 | 生成离线单文件 HTML 报表（路径由 `--html-out` 指定或默认输出目录） |
-| `--html-out` | PATH | HTML 输出文件路径 |
+| `-e`, `--excel [PATH]` | 可选 PATH | 生成 Excel 报表；无 PATH 时输出到 `Path.cwd()`，有 PATH 时直接使用给定路径 |
+| `--html [PATH]` | 可选 PATH | 生成离线单文件 HTML 报表；无 PATH 时输出到 `Path.cwd()`，有 PATH 时直接使用给定路径 |
 | `--fail-on critical` | 无 | 任一指标业务状态为 CRIT 时以退出码 20 结束（默认：仅报告，退出码 0/10） |
 
 > 注：`--hosts` 的短选项为 `-H`；`--help` 的短选项为 `-h`。表格以反引号分隔以避免歧义。
@@ -73,10 +71,8 @@
       --all                inventory 全部主机
       --list-metrics       列出已实现指标，不采集
       --info METRIC_ID     显示指标定义，不采集
-  -e, --excel              生成 Excel 报表
-      --xlsx-out PATH      Excel 输出路径
-      --html               生成离线单文件 HTML 报表
-      --html-out PATH      HTML 输出路径
+  -e, --excel [PATH]       生成 Excel 报表；可选输出路径
+      --html [PATH]        生成离线单文件 HTML 报表；可选输出路径
       --fail-on critical   任一指标 CRIT 时退出码 20
 退出码: 0 成功 / 2 用法错误 / 10 执行失败 / 20 业务告警(--fail-on critical)
 ```
@@ -88,7 +84,7 @@
 inspect.sh
 
 # 巡检两台远程主机并生成 Excel 与离线 HTML
-inspect.sh -H 10.0.0.11,10.0.0.12 -e --xlsx-out report.xlsx --html --html-out report.html
+inspect.sh -H 10.0.0.11,10.0.0.12 -e report.xlsx --html report.html
 
 # 走已有 inventory，限 2 台，CRIT 时非零退出
 inspect.sh -i inventory/hosts.yml --limit 'db*' --fail-on critical

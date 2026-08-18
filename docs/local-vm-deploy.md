@@ -64,13 +64,13 @@ localhost ansible_connection=local
 cd /data/inspect
 # inspect.sh automatically sets these non-secret local flags in its child only.
 # It also rejects a missing/mismatched project-local Python 3.12 runtime.
-bash inspect.sh --local --html --html-out out/local-smoke.html
+bash inspect.sh --local --html out/local-smoke.html
 ```
 
-确认 JSON 事实源、stdout 和离线 HTML 已生成。Excel 只有在 `xlsxwriter` 已经存在或获得单独安装授权时才执行：
+确认 JSON 事实源、stdout 和离线 HTML 已生成。项目 Python 运行时应先安装 requirements.txt 中的 `pandas` 与 `xlsxwriter`，再执行 Excel：
 
 ```bash
-bash inspect.sh --local --excel --xlsx-out out/local-smoke.xlsx
+bash inspect.sh --local --excel out/local-smoke.xlsx
 ```
 
 本地执行中：
