@@ -1,4 +1,4 @@
-"""tests/test_render_html.py — T-107 离线单文件 HTML 渲染测试（合同 AC-1）。
+"""tests/test_render_html.py — T-127 离线单文件 HTML 渲染测试（合同 AC-1）。
 
 覆盖（合同必需步骤 4 + mitigations + DAG §10 AC 对应项，REQ-R-05/06/07/08）：
   - 单文件零外链：模板与最终产物均无 `<link`/`<script src`/`src=`/
@@ -10,12 +10,12 @@
   - 不可信文本 HTML 转义：evidence/error.message/provenance 中的
     `<script>` 注入在正文呈 `&lt;script&gt;`（合同 mitigation"不可信文本
     HTML 转义"，测试断言 `<script>` 注入被转义）；
-  - 布局：左导航（Run 摘要/主机列表/状态筛选/指标维度）+ 右滚动区
+  - 布局：左导航（主机/状态/中间件多选筛选）+ 右滚动区（Run 摘要置顶）
     （宏观卡片 → 主机详情逐指标卡片 raw/normalized/unit/status/
     threshold/evidence/error/provenance）（REQ-R-06）；
   - 四状态色板/徽标：#2E7D32/#F9A825/#C62828/#757575；execution_status
     描边徽标区分于业务状态填充徽标（REQ-R-07）；
-  - 交互：状态/主机/指标过滤接线（data-* 属性 + addEventListener）；
+  - 交互：状态/主机/中间件多选、搜索和三种分组视图接线（data-* 属性 + addEventListener）；
     展示层零业务计算（JS 无 reduce/parseInt/Number）——宏观计数为
     渲染期静态文本（REQ-R-06 + mitigation"展示层不二次计算"）；
   - 打印友好：@media print 默认只打印宏观摘要，print-details 开关
@@ -264,8 +264,10 @@ class TestEscaping:
 class TestLayout:
     def test_nav_sections_present(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
-        for section in ("Run 摘要", "主机列表", "状态筛选", "指标维度"):
-            assert section in body, "左导航缺少: %s" % section
+        for section in ("Run 摘要", "主机列表", "状态筛选", "中间件"):
+            assert section in body, "报表缺少: %s" % section
+        assert body.index('<header class="run-header"') > body.index('<main class="content">')
+        assert "指标维度" not in body
 
     def test_left_nav_before_content(self, tmp_path):
         s = render_str(fixture_docs(), tmp_path)
@@ -287,7 +289,7 @@ class TestLayout:
     def test_run_header_totals(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
         assert "主机 3" in body
-        assert "OK 8 / WARN 1 / CRIT 1 / UNKNOWN 2" in body
+        assert "8 / 1 / 1 / 2" in body
         assert "技术失败 1" in body
 
     def test_metric_card_fields_complete(self, tmp_path):
@@ -312,13 +314,15 @@ class TestLayout:
         s = render_str(fixture_docs(), tmp_path)
         # 仅指标卡开标签（导航按钮/宏观卡/主机区也带 data-*，需限定作用域）
         openings = re.findall(r'<div class="metric-card[^"]*"[^>]*>', s)
-        assert len(openings) == 12  # 3 主机 × 4 指标
+        assert len(openings) == 36  # 三种静态分组视图 × 3 主机 × 4 指标
         statuses = re.findall(r'data-status="(OK|WARN|CRIT|UNKNOWN)"', "".join(openings))
-        assert len(statuses) == 12
+        assert len(statuses) == 36
         hosts = re.findall(r'data-host="node-fx0[1-3]"', "".join(openings))
-        assert len(hosts) == 12
+        assert len(hosts) == 36
         metrics = re.findall(r'data-metric-id="local\.[^"]+"', "".join(openings))
-        assert len(metrics) == 12
+        assert len(metrics) == 36
+        middleware = re.findall(r'data-middleware="([^"]+)"', "".join(openings))
+        assert set(middleware) >= {"elasticsearch", "redis", "mysql"}
         for st in ("OK", "WARN", "CRIT", "UNKNOWN"):
             assert st in statuses  # 四状态均出现（UNKNOWN 可见，RR §6.2）
 
@@ -371,62 +375,54 @@ class TestPaletteAndBadges:
         # 夹具无 ERROR 主机（CSS 选择器文本允许出现，徽标类不允许）
         assert 'exec-badge exec-error"' not in body
 
-    def test_status_filter_buttons_colored(self):
+    def test_status_filter_options_and_colors(self, tmp_path):
         s = TEMPLATE.read_text(encoding="utf-8")
+        body = body_text(render_str(fixture_docs(), tmp_path))
         for st, hexv in PALETTE.items():
-            assert '.filter-btn[data-status="' + st + '"]' in s
+            assert 'data-filter-kind="status" data-filter-value="' + st + '"' in body
             assert hexv in s
 
 
 # --------------------------------------------------------------------------
-# 6. 过滤交互（状态/主机/指标；展示层不二次计算）
+# 6. 过滤交互（状态/主机/中间件 + 分组；展示层不二次计算）
 # --------------------------------------------------------------------------
 
 
 class TestFilterInteraction:
-    def test_four_status_filter_buttons(self, tmp_path):
+    def test_multi_select_filters(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
-        for st in ("OK", "WARN", "CRIT", "UNKNOWN"):
-            assert 'class="filter-btn filter-status" data-status="' + st + '"' in body
-
-    def test_host_filter_buttons(self, tmp_path):
-        body = body_text(render_str(fixture_docs(), tmp_path))
+        assert body.count('class="multi-select"') == 3
+        for kind in ("host", "status", "middleware"):
+            assert 'data-filter-kind="' + kind + '"' in body
+            assert 'class="filter-search" data-search-kind="' + kind + '"' in body
+            assert 'class="filter-check"' in body
         for host in ("node-fx01", "node-fx02", "node-fx03"):
-            assert 'class="filter-btn filter-host" data-host="' + host + '"' in body
+            assert 'data-filter-kind="host" data-filter-value="' + host + '"' in body
+        for middleware in ("elasticsearch", "redis", "mysql"):
+            assert 'data-filter-kind="middleware" data-filter-value="' + middleware + '"' in body
 
-    def test_metric_dimension_buttons(self, tmp_path):
-        """指标维度导航：去重后的指标全集（按首次出现顺序）。"""
+    def test_group_modes_present(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
-        dims = re.findall(r'class="filter-btn filter-metric" data-metric-id="([^"]+)"', body)
-        assert dims == [
-            "local.cpu.utilization",
-            "local.swap.used_percent",
-            "local.filesystem.used_percent",
-            "local.memory.available_percent",
-            "local.cpu.load_1m",
-            "local.logs.key_evidence",
-            "local.process.present",
-            "local.service.active",
-            "local.port.listening",
-        ]
-        assert "CPU 使用率" in body  # 中文名作按钮文本
+        for value, label in (("host", "按主机分组"), ("status", "按状态分组"), ("middleware", "按中间件分组")):
+            assert 'option value="' + value + '"' in body
+            assert label in body
+            assert 'data-group-mode="' + value + '"' in body
 
-    def test_js_wires_filters(self, tmp_path):
+    def test_js_wires_filters_and_grouping(self, tmp_path):
         js = inline_js(render_str(fixture_docs(), tmp_path))
         for needle in (
-            "addEventListener", "data-status", "data-host", "data-metric-id",
-            "classList", "applyFilters", "filter-reset", "filter-status",
-            "filter-host", "filter-metric", "hidden",
+            "addEventListener", "data-filter-kind", "data-filter-value", "data-middleware",
+            "classList", "applyFilters", "filter-reset", "filter-search", "group-by-select",
+            "group-view", "hidden",
         ):
-            assert needle in js, "JS 缺少过滤接线: %s" % needle
+            assert needle in js, "JS 缺少交互接线: %s" % needle
 
     def test_js_card_click_expands_evidence(self, tmp_path):
         js = inline_js(render_str(fixture_docs(), tmp_path))
         assert "card-details" in js
         assert "bindCardToggle" in js
-        # 卡片含可折叠证据容器（点击卡片展开证据与来源锚点，RR §4）
         body = body_text(render_str(fixture_docs(), tmp_path))
-        assert body.count("details class=\"card-details\"") == 12
+        assert body.count('details class="card-details"') == 36
 
     def test_reset_button_present(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
@@ -442,10 +438,10 @@ class TestFilterInteraction:
     def test_counts_are_server_rendered_text(self, tmp_path):
         """宏观计数为渲染期静态文本（非 JS 计算），与执行摘要一致。"""
         body = body_text(render_str(fixture_docs(), tmp_path))
-        assert 'count-ok">OK<b>8</b>' not in body  # run 级不在卡内
-        assert 'count-ok">OK<b>2</b>' in body  # node-fx01
+        assert 'count-ok">OK<b>8</b>' not in body
+        assert 'count-ok">OK<b>2</b>' in body
         assert 'count-crit">CRIT<b>1</b>' in body
-        assert 'count-unknown">UNKNOWN<b>2</b>' in body  # node-fx02
+        assert 'count-unknown">UNKNOWN<b>2</b>' in body
 
 
 # --------------------------------------------------------------------------
@@ -461,11 +457,11 @@ class TestPrintFriendly:
     def test_print_default_hides_details(self):
         """默认打印：主机详情与卡内证据折叠，仅宏观摘要。"""
         s = TEMPLATE.read_text(encoding="utf-8")
-        assert ".host-detail, .card-details { display: none; }" in s
+        assert ".host-detail, .group-view:not(.active), .card-details { display: none; }" in s
 
     def test_print_toggle_expands_details(self):
         s = TEMPLATE.read_text(encoding="utf-8")
-        assert "body.print-details .host-detail { display: block; }" in s
+        assert "body.print-details .host-detail, body.print-details .group-view.active { display: block; }" in s
         assert "body.print-details .card-details { display: block; }" in s
 
     def test_print_hides_nav_and_toolbar(self):
@@ -558,7 +554,7 @@ class TestMacroCards:
         assert 'count-unknown">UNKNOWN<b>2</b>' in body
         openings = re.findall(r'<div class="metric-card[^"]*"[^>]*>', body)
         unknown_cards = [o for o in openings if 'data-status="UNKNOWN"' in o]
-        assert len(unknown_cards) == 2  # 2 个 UNKNOWN 指标卡（RR §6.2 可见）
+        assert len(unknown_cards) == 6  # 三种视图各包含 2 个 UNKNOWN 指标卡
 
     def test_run_conclusion(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
@@ -669,4 +665,4 @@ class TestTemplateRender:
         s = render_str(fixture_docs(), tmp_path)
         assert "<title>" + INSPECTION_ID + " — 巡检 HTML 报表</title>" in s
         assert "生成时间：2026-08-15T12:00:00" in s
-        assert "生成于 2026-08-15T12:00:00" in s
+        assert "<dt>生成时间</dt><dd>2026-08-15T12:00:00" in s

@@ -1,9 +1,9 @@
-"""inspect/render_html.py — 离线单文件 HTML 渲染（T-107）。
+"""inspect/render_html.py — 离线单文件 HTML 渲染（T-127）。
 
 职责（RR §4/§5、TD §8 选型、HR §8、REQ-R-05/06/07）：
   - 只读消费 host-result-v1 文档列表（事实源 JSON）→ 单文件 HTML；
   - 全内联零外链：模板 CSS/JS 全内联，无 `<link`/`<script src`/fetch/
-    外链资源（AC-2 机械断言见 contract-T-107-v1 ac_map，模板级断言
+    外链资源（AC-2 机械断言见 contract-T-127-v1 ac_map，模板级断言
     tests/test_render_html.py 覆盖模板与最终产物两层）；
   - 数据以 `<script type="application/json">` 内嵌（只读；展示层不做
     二次计算——宏观计数/整体结论/维度列表均在渲染期计算为静态文本，
@@ -210,22 +210,59 @@ def _field_rows(section: str, obj: Any, fields: Sequence[tuple]) -> str:
     return "".join(rows)
 
 
-def _metric_card(metric: Mapping[str, Any], host_name: str) -> str:
-    """单指标卡片：raw/normalized/unit/status 头 + 阈值表 + 证据/错误/来源。"""
+def _as_strings(value: Any) -> List[str]:
+    """将 profile/middleware 字段规范为去重后的字符串列表。"""
+    if value is None:
+        return []
+    values = value if isinstance(value, (list, tuple, set)) else [value]
+    result: List[str] = []
+    for item in values:
+        text = str(item).strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _middleware_values(doc: Mapping[str, Any], metric: Mapping[str, Any]) -> List[str]:
+    """为指标确定展示/筛选用的中间件维度，不改变事实源。"""
+    for key in ("middleware", "middleware_id", "module_id", "module"):
+        values = _as_strings(metric.get(key))
+        if values:
+            return values
+    host = doc.get("host") or {}
+    values = _as_strings(host.get("product_profiles"))
+    return values or ["Linux 基础"]
+
+
+def _metric_card(
+    metric: Mapping[str, Any],
+    host_name: str,
+    middleware_values: Optional[Sequence[str]] = None,
+    *,
+    show_host: bool = False,
+) -> str:
+    """单指标卡片；show_host 用于跨主机的状态/中间件分组视图。"""
     status = metric.get("status")
     if status not in STATUSES:
         status = "UNKNOWN"
     metric_id = metric.get("metric_id", "")
     name = metric.get("name", "")
+    middleware_values = list(middleware_values or ["Linux 基础"])
+    middleware_attr = "|".join(middleware_values)
     card_cls = "metric-card status-" + status.lower()
+    context = (
+        '<span class="card-context">主机：' + esc(host_name) + "</span>"
+        if show_host else ""
+    )
     parts: List[str] = [
         '<div class="' + card_cls + '" data-status="' + esc(status)
         + '" data-host="' + esc(host_name)
-        + '" data-metric-id="' + esc(metric_id) + '">',
+        + '" data-metric-id="' + esc(metric_id)
+        + '" data-middleware="' + esc(middleware_attr) + '">',
         '<div class="card-head"><h4 class="card-title">'
         '<span class="metric-id">' + esc(metric_id) + "</span>"
         '<span class="metric-name">' + esc(name) + "</span>"
-        + _chip(status) + "</h4></div>",
+        + context + _chip(status) + "</h4></div>",
         '<dl class="card-values">',
         '<div><dt>raw_value</dt><dd>' + _value_or_dash(metric.get("raw_value")) + "</dd></div>",
         '<div><dt>normalized_value</dt><dd>'
@@ -296,7 +333,7 @@ def _macro_card(doc: Mapping[str, Any]) -> str:
 
 
 def _host_section(doc: Mapping[str, Any]) -> str:
-    """主机详情区：标题/徽标/元信息 + 逐指标卡片。"""
+    """按主机分组的详情区：标题/徽标/元信息 + 逐指标卡片。"""
     host = doc.get("host") or {}
     host_name = host.get("name", "")
     execution_status = doc.get("execution_status", "UNKNOWN")
@@ -310,16 +347,18 @@ def _host_section(doc: Mapping[str, Any]) -> str:
         + " · duration_sec：" + esc(doc.get("duration_sec", ""))
         + " · 技术失败：" + str(failed)
     )
-    cards = [_metric_card(m, host_name) for m in doc.get("metrics") or []]
-    parts: List[str] = [
-        '<section class="host-section" data-host="' + esc(host_name)
+    cards = [
+        _metric_card(m, host_name, _middleware_values(doc, m))
+        for m in doc.get("metrics") or []
+    ]
+    return "".join([
+        '<section class="report-group host-section" data-host="' + esc(host_name)
         + '" id="host-' + esc(host_name) + '">',
         '<h2 class="host-title">' + esc(host_name) + " " + _badge(execution_status) + "</h2>",
         '<p class="host-meta">' + meta + "</p>",
         "".join(cards),
         "</section>",
-    ]
-    return "".join(parts)
+    ])
 
 
 def _run_totals(docs: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -363,21 +402,19 @@ def _run_conclusion(docs: Sequence[Mapping[str, Any]], totals: Mapping[str, Any]
     return "整体结论：" + "；".join(parts) + "。"
 
 
-def _metric_dimensions(docs: Sequence[Mapping[str, Any]]) -> List[tuple]:
-    """指标维度（导航）：按首次出现顺序去重（metric_id, name）。"""
-    seen: Dict[str, str] = {}
-    order: List[str] = []
+def _middleware_dimensions(docs: Sequence[Mapping[str, Any]]) -> List[str]:
+    """中间件维度：优先使用 metric/host product_profiles，空时归入 Linux 基础。"""
+    result: List[str] = []
     for doc in docs:
-        for m in doc.get("metrics") or []:
-            mid = m.get("metric_id")
-            if mid and mid not in seen:
-                seen[mid] = m.get("name") or mid
-                order.append(mid)
-    return [(mid, seen[mid]) for mid in order]
+        for metric in doc.get("metrics") or []:
+            for value in _middleware_values(doc, metric):
+                if value not in result:
+                    result.append(value)
+    return result
 
 
 def _run_summary_nav(docs, totals, inspection_id, run_id, collected_at, generated_at) -> str:
-    """左导航 Run 摘要块。"""
+    """正文顶部 Run 摘要块（保留旧函数名以兼容调用方）。"""
     exec_dist = totals["exec_dist"]
     dist_text = " · ".join(
         "%d %s" % (exec_dist[es], es) for es in EXECUTION_STATUSES if exec_dist[es]
@@ -397,55 +434,113 @@ def _run_summary_nav(docs, totals, inspection_id, run_id, collected_at, generate
     rows = "".join(
         "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>" for k, v in items
     )
-    return '<dl class="run-meta">' + rows + "</dl>"
-
-
-def _host_nav(docs: Sequence[Mapping[str, Any]]) -> str:
-    """左导航主机列表按钮（点击筛选/定位该主机）。"""
-    buttons: List[str] = []
-    for doc in docs:
-        host = doc.get("host") or {}
-        name = host.get("name", "")
-        es = doc.get("execution_status", "UNKNOWN")
-        es_cls = "exec-" + (es if es in EXECUTION_STATUSES else "UNKNOWN").lower()
-        buttons.append(
-            '<button type="button" class="filter-btn filter-host" data-host="'
-            + esc(name) + '" title="点击筛选主机 ' + esc(name) + '">'
-            + esc(name)
-            + '<span class="host-chip exec-badge ' + es_cls + '">' + esc(es) + "</span>"
-            + "</button>"
-        )
-    return "".join(buttons)
-
-
-def _status_filters() -> str:
-    """左导航状态筛选按钮（RR §4：OK/WARN/CRIT/UNKNOWN）。"""
-    return "".join(
-        '<button type="button" class="filter-btn filter-status" data-status="'
-        + esc(st) + '">' + esc(st) + "</button>"
-        for st in STATUSES
+    return (
+        '<header class="run-header" aria-label="Run 摘要">'
+        '<h1>巡检 HTML 报表 — ' + esc(inspection_id) + "</h1>"
+        '<p class="run-stream">' + _run_conclusion(docs, totals) + "</p>"
+        '<dl class="run-meta">' + rows + "</dl>"
+        "</header>"
     )
 
 
-def _metric_nav(docs: Sequence[Mapping[str, Any]]) -> str:
-    """左导航指标维度按钮。"""
-    buttons = []
-    for mid, name in _metric_dimensions(docs):
-        buttons.append(
-            '<button type="button" class="filter-btn filter-metric" '
-            'data-metric-id="' + esc(mid) + '" title="' + esc(mid) + '">'
-            + esc(name) + "</button>"
+def _multi_select_filter(kind: str, title: str, options: Sequence[tuple]) -> str:
+    """左侧隐藏下拉多选：原生 details + 搜索框 + checkbox。"""
+    option_rows: List[str] = []
+    for value, label in options:
+        option_rows.append(
+            '<label class="filter-option"><input type="checkbox" class="filter-check" '
+            'data-filter-kind="' + esc(kind) + '" data-filter-value="' + esc(value) + '">'
+            '<span>' + esc(label) + "</span></label>"
         )
-    return "".join(buttons)
+    return (
+        '<details class="multi-select" data-filter-kind="' + esc(kind) + '">'
+        '<summary>' + esc(title) + '<span class="selection-count">未选择</span></summary>'
+        '<div class="multi-menu">'
+        '<input type="search" class="filter-search" data-search-kind="' + esc(kind)
+        + '" placeholder="搜索' + esc(title) + '" aria-label="搜索' + esc(title) + '">'
+        '<div class="filter-options">' + "".join(option_rows) + "</div>"
+        "</div></details>"
+    )
+
+
+def _host_nav(docs: Sequence[Mapping[str, Any]]) -> str:
+    """左导航主机多选筛选器。"""
+    options = []
+    for doc in docs:
+        host = doc.get("host") or {}
+        name = str(host.get("name", ""))
+        options.append((name, name))
+    return _multi_select_filter("host", "主机列表", options)
+
+
+def _status_filters() -> str:
+    """左导航状态多选筛选器。"""
+    return _multi_select_filter("status", "状态筛选", [(st, st) for st in STATUSES])
+
+
+def _middleware_nav(docs: Sequence[Mapping[str, Any]]) -> str:
+    """左导航中间件多选筛选器。"""
+    values = _middleware_dimensions(docs)
+    return _multi_select_filter("middleware", "中间件", [(value, value) for value in values])
 
 
 def _macro_cards(docs: Sequence[Mapping[str, Any]]) -> str:
     return "".join(_macro_card(doc) for doc in docs)
 
 
-def _host_details(docs: Sequence[Mapping[str, Any]]) -> str:
-    return "".join(_host_section(doc) for doc in docs)
+def _status_details(docs: Sequence[Mapping[str, Any]]) -> str:
+    parts: List[str] = []
+    for status in STATUSES:
+        cards: List[str] = []
+        for doc in docs:
+            host_name = str((doc.get("host") or {}).get("name", ""))
+            for metric in doc.get("metrics") or []:
+                metric_status = metric.get("status") if metric.get("status") in STATUSES else "UNKNOWN"
+                if metric_status == status:
+                    cards.append(_metric_card(
+                        metric, host_name, _middleware_values(doc, metric), show_host=True
+                    ))
+        if cards:
+            parts.append(
+                '<section class="report-group status-group" data-group-value="' + esc(status) + '">'
+                '<h2 class="group-title">状态：' + _chip(status) + '</h2>'
+                + "".join(cards) + "</section>"
+            )
+    return "".join(parts)
 
+
+def _middleware_details(docs: Sequence[Mapping[str, Any]]) -> str:
+    parts: List[str] = []
+    for middleware in _middleware_dimensions(docs):
+        cards: List[str] = []
+        for doc in docs:
+            host_name = str((doc.get("host") or {}).get("name", ""))
+            for metric in doc.get("metrics") or []:
+                values = _middleware_values(doc, metric)
+                if middleware in values:
+                    cards.append(_metric_card(metric, host_name, values, show_host=True))
+        if cards:
+            parts.append(
+                '<section class="report-group middleware-group" data-group-value="' + esc(middleware) + '">'
+                '<h2 class="group-title">中间件：' + esc(middleware) + "</h2>"
+                + "".join(cards) + "</section>"
+            )
+    return "".join(parts)
+
+
+def _grouped_details(docs: Sequence[Mapping[str, Any]]) -> str:
+    """预渲染三种分组视图，浏览器端只切换显隐。"""
+    return (
+        '<div class="group-view active" id="group-view-host" data-group-mode="host">'
+        + "".join(_host_section(doc) for doc in docs)
+        + "</div>"
+        '<div class="group-view" id="group-view-status" data-group-mode="status">'
+        + _status_details(docs)
+        + "</div>"
+        '<div class="group-view" id="group-view-middleware" data-group-mode="middleware">'
+        + _middleware_details(docs)
+        + "</div>"
+    )
 
 def render_html(
     docs: Sequence[Mapping[str, Any]],
@@ -501,21 +596,9 @@ def render_html(
         ),
         "HOST_NAV": _host_nav(docs),
         "STATUS_FILTERS": _status_filters(),
-        "METRIC_NAV": _metric_nav(docs),
+        "MIDDLEWARE_NAV": _middleware_nav(docs),
         "MACRO_CARDS": _macro_cards(docs),
-        "HOST_DETAILS": _host_details(docs),
-        "RUN_HEADER": (
-            "<h1>巡检 HTML 报表 — " + esc(inspection_id) + "</h1>"
-            '<p class="run-stream">run_id：' + esc(run_id)
-            + " · 主机 " + str(len(docs))
-            + " · 指标总数 " + str(totals["total_metrics"])
-            + " · OK %d / WARN %d / CRIT %d / UNKNOWN %d" % (
-                totals["ok"], totals["warn"], totals["crit"], totals["unknown"]
-            )
-            + " · 技术失败 " + str(totals["failed"])
-            + " · 生成于 " + esc(generated_at) + "</p>"
-            '<p class="run-conclusion">' + _run_conclusion(docs, totals) + "</p>"
-        ),
+        "GROUPED_DETAILS": _grouped_details(docs),
         "DATA_JSON": _embed_json(docs),
         "GENERATED_AT": esc(generated_at),
     }
