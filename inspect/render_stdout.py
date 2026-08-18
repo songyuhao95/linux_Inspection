@@ -436,7 +436,7 @@ def _cpu_load_detail_lines(metric: Mapping[str, Any]) -> Optional[List[tuple[str
         if ratio is None:
             ratio_text = "负载/核数=无法计算"
         elif detail_status == STATUS_OK:
-            ratio_text = f"负载/核数<={ratio:.2f}"
+            ratio_text = f"负载/核数={ratio:.2f}，阈值<=1.00，正常"
         else:
             ratio_text = f"负载/核数={ratio:.2f}"
         explanation = f"（{window.replace(' ', '').replace('　', '')}，CPU核数={cpu_cores_text}，{ratio_text}"

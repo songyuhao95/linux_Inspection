@@ -181,11 +181,12 @@ class TestMetricValueOutput:
         doc["metrics"] = [metric]
         n.validate_host_result(doc)
         out = render(doc)
-        assert "1 分钟系统负载：0.52（1分钟，CPU核数=8，负载/核数<=0.07）" in out
-        assert "5 分钟系统负载：0.44（5分钟，CPU核数=8，负载/核数<=0.06）" in out
-        assert "15 分钟系统负载：0.39（15分钟，CPU核数=8，负载/核数<=0.05）" in out
+        assert "1 分钟系统负载：0.52（1分钟，CPU核数=8，负载/核数=0.07，阈值<=1.00，正常）" in out
+        assert "5 分钟系统负载：0.44（5分钟，CPU核数=8，负载/核数=0.06，阈值<=1.00，正常）" in out
+        assert "15 分钟系统负载：0.39（15分钟，CPU核数=8，负载/核数=0.05，阈值<=1.00，正常）" in out
         assert "系统负载: 1 分钟系统负载" not in out
         assert "负载 <= CPU 核数：正常" not in out
+        assert "负载/核数<=0.07" not in out
         assert "相对核数，无量纲" not in out
 
     def test_load_unknown_window_keeps_status_and_explains_ratio(self):
