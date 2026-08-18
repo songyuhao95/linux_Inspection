@@ -37,8 +37,8 @@ def test_linux_basic_uses_interval_cpu_and_root_filesystem():
     specs = {spec.metric_id: spec for spec in runner_mod.build_metric_command_specs(profile={})}
     assert "top -bn2 -d 1" in specs["local.cpu.utilization"].command
     assert "grep 'Cpu(s)' | tail -1" in specs["local.cpu.utilization"].command
-    assert specs["local.filesystem.used_percent"].command == "df -P -T /"
-    assert specs["local.filesystem.inode_used_percent"].command == "df -P -i /"
+    assert specs["local.filesystem.used_percent"].command == "df -hT /"
+    assert specs["local.filesystem.inode_used_percent"].command == "df -i /"
 
 
 def test_profile_dependent_module_stays_unknown_without_profile():

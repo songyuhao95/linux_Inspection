@@ -339,7 +339,7 @@ def test_profile_root_path_allowed():
                     "unit": "x.service", "log_paths": ["/a/*.log"],
                     "log_keywords": ["err"]})
     s = next(x for x in specs if x.metric_id == "local.filesystem.used_percent")
-    assert s.command == "df -P -T /"
+    assert s.command == "df -hT /"
 
 
 # ==========================================================================
