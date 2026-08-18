@@ -45,6 +45,13 @@ bash inspect.sh --local --excel reports/local.xlsx --html reports/local.html
 
 旧参数 `--xlsx-out` 和 `--html-out` 已移除，不再被 CLI 接受。
 
+报表字段约束：HTML 指标卡片与 Excel `Local` Sheet 使用同一组字段
+`host`、`ip`、`metric_id`、`name`、`raw_value`、`normalized_value`、`unit`、
+`status`、`threshold_rule`、`command`；HTML 不再展开证据来源锚点或 provenance 详情，
+按主机分组时主机状态摘要直接合并到主机大卡片中。事实源 JSON 仍按脱敏契约保存 IP 为
+`<IP>`；Excel 的 `Local.ip` 仅在渲染时使用 inventory 的 `ansible_host` 填充，便于运维识别
+主机，不会写回 JSON、事件或 HTML，也不会携带认证变量。
+
 ## 监控模块扩展
 
 监控模块注册在 `inspect/modules/`，统一通过 `MonitorModule` 和 `ModuleRegistry` 暴露指标。当前内置模块为 `linux_basic`（Linux 主机基础指标）和 `linux_common`（需要产品 profile 的通用指标）。以后新增中间件时，应：

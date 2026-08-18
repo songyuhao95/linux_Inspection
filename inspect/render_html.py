@@ -10,8 +10,7 @@
     浏览器 JS 只做显隐过滤）；
   - 文件名默认 `<inspection-id>.html`（TD §3 布局）；`out_path` 参数
     覆盖（对应 CLI `--html PATH`，函数参数语义，cli-contract §2）；
-  - 不可信文本（evidence 命令/日志片段、error.message、threshold
-    source_anchor、provenance 备注、主机名等）一律 HTML 转义
+  - 不可信文本（主机名、指标字段、command 等）一律 HTML 转义
     （html.escape quote=True）；内嵌 JSON 中 "</" 转义为 "<\\/" 防止
     `</script>` 越界闭合；全部动态文本的 "$" 双写为 "$$"（模板经
     string.Template 渲染，TD §8：stdlib 零依赖）；
@@ -53,28 +52,19 @@ SUMMARY_KEYS: Mapping[str, str] = {
     "UNKNOWN": "unknown",
 }
 
-# 逐指标卡片字段标签（RR §4：threshold/evidence/error/provenance）
-_THRESHOLD_FIELDS: Sequence[tuple] = (
-    ("阈值", "layer"),
-    ("阈值", "rule_id"),
-    ("阈值", "value"),
-    ("阈值", "source_anchor"),
-    ("阈值", "notes"),
-)
-_EVIDENCE_FIELDS: Sequence[tuple] = (
-    ("证据", "command"),
-    ("证据", "output_summary"),
-    ("证据", "raw_ref"),
-    ("证据", "sampled_at"),
-)
-_ERROR_FIELDS: Sequence[tuple] = (
-    ("错误", "code"),
-    ("错误", "message"),
-)
-_PROVENANCE_FIELDS: Sequence[tuple] = (
-    ("来源", "config_sources"),
-    ("来源", "doc_sources"),
-    ("来源", "notes"),
+# 指标卡片只展示 Excel Local 列字段；threshold/evidence 中的嵌套值在
+# 渲染期映射为 threshold_rule/command，不改变事实源文档。
+_METRIC_FIELDS: Sequence[tuple] = (
+    ("host", "host"),
+    ("ip", "ip"),
+    ("metric_id", "metric_id"),
+    ("name", "name"),
+    ("raw_value", "raw_value"),
+    ("normalized_value", "normalized_value"),
+    ("unit", "unit"),
+    ("status", "status"),
+    ("threshold_rule", "threshold_rule"),
+    ("command", "command"),
 )
 
 
@@ -190,8 +180,8 @@ def _chip(status: str) -> str:
     )
 
 
-def _field_rows(section: str, obj: Any, fields: Sequence[tuple]) -> str:
-    """指标卡片字段行（label + key 双语，机械可断言；RR §4 字段全集）。"""
+def _field_rows(obj: Any, fields: Sequence[tuple]) -> str:
+    """指标卡片字段行（label + key，值统一 HTML 转义）。"""
     obj = obj if isinstance(obj, Mapping) else {}
     rows: List[str] = []
     for label, key in fields:
@@ -233,14 +223,46 @@ def _middleware_values(doc: Mapping[str, Any], metric: Mapping[str, Any]) -> Lis
     return values or ["Linux 基础"]
 
 
+def _threshold_rule_text(metric: Mapping[str, Any]) -> str:
+    """Build the same human-readable threshold_rule text used by Excel."""
+    threshold = metric.get("threshold") or {}
+    parts: List[str] = []
+    evidence = metric.get("evidence") or {}
+    details = evidence.get("details") if isinstance(evidence, Mapping) else None
+    detail = details[0] if isinstance(details, list) and details and isinstance(details[0], Mapping) else None
+    if detail:
+        for key, label in (("window", "测量周期"), ("cpu_cores", "CPU核数"),
+                           ("mount", "挂载点"), ("filesystem", "文件系统")):
+            value = detail.get(key)
+            if value is not None and str(value) != "":
+                parts.append(f"{label}：{value}")
+    if not parts:
+        parts.append(f"测量对象：{metric.get('name') or metric.get('metric_id') or '指标'}")
+    value = threshold.get("value")
+    if value is not None and str(value) != "":
+        parts.append("判定规则：" + str(value).replace(">=", "≥").replace("<=", "≤"))
+    else:
+        notes = threshold.get("notes")
+        if notes is not None and str(notes) != "":
+            parts.append(f"判定说明：{notes}")
+        else:
+            layer = threshold.get("layer")
+            parts.append(f"判定层：{layer}" if layer else "判定规则：事实源未提供")
+    rule_id = threshold.get("rule_id")
+    if rule_id is not None and str(rule_id) != "":
+        parts.append(f"规则标识：{rule_id}")
+    return "；".join(str(part) for part in parts)
+
+
 def _metric_card(
     metric: Mapping[str, Any],
     host_name: str,
+    host_ip: str = "",
     middleware_values: Optional[Sequence[str]] = None,
     *,
     show_host: bool = False,
 ) -> str:
-    """单指标卡片；show_host 用于跨主机的状态/中间件分组视图。"""
+    """Render exactly the Excel Local columns, without evidence/source sections."""
     status = metric.get("status")
     if status not in STATUSES:
         status = "UNKNOWN"
@@ -253,7 +275,21 @@ def _metric_card(
         '<span class="card-context">主机：' + esc(host_name) + "</span>"
         if show_host else ""
     )
-    parts: List[str] = [
+    evidence = metric.get("evidence")
+    command = evidence.get("command") if isinstance(evidence, Mapping) else None
+    local_fields = {
+        "host": host_name,
+        "ip": host_ip,
+        "metric_id": metric_id,
+        "name": name,
+        "raw_value": metric.get("raw_value"),
+        "normalized_value": metric.get("normalized_value"),
+        "unit": metric.get("unit"),
+        "status": status,
+        "threshold_rule": _threshold_rule_text(metric),
+        "command": command,
+    }
+    return "".join([
         '<div class="' + card_cls + '" data-status="' + esc(status)
         + '" data-host="' + esc(host_name)
         + '" data-metric-id="' + esc(metric_id)
@@ -262,25 +298,9 @@ def _metric_card(
         '<span class="metric-id">' + esc(metric_id) + "</span>"
         '<span class="metric-name">' + esc(name) + "</span>"
         + context + _chip(status) + "</h4></div>",
-        '<dl class="card-values">',
-        '<div><dt>raw_value</dt><dd>' + _value_or_dash(metric.get("raw_value")) + "</dd></div>",
-        '<div><dt>normalized_value</dt><dd>'
-        + _value_or_dash(metric.get("normalized_value"))
-        + "</dd></div>",
-        '<div><dt>unit</dt><dd>' + _value_or_dash(metric.get("unit")) + "</dd></div>",
-        "</dl>",
-        '<table class="card-fields">'
-        + _field_rows("阈值", metric.get("threshold"), _THRESHOLD_FIELDS)
-        + "</table>",
-        '<details class="card-details"><summary>证据与来源锚点</summary>',
-        '<table class="card-fields">'
-        + _field_rows("证据", metric.get("evidence"), _EVIDENCE_FIELDS)
-        + _field_rows("错误", metric.get("error"), _ERROR_FIELDS)
-        + _field_rows("来源", metric.get("provenance"), _PROVENANCE_FIELDS)
-        + "</table></details>",
+        '<table class="card-fields">' + _field_rows(local_fields, _METRIC_FIELDS) + "</table>",
         "</div>",
-    ]
-    return "".join(parts)
+    ])
 
 
 def _int_of(value: Any, default: int = 0) -> int:
@@ -297,8 +317,8 @@ def _summary_of(doc: Mapping[str, Any]) -> Mapping[str, Any]:
     return s if isinstance(s, Mapping) else {}
 
 
-def _macro_card(doc: Mapping[str, Any]) -> str:
-    """宏观卡片：主机名 + execution_status 徽标 + 四状态计数 + 整体结论。"""
+def _host_summary(doc: Mapping[str, Any]) -> str:
+    """Render the former host summary inside its host detail card."""
     host = doc.get("host") or {}
     host_name = host.get("name", "")
     execution_status = doc.get("execution_status", "UNKNOWN")
@@ -309,8 +329,8 @@ def _macro_card(doc: Mapping[str, Any]) -> str:
     total_metrics = _int_of(summary.get("total_metrics"), default=total)
     executed = _int_of(summary.get("executed"), default=total_metrics)
     parts: List[str] = [
-        '<section class="macro-card" data-host="' + esc(host_name) + '">',
-        '<h3 class="macro-host">' + esc(host_name) + " " + _badge(execution_status) + "</h3>",
+        '<div class="host-summary">',
+        '<h2 class="host-title">' + esc(host_name) + " " + _badge(execution_status) + "</h2>",
         '<ul class="macro-counts">',
     ]
     for st in STATUSES:
@@ -318,16 +338,14 @@ def _macro_card(doc: Mapping[str, Any]) -> str:
             '<li class="count count-' + st.lower() + '">' + esc(st)
             + "<b>" + str(counts[st]) + "</b></li>"
         )
-    parts.append("</ul>")
-    parts.append(
-        '<p class="macro-conclusion">' + _conclusion(counts, execution_status, failed) + "</p>"
-    )
-    parts.append(
+    parts.extend([
+        "</ul>",
+        '<p class="macro-conclusion">' + _conclusion(counts, execution_status, failed) + "</p>",
         '<p class="macro-meta">执行状态：' + esc(execution_status)
         + " · 指标总数 " + str(total_metrics) + " · 已执行 " + str(executed)
-        + " · 技术失败 " + str(failed) + "</p>"
-    )
-    parts.append("</section>")
+        + " · 技术失败 " + str(failed) + "</p>",
+        "</div>",
+    ])
     return "".join(parts)
 
 
@@ -358,30 +376,19 @@ def _host_error_block(doc: Mapping[str, Any], *, show_host: bool = False) -> str
 
 
 def _host_section(doc: Mapping[str, Any]) -> str:
-    """按主机分组的详情区：标题/徽标/元信息 + 逐指标卡片。"""
+    """按主机分组的单一大卡片：摘要与 Excel 字段指标统一展示。"""
     host = doc.get("host") or {}
     host_name = host.get("name", "")
-    execution_status = doc.get("execution_status", "UNKNOWN")
-    summary = _summary_of(doc)
-    failed = _int_of(summary.get("failed"))
-    meta = (
-        "IP：" + esc(host.get("ip", ""))
-        + " · inventory_source：" + esc(host.get("inventory_source", ""))
-        + " · product_profiles：" + esc(_fmt(host.get("product_profiles") or []))
-        + " · collected_at：" + esc(doc.get("collected_at", ""))
-        + " · duration_sec：" + esc(doc.get("duration_sec", ""))
-        + " · 技术失败：" + str(failed)
-    )
+    host_ip = host.get("ip", "")
     cards = [
-        _metric_card(m, host_name, _middleware_values(doc, m))
+        _metric_card(m, host_name, host_ip, _middleware_values(doc, m))
         for m in doc.get("metrics") or []
     ]
     error_block = _host_error_block(doc)
     return "".join([
         '<section class="report-group host-section" data-host="' + esc(host_name)
         + '" id="host-' + esc(host_name) + '">',
-        '<h2 class="host-title">' + esc(host_name) + " " + _badge(execution_status) + "</h2>",
-        '<p class="host-meta">' + meta + "</p>",
+        _host_summary(doc),
         error_block,
         "".join(cards),
         "</section>",
@@ -515,8 +522,6 @@ def _middleware_nav(docs: Sequence[Mapping[str, Any]]) -> str:
     return _multi_select_filter("middleware", "中间件", [(value, value) for value in values])
 
 
-def _macro_cards(docs: Sequence[Mapping[str, Any]]) -> str:
-    return "".join(_macro_card(doc) for doc in docs)
 
 
 def _status_details(docs: Sequence[Mapping[str, Any]]) -> str:
@@ -533,7 +538,7 @@ def _status_details(docs: Sequence[Mapping[str, Any]]) -> str:
                 metric_status = metric.get("status") if metric.get("status") in STATUSES else "UNKNOWN"
                 if metric_status == status:
                     cards.append(_metric_card(
-                        metric, host_name, _middleware_values(doc, metric), show_host=True
+                        metric, host_name, (doc.get("host") or {}).get("ip", ""), _middleware_values(doc, metric), show_host=True
                     ))
         if cards:
             parts.append(
@@ -556,7 +561,7 @@ def _middleware_details(docs: Sequence[Mapping[str, Any]]) -> str:
             for metric in doc.get("metrics") or []:
                 values = _middleware_values(doc, metric)
                 if middleware in values:
-                    cards.append(_metric_card(metric, host_name, values, show_host=True))
+                    cards.append(_metric_card(metric, host_name, (doc.get("host") or {}).get("ip", ""), values, show_host=True))
         if cards:
             parts.append(
                 '<section class="report-group middleware-group" data-group-value="' + esc(middleware) + '">'
@@ -635,7 +640,6 @@ def render_html(
         "HOST_NAV": _host_nav(docs),
         "STATUS_FILTERS": _status_filters(),
         "MIDDLEWARE_NAV": _middleware_nav(docs),
-        "MACRO_CARDS": _macro_cards(docs),
         "GROUPED_DETAILS": _grouped_details(docs),
         "DATA_JSON": _embed_json(docs),
         "GENERATED_AT": esc(generated_at),

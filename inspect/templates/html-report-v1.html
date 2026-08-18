@@ -129,13 +129,12 @@ body {
 .print-toggle input { margin-right: 6px; vertical-align: -1px; }
 .filter-hint { font-size: 12px; color: var(--text-dim); }
 
-/* ---------------- 宏观卡片（每主机四状态计数 + 徽标 + 结论） ---------------- */
-.macro-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 22px; }
-.macro-card {
+/* ---------------- 主机大卡片摘要（摘要与指标合并） ---------------- */
+.host-section {
   background: var(--card-bg); border: 1px solid var(--border);
-  border-radius: 8px; padding: 12px 14px;
+  border-radius: 10px; padding: 16px; margin-bottom: 22px;
 }
-.macro-host { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.host-summary { margin-bottom: 14px; }
 .macro-counts { list-style: none; margin: 0 0 8px; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
 .count { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; color: #ffffff; }
 .count b { font-size: 13px; margin-left: 4px; }
@@ -174,7 +173,6 @@ body {
 .metric-card.status-unknown { border-left-color: #757575; }
 .metric-card.hidden { display: none; }
 .card-context { color: var(--text-dim); font-size: 12px; font-weight: 400; }
-.metric-card.expanded { border-color: var(--accent); }
 
 .card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
 .card-title { font-size: 14px; margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -218,13 +216,6 @@ body {
 .exec-partial { border-color: #F9A825; background: #FFF8E1; color: #8a6d00; }
 .exec-error   { border-color: #C62828; background: #FDECEA; color: #C62828; }
 
-details.card-details { margin-top: 8px; border-top: 1px dashed #eceef1; padding-top: 6px; }
-details.card-details summary {
-  cursor: pointer; color: var(--accent); font-size: 13px;
-  outline: none; user-select: none;
-}
-details.card-details summary:hover { text-decoration: underline; }
-
 footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); }
 
 /* ---------------- 打印友好（RR §4）：默认宏观摘要，详情可展开 ---------------- */
@@ -233,14 +224,10 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
   body { background: #ffffff; font-size: 12px; }
   .layout { display: block; }
   .content { padding: 0; }
-  .macro-cards { display: block; }
-  .macro-card { break-inside: avoid; margin-bottom: 10px; }
-  .host-section { margin-bottom: 16px; }
+  .host-section { break-inside: avoid; margin-bottom: 16px; }
   .metric-card { break-inside: avoid; }
-  /* 默认只打印宏观摘要：主机详情与卡内证据折叠 */
-  .host-detail, .group-view:not(.active), .card-details { display: none; }
+  .host-detail, .group-view:not(.active) { display: none; }
   body.print-details .host-detail, body.print-details .group-view.active { display: block; }
-  body.print-details .card-details { display: block; }
 }
 </style>
 </head>
@@ -279,13 +266,8 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
       <label class="print-toggle">
         <input type="checkbox" id="print-details-toggle"> 打印时包含主机详情
       </label>
-      <span class="filter-hint">左侧筛选支持搜索和多选；点击指标卡片展开证据与来源锚点。</span>
+      <span class="filter-hint">左侧筛选支持搜索和多选；指标卡片字段与 Excel 报表保持一致。</span>
     </div>
-
-    <!-- 宏观卡片：每主机四状态计数 + execution_status 徽标 + 整体结论 -->
-    <section class="macro-cards" aria-label="宏观摘要卡片">
-      $MACRO_CARDS
-    </section>
 
     <!-- 三种分组视图在渲染期静态生成，JS 仅切换显隐 -->
     <section class="host-detail" aria-label="指标详情">
@@ -442,31 +424,12 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
     });
   }
 
-  /* 点击指标卡片展开/收起证据与来源锚点。 */
-  function bindCardToggle() {
-    var cards = document.querySelectorAll(".metric-card");
-    var i;
-    for (i = 0; i < cards.length; i += 1) {
-      (function (card) {
-        card.addEventListener("click", function (ev) {
-          if (ev.target.closest("details")) { return; }
-          var details = card.querySelector(".card-details");
-          if (details) {
-            if (details.hasAttribute("open")) { details.removeAttribute("open"); }
-            else { details.setAttribute("open", "open"); }
-          }
-          card.classList.toggle("expanded");
-        });
-      })(cards[i]);
-    }
-  }
   bindChecks();
   bindSearches();
-  bindCardToggle();
   updateSelectionCounts();
   applyFilters();
 
-  /* 打印友好：默认只打印宏观摘要；勾选后打印当前分组详情。 */
+  /* 打印友好：默认只打印当前摘要；勾选后打印当前分组详情。 */
   var printToggle = document.getElementById("print-details-toggle");
   if (printToggle) {
     printToggle.addEventListener("change", function () {

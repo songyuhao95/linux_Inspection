@@ -40,9 +40,10 @@
 - 布局：
   - 左导航仅提供主机列表、状态筛选（OK/WARN/CRIT/UNKNOWN）、中间件筛选；三者均为原生隐藏下拉框，内含搜索输入和 checkbox 多选。
   - 正文最上方展示完整 Run 摘要（run_id、inspection_id、主机/指标计数、状态合计、技术失败、执行状态分布、采集时间、生成时间和整体结论）。
-  - 摘要下方提供三种正文显示方式：按主机分组、按状态分组、按中间件分组；指标卡片展示 raw/normalized/unit/status/threshold/evidence/error/provenance。
-- 交互：按状态/主机/中间件多选过滤，筛选项支持搜索；点击指标卡片展开证据与来源锚点；分组视图切换只做静态片段显隐，不在浏览器重新计算业务汇总。
-- 打印友好：默认打印宏观摘要，勾选后打印当前分组详情。
+  - 摘要下方提供三种正文显示方式：按主机分组、按状态分组、按中间件分组；按主机分组时，主机状态摘要与指标明细合并在同一主机大卡片中。
+  - 指标卡片与 Excel Local 列保持一致：host、ip、metric_id、name、raw_value、normalized_value、unit、status、threshold_rule、command；不再展示证据来源锚点、evidence_summary、provenance、error 等扩展块。
+- 交互：按状态/主机/中间件多选过滤，筛选项支持搜索；分组视图切换只做静态片段显隐，不在浏览器重新计算业务汇总。
+- 打印友好：默认打印当前分组摘要，勾选后打印当前分组详情。
 - HTML 安全与可见性约束：内嵌 JSON 将 `<` 编码为 `\u003c` 防止大小写脚本闭合绕过；无指标的 ERROR/PARTIAL 主机必须保留主机级技术失败提示；清除筛选同时清空搜索词并恢复全部选项。
 
 ## 5. 四状态与颜色
@@ -60,8 +61,8 @@
 
 1. 所有报表由同一份 JSON 渲染；同一 inspection 的三类报表状态计数必须一致。
 2. -UNKNOWN- 必须在报表中可见（不得静默过滤）；-ERROR-/技术失败必须可见（Errors-Evidence）。
-3. Local Sheet 的 threshold_rule 使用可读中文解释，command 保留事实源中的指标取值命令；source_anchor/evidence_summary/provenance 仍保留在 JSON/HTML 事实消费链路中，但不作为 Local Sheet 列重复展示。
-4. 报表不含凭据与明文 IP；脱敏规则同 host-result-v1.md 第 3 节。
+3. Local Sheet 的 threshold_rule 使用可读中文解释，command 保留事实源中的指标取值命令；source_anchor/evidence_summary/provenance 不作为 Local Sheet 或 HTML 正文列重复展示。
+4. host-result-v1 JSON 继续按脱敏契约保存 `<IP>`。Excel Local Sheet 是经 CLI inventory 解析得到的运维展示例外：运行时将 inventory 中的 ansible_host 映射到 ip 列，但不回写 JSON、事件或 HTML 事实源；凭据仍不进入任何报表。
 
 ## 7. 路线（后续版本，非本合同交付）
 

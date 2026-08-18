@@ -284,6 +284,70 @@ def test_build_host_selection_inventory_all():
     assert sel == {"kind": "inventory", "inventory": "h.yml", "limit": "all"}
 
 
+def test_host_ips_comes_from_resolved_host_selection():
+    selection = cli.inventory_mod.HostSelection(
+        kind="inventory",
+        inventory_file=Path("inventory.ini"),
+        hosts=[
+            cli.inventory_mod.HostEntry("node-01", "192.0.2.10"),
+            cli.inventory_mod.HostEntry("node-02", "192.0.2.11"),
+        ],
+    )
+
+    assert cli._host_ips(selection) == {
+        "node-01": "192.0.2.10",
+        "node-02": "192.0.2.11",
+    }
+
+
+def test_run_inspection_passes_inventory_ips_to_xlsx_renderer(monkeypatch, tmp_path):
+    selection = cli.inventory_mod.HostSelection(
+        kind="inventory",
+        inventory_file=tmp_path / "inventory.ini",
+        hosts=[cli.inventory_mod.HostEntry("node-01", "192.0.2.10")],
+    )
+    doc = {"metrics": [{"status": "OK"}]}
+    captured = {}
+
+    monkeypatch.setattr(cli.config_mod, "load_inspect_config", lambda: {"out_dir": tmp_path / "out"})
+    monkeypatch.setattr(cli.config_mod, "build_resolved_thresholds", lambda: {})
+    monkeypatch.setattr(cli.inventory_mod, "default_runtime_dir", lambda: tmp_path / "runtime")
+    monkeypatch.setattr(cli.inventory_mod, "resolve_host_selection", lambda *_args: selection)
+    monkeypatch.setattr(cli.runner_mod, "build_metric_command_specs", lambda: [])
+    monkeypatch.setattr(
+        cli.runner_mod,
+        "run",
+        lambda *_args, **_kwargs: {"execution_status": "SUCCESS", "hosts": []},
+    )
+    monkeypatch.setattr(cli.normalize_mod, "make_inspection_id", lambda *_args: "inspection-1")
+    monkeypatch.setattr(cli, "_make_run_id", lambda: "run-test")
+    monkeypatch.setattr(
+        cli.normalize_mod,
+        "normalize_run_results",
+        lambda *_args, **_kwargs: {"documents": [doc], "host_errors": []},
+    )
+    monkeypatch.setattr(
+        cli.fact_source_mod,
+        "write_inspection",
+        lambda *_args, **_kwargs: {
+            "entries": [{"file": str(tmp_path / "host.json")}],
+            "inspection_dir": tmp_path / "inspection",
+        },
+    )
+    monkeypatch.setattr(cli.fact_source_mod, "read_host_result", lambda *_args: doc)
+    monkeypatch.setattr(cli.stdout_mod, "render_inspection_report", lambda *_args, **_kwargs: "summary")
+
+    def fake_render(docs, *, out_path, host_ips):
+        captured.update(docs=docs, out_path=out_path, host_ips=host_ips)
+
+    monkeypatch.setattr(cli.xlsx_mod, "render_xlsx", fake_render)
+
+    ns = Namespace(excel=str(tmp_path / "report.xlsx"), html=None, fail_on=False)
+    assert cli.run_inspection(ns, {"kind": "inventory", "inventory": "inventory.ini"}) == cli.EXIT_OK
+    assert captured["host_ips"] == {"node-01": "192.0.2.10"}
+    assert captured["out_path"] == tmp_path / "report.xlsx"
+
+
 # ---------------------------------------------------------------- 退出码映射（单元）
 
 def test_exit_code_mapping_priority():

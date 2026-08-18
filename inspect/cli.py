@@ -220,6 +220,11 @@ def _make_run_id() -> str:
     return f"run-{datetime.now():%Y%m%d}-{uuid.uuid4().hex[:6]}"
 
 
+def _host_ips(host_selection: inventory_mod.HostSelection) -> Dict[str, str]:
+    """Build the display-only host-name → inventory target-address mapping."""
+    return {host.name: host.ip for host in host_selection.hosts}
+
+
 def _inventory_source(host_selection: object) -> str:
     """normalize 的 inventory_source：inventory 模式记录文件路径，其余取 kind。"""
     kind = host_selection.kind
@@ -329,7 +334,11 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     if ns.excel is not None:
         xlsx_path = _report_output_path(ns.excel, inspection_id, ".xlsx")
         try:
-            xlsx_mod.render_xlsx(facts_docs, out_path=xlsx_path)
+            xlsx_mod.render_xlsx(
+                facts_docs,
+                out_path=xlsx_path,
+                host_ips=_host_ips(host_selection),
+            )
         except xlsx_mod.RendererError as exc:
             print(f"inspect.sh: 执行失败: {exc}", file=sys.stderr)
             execution_error = True

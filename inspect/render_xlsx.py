@@ -307,7 +307,10 @@ def _threshold_rule_text(
 
 
 def _local_row_values(
-    doc: Mapping[str, Any], metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]]
+    doc: Mapping[str, Any],
+    metric: Mapping[str, Any],
+    detail: Optional[Mapping[str, Any]],
+    host_ips: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, Any]:
     """Map one fact-source metric/detail pair to the Local headers."""
     status = _detail_status(metric, detail or {})
@@ -326,9 +329,11 @@ def _local_row_values(
         elif mount is not None and str(mount) != "":
             name = f"{name}: {mount}"
     host = doc.get("host") or {}
+    host_name = host.get("name", "")
+    mapped_ip = host_ips.get(host_name) if host_ips else None
     return {
-        "host": host.get("name", ""),
-        "ip": host.get("ip", "—"),
+        "host": host_name,
+        "ip": mapped_ip if mapped_ip not in (None, "") else host.get("ip", "—"),
         "metric_id": metric.get("metric_id", ""),
         "name": name,
         "raw_value": raw_value,
@@ -353,7 +358,9 @@ def _require_xlsxwriter():
 
 
 def _write_workbook(
-    docs: Sequence[Mapping[str, Any]], target: Path
+    docs: Sequence[Mapping[str, Any]],
+    target: Path,
+    host_ips: Optional[Mapping[str, str]] = None,
 ) -> None:
     xlsxwriter = _require_xlsxwriter()
     try:
@@ -472,7 +479,7 @@ def _write_workbook(
         for metric in doc["metrics"]:
             for expanded in _metric_rows(metric):
                 detail = expanded["detail"]
-                values = _local_row_values(doc, metric, detail)
+                values = _local_row_values(doc, metric, detail, host_ips=host_ips)
                 status = values["status"]
                 value_fmt = crit_value_fmt if status == "CRIT" else cell_fmt
                 for col, header in enumerate(LOCAL_HEADERS):
@@ -541,6 +548,7 @@ def _write_workbook(
 def render_xlsx(
     docs: Union[Mapping[str, Any], Sequence[Mapping[str, Any]]],
     out_path: Optional[Union[str, Path]] = None,
+    host_ips: Optional[Mapping[str, str]] = None,
 ) -> Path:
     """渲染三 Sheet Excel 报表（只读消费 host-result-v1 文档）。
 
@@ -579,13 +587,14 @@ def render_xlsx(
         raise RendererError(
             f"Excel 输出目录创建失败: {target.parent}（{exc}）"
         ) from exc
-    _write_workbook(doc_list, target)
+    _write_workbook(doc_list, target, host_ips=host_ips)
     return target
 
 
 def render_xlsx_file(
     json_path: Union[str, Path],
     out_path: Optional[Union[str, Path]] = None,
+    host_ips: Optional[Mapping[str, str]] = None,
 ) -> Path:
     """读取 host-result-v1 JSON 文件并渲染（渲染层只读 JSON，RR §1）。
 
@@ -604,9 +613,9 @@ def render_xlsx_file(
     except ValueError as exc:
         raise RendererError(f"事实源 JSON 损坏（解析失败）: {p}（{exc}）") from exc
     if isinstance(data, Mapping):
-        return render_xlsx(data, out_path=out_path)
+        return render_xlsx(data, out_path=out_path, host_ips=host_ips)
     if isinstance(data, list):
-        return render_xlsx(data, out_path=out_path)
+        return render_xlsx(data, out_path=out_path, host_ips=host_ips)
     raise RendererError(
         f"事实源 JSON 结构非法（期望 host-result-v1 对象或数组）: {p}"
     )

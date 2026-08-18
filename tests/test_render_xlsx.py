@@ -590,6 +590,29 @@ class TestRenderWithStubXlsxwriter:
         assert "判定规则：" in rows[crit_row][8][0]
         assert rows[crit_row][9][0] == "echo test"
 
+    def test_host_ips_override_fact_source_ip_for_local_only(self, monkeypatch, tmp_path):
+        stub = StubXlsxwriter()
+        monkeypatch.setitem(sys.modules, "xlsxwriter", stub)
+        docs = rich_docs()
+        host_ips = {
+            "node-fx01": "192.0.2.101",
+            "node-fx02": "192.0.2.102",
+        }
+
+        rx.render_xlsx(docs, tmp_path / "r.xlsx", host_ips=host_ips)
+
+        local = stub.workbooks[-1].sheets[1]
+        rows = [
+            local.cells[(row, 1)][0]
+            for row in range(1, 1 + sum(len(rx._metric_rows(m)) for d in docs for m in d["metrics"]))
+        ]
+        assert rows == [
+            "192.0.2.101", "192.0.2.101", "192.0.2.101", "192.0.2.101",
+            "192.0.2.101", "192.0.2.102", "192.0.2.102",
+        ]
+        assert all(doc["host"]["ip"] == "<IP>" for doc in docs)
+
+
     def test_local_expands_load_and_filesystem_details(self, monkeypatch, tmp_path):
         stub = StubXlsxwriter()
         monkeypatch.setitem(sys.modules, "xlsxwriter", stub)

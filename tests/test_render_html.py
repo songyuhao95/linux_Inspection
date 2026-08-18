@@ -193,9 +193,9 @@ class TestEmbeddedJson:
         assert "$$" not in blob
 
     def test_dollar_in_body_preserved(self, tmp_path):
-        """正文中的 "$" 原样显示（不经模板误解析，也不被转义破坏）。"""
+        """Excel 对齐字段 command 中的 "$" 原样显示。"""
         docs = fixture_docs()
-        docs[2]["metrics"][0]["evidence"]["output_summary"] = "cmd $VAR ok"
+        docs[2]["metrics"][0]["evidence"]["command"] = "cmd $VAR ok"
         body = body_text(render_str(docs, tmp_path))
         assert "$VAR" in body
         assert "$$" not in body
@@ -207,26 +207,21 @@ class TestEmbeddedJson:
 
 
 class TestEscaping:
-    def test_script_injection_escaped_everywhere(self, tmp_path):
-        """evidence/error.message/provenance 三处注入均转义为实体。"""
+    def test_script_injection_escaped_in_command_field(self, tmp_path):
+        """Excel 对齐字段 command 中的不可信文本仍然 HTML 转义。"""
         payload = "<script>alert(1)</script>"
         docs = fixture_docs()
-        docs[0]["metrics"][0]["evidence"]["output_summary"] = payload
-        docs[1]["metrics"][3]["error"] = {
-            "code": "PERMISSION_DENIED",
-            "message": payload,
-            "metric_status": "UNKNOWN",
-        }
-        docs[2]["metrics"][0]["provenance"]["notes"] = payload
+        docs[0]["metrics"][0]["evidence"]["command"] = payload
         body = body_text(render_str(docs, tmp_path))
         assert "<script>alert(1)</script>" not in body
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
-        assert body.count("&lt;script&gt;") >= 3
-        assert "alert(1)" in body  # 载荷文本保留（转义而非丢弃）
+        assert "alert(1)" in body
+        assert "证据 output_summary" not in body
+        assert "来源 doc_sources" not in body
 
     def test_html_special_chars_escaped(self, tmp_path):
         docs = fixture_docs()
-        docs[0]["metrics"][1]["evidence"]["output_summary"] = (
+        docs[0]["metrics"][1]["evidence"]["command"] = (
             'echo "a & b < c > d" and \'q\''
         )
         body = body_text(render_str(docs, tmp_path))
@@ -236,8 +231,10 @@ class TestEscaping:
         assert "&lt; c" in body  # "< c"（原样含空格）转义为 "&lt; c"
 
     def test_fixture_special_chars_escaped(self, tmp_path):
-        """夹具固有特殊字符（a < b & c）在产物中为实体。"""
-        body = body_text(render_str(fixture_docs(), tmp_path))
+        """夹具中 command 的特殊字符在产物中为实体。"""
+        docs = fixture_docs()
+        docs[2]["metrics"][0]["evidence"]["command"] = "a < b & c"
+        body = body_text(render_str(docs, tmp_path))
         assert "a &lt; b &amp; c" in body
         assert "a < b & c" not in body
 
@@ -249,15 +246,14 @@ class TestEscaping:
         assert "onclick=" + '"alert' not in body
         assert "&quot;" in body
 
-    def test_error_message_escaped_in_card(self, tmp_path):
+    def test_command_special_chars_escaped_in_card(self, tmp_path):
         docs = fixture_docs()
-        docs[1]["metrics"][3]["error"]["message"] = (
-            "cannot read <log> & 'secret'"
+        docs[1]["metrics"][3]["evidence"]["command"] = (
+            "cat <log> & 'secret'"
         )
         body = body_text(render_str(docs, tmp_path))
-        # 引号（含单引号）同样转义（quote=True，属性值安全）
-        assert "cannot read &lt;log&gt; &amp; &#x27;secret&#x27;" in body
-        assert "cannot read <log> & 'secret'" not in body
+        assert "cat &lt;log&gt; &amp; &#x27;secret&#x27;" in body
+        assert "cat <log> & 'secret'" not in body
 
     def test_esc_unit(self):
         assert rh.esc("a<b>&\"'") == "a&lt;b&gt;&amp;&quot;&#x27;"
@@ -287,9 +283,11 @@ class TestLayout:
         s = render_str(fixture_docs(), tmp_path)
         assert s.index('<nav class="nav"') < s.index('<main class="content"')
 
-    def test_macro_cards_before_host_details(self, tmp_path):
+    def test_host_summary_is_inside_host_details(self, tmp_path):
         s = render_str(fixture_docs(), tmp_path)
-        assert s.index('class="macro-cards"') < s.index('class="host-detail"')
+        assert 'class="macro-cards"' not in s
+        assert 'class="macro-card"' not in s
+        assert s.index('class="host-summary"') < s.index('class="metric-card')
 
     def test_run_summary_fields(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
@@ -306,23 +304,20 @@ class TestLayout:
         assert "8 / 1 / 1 / 2" in body
         assert "技术失败 1" in body
 
-    def test_metric_card_fields_complete(self, tmp_path):
-        """逐指标卡片含 raw/normalized/unit/status/threshold/evidence/
-        error/provenance 全集（RR §4）。"""
+    def test_metric_card_fields_match_excel_local_columns(self, tmp_path):
+        """指标卡片只保留 Excel Local 列字段。"""
         body = body_text(render_str(fixture_docs(), tmp_path))
         for label in (
-            "raw_value", "normalized_value", "unit",
-            "阈值 rule_id", "阈值 value", "阈值 source_anchor", "阈值 notes",
-            "证据 command", "证据 output_summary", "证据 raw_ref", "证据 sampled_at",
-            "错误 code", "错误 message",
-            "来源 config_sources", "来源 doc_sources", "来源 notes",
+            "host", "ip", "metric_id", "name", "raw_value", "normalized_value",
+            "unit", "status", "threshold_rule", "command",
         ):
-            assert label in body, "指标卡片缺少字段: %s" % label
-        # 阈值层字段（RR §4 threshold）与实测值
-        assert "阈值 layer" in body
-        assert "linux-common-p0-v1.memory.available_percent.crit" in body
-        assert "PERMISSION_DENIED" in body
-        assert "cannot read /opt/redis/logs/redis.log" in body
+            assert label in body, "指标卡片缺少 Excel 字段: %s" % label
+        assert "证据 output_summary" not in body
+        assert "证据 raw_ref" not in body
+        assert "证据 sampled_at" not in body
+        assert "来源 doc_sources" not in body
+        assert "PERMISSION_DENIED" not in body
+        assert "测量对象：" in body
 
     def test_cards_carry_filter_attributes(self, tmp_path):
         s = render_str(fixture_docs(), tmp_path)
@@ -432,12 +427,14 @@ class TestFilterInteraction:
         ):
             assert needle in js, "JS 缺少交互接线: %s" % needle
 
-    def test_js_card_click_expands_evidence(self, tmp_path):
-        js = inline_js(render_str(fixture_docs(), tmp_path))
-        assert "card-details" in js
-        assert "bindCardToggle" in js
-        body = body_text(render_str(fixture_docs(), tmp_path))
-        assert body.count('details class="card-details"') == 36
+    def test_cards_have_no_expandable_evidence_sections(self, tmp_path):
+        html_text = render_str(fixture_docs(), tmp_path)
+        js = inline_js(html_text)
+        assert "card-details" not in js
+        assert "bindCardToggle" not in js
+        body = body_text(html_text)
+        assert "card-details" not in body
+        assert "证据与来源锚点" not in body
 
     def test_reset_button_present(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
@@ -490,14 +487,14 @@ class TestPrintFriendly:
         assert "@media print" in s
 
     def test_print_default_hides_details(self):
-        """默认打印：主机详情与卡内证据折叠，仅宏观摘要。"""
+        """默认打印只隐藏非当前分组视图。"""
         s = TEMPLATE.read_text(encoding="utf-8")
-        assert ".host-detail, .group-view:not(.active), .card-details { display: none; }" in s
+        assert ".host-detail, .group-view:not(.active) { display: none; }" in s
 
     def test_print_toggle_expands_details(self):
         s = TEMPLATE.read_text(encoding="utf-8")
         assert "body.print-details .host-detail, body.print-details .group-view.active { display: block; }" in s
-        assert "body.print-details .card-details { display: block; }" in s
+        assert "card-details" not in s
 
     def test_print_hides_nav_and_toolbar(self):
         s = TEMPLATE.read_text(encoding="utf-8")

@@ -71,7 +71,7 @@
 | REQ-E-06 | 输出只读：无 kill/rm/systemctl stop/写操作 | AE §4.4 | 命令集合只读性结构审查（每个命令对照 MR 数据源列） | `python -m pytest tests/test_metrics.py -q` + 结构审查 | T-101/T-103 |
 | REQ-E-07 | 失败/业务分离：部分指标失败→execution PARTIAL 失败指标 UNKNOWN+error；单主机连接失败→该主机无业务结论退出码 10；全部失败/控制端失败→ERROR 退出码 10 | AE §6；CC §4 | 三场景单元测试 + 退出码断言 | `python -m pytest tests/test_ansible_runner.py tests/test_cli.py -q` | T-103/T-101 |
 | REQ-E-08 | 超时/连接失败不自动重试（serial:1 下重复执行意义有限） | AE §7 | 重试计数断言（0 重试） | 同上（test_no_retry） | T-103 |
-| REQ-E-09 | 结果脱敏：IP 脱敏为 `<IP>`、凭据关键字脱敏、原始输出只落本地临时目录不进报表 | AE §4.5；HR §1.4；DC C10/C11 | 脱敏单元测试（IP/凭据/日志行）+ 报表不含明文 IP 断言 | `python -m pytest tests/test_normalize.py -q`（test_desensitization） | T-104 |
+| REQ-E-09 | 结果脱敏：host-result JSON/事件/HTML 中 IP 脱敏为 `<IP>`、凭据关键字脱敏、原始输出只落本地临时目录；Excel Local.ip 仅使用运行时 inventory 映射用于运维识别 | AE §4.5；HR §1.4；DC C10/C11 | 脱敏单元测试（IP/凭据/日志行）+ 报表不含明文 IP 断言 | `python -m pytest tests/test_normalize.py -q`（test_desensitization） | T-104 |
 
 ## 6. 组 E：报表（reporting-roadmap）
 
@@ -79,10 +79,10 @@
 | --- | --- | --- | --- | --- | --- |
 | REQ-R-01 | stdout：run 摘要、主机摘要（execution_status、状态计数）、失败/未知指标列表、退出码说明；顺序先全局后逐主机 | RR §2 | 渲染输出断言（内容与顺序） | `python -m pytest tests/test_render_stdout.py -q` | T-105 |
 | REQ-R-02 | UNKNOWN 与 ERROR 必须显式展示原因（missing/conflict/permission/timeout），不得静默过滤 | RR §2/§6.2 | 含 UNKNOWN 样本渲染断言 | 同上（test_unknown_visible） | T-105 |
-| REQ-R-03 | Excel 三 Sheet：Overview / Local / Errors-Evidence；每主机每指标一行含 threshold/evidence/provenance；UNKNOWN 不混入 OK 计数 | RR §3 | 生成文件 Sheet 名与单元格断言（zipfile/openpyxl 只读校验） | `python -m pytest tests/test_render_xlsx.py -q` | T-106 |
+| REQ-R-03 | Excel 三 Sheet：Overview / Local / Errors-Evidence；Local 含 host/ip/metric_id/name/raw_value/normalized_value/unit/status/threshold_rule/command，UNKNOWN 不混入 OK 计数 | RR §3 | 生成文件 Sheet 名与单元格断言（zipfile/openpyxl 只读校验） | `python -m pytest tests/test_render_xlsx.py -q` | T-106 |
 | REQ-R-04 | Excel 文件名 `<inspection-id>.xlsx`；`--excel PATH` 可覆盖 | RR §3.2；CC §2 | 文件名断言 | 同上（test_filename） | T-106 |
 | REQ-R-05 | HTML 离线单文件：CSS/JS 全内联、数据以 JSON 内嵌、无外部依赖可离线打开 | RR §4 | 无 `<link`/`<script src`/fetch 外链文本断言 + 内嵌 JSON 与事实源一致断言 | `python -m pytest tests/test_render_html.py -q` | T-107 |
-| REQ-R-06 | HTML 布局：左导航（run 摘要/主机列表/状态筛选）、右滚动区（宏观卡片→主机详情逐指标卡片含 evidence/error/provenance）、打印友好 | RR §4 | 模板结构与占位符断言 | 同上（test_layout） | T-107 |
+| REQ-R-06 | HTML 布局：左导航（run 摘要/主机列表/状态筛选/中间件筛选）、右滚动区（主机摘要并入主机大卡片，指标卡片与 Excel Local 字段一致，不展开 evidence/source/provenance）、打印友好 | RR §4 | 模板结构与占位符断言 | 同上（test_layout） | T-107 |
 | REQ-R-07 | 四状态颜色与徽标：OK #2E7D32 / WARN #F9A825 / CRIT #C62828 / UNKNOWN #757575；execution_status 以徽标区分 | RR §5 | 颜色值断言（stdout 可选/HTML 必含） | 同上（test_palette） | T-105/T-107 |
 | REQ-R-08 | 一致性：三类报表由同一份 JSON 渲染，同一 inspection 状态计数一致 | RR §6.1 | 同一 fixture JSON 渲染三类报表并比对计数 | `python -m pytest tests/test_e2e.py -q` | T-108 |
 
@@ -93,7 +93,7 @@
 | REQ-N-01 | 命令可重复：所有巡检动作固定为可重复执行命令；结果只记录结论、异常证据和处理动作 | PB §8.1 | 命令集合与指标定义一一对应断言（metrics.py 定义即命令唯一来源） | `python -m pytest tests/test_metrics.py -q` | T-101 |
 | REQ-N-02 | 结论明确：仅四状态；判据缺失一律 UNKNOWN 而非猜测 | PB §8.2；MR §4 | status 枚举断言（输出中不出现四状态之外值） | `python -m pytest tests/test_normalize.py -q`（test_status_enum） | T-104 |
 | REQ-N-03 | 执行/业务分离：技术失败不产生业务 CRIT；业务 CRIT 默认不产生非零退出码 | PB §8.3；AE §6 | 见 REQ-D-02 / REQ-C-03 组合测试 | `python -m pytest tests/test_e2e.py -q` | T-104/T-108 |
-| REQ-N-04 | 脱敏：IP/端口/路径/用户/模式保持配置边界；凭据不进 JSON、报表与事件 | PB §8.4；AE §4.5 | 见 REQ-E-09 + 全链路 e2e 脱敏断言 | `python -m pytest tests/test_e2e.py -q`（test_desensitization_e2e） | T-104/T-108 |
+| REQ-N-04 | 脱敏：IP/端口/路径/用户/模式保持配置边界；凭据不进 JSON、报表与事件；Excel Local.ip 的运行时 inventory 映射不回写事实源 | PB §8.4；AE §4.5 | 见 REQ-E-09 + 全链路 e2e 脱敏断言 | `python -m pytest tests/test_e2e.py -q`（test_desensitization_e2e） | T-104/T-108 |
 | REQ-N-05 | 超时上限覆盖全部采集动作（探针失败按能力不足/技术失败处理） | PB §8.5；AE §3/§7 | 见 REQ-E-04 | — | T-103 |
 | REQ-N-06 | 只写事实源：报表不二次采集、不修改事实源格式（版本化兼容） | PB §8.6；RR §1 | 渲染测试断言无采集调用（mock 注入） | `python -m pytest tests/test_render_stdout.py tests/test_render_xlsx.py tests/test_render_html.py -q` | T-105/T-106/T-107 |
 | REQ-N-07 | 兼容性：控制端 Linux/WSL；受控端 Kylin V10（bash 4.x、systemd、不假定 Python）；组合见兼容测试矩阵 | PB §2；AE §1 | 矩阵每组合可执行 smoke 命令；fixture 模式覆盖无目标主机情形 | `bash inspect.sh --local` + `python -m pytest tests/test_e2e.py -q` | T-108 |
