@@ -56,9 +56,10 @@ def make_metric(
     ev_summary: str = "out",
     error: dict = None,
     prov_notes: str = None,
+    ev_details: list = None,
 ) -> dict:
     """构造符合 host-result-v1 schema 的 metric 对象（HR §3.1）。"""
-    return {
+    metric = {
         "metric_id": metric_id,
         "name": name or metric_id,
         "scope": "local-common-p0-v1",
@@ -85,6 +86,9 @@ def make_metric(
             "notes": prov_notes,
         },
     }
+    if ev_details is not None:
+        metric["evidence"]["details"] = ev_details
+    return metric
 
 
 def make_doc(
@@ -240,12 +244,14 @@ class TestConstants:
         assert rx.SHEET_NAMES == ("Overview", "Local", "Errors-Evidence")
 
     def test_local_headers_cover_rr_section3_columns(self):
+        assert rx.LOCAL_HEADERS[:2] == ("host", "ip")
         for col in (
             "metric_id", "raw_value", "normalized_value", "unit", "status",
-            "threshold_rule", "source_anchor", "evidence_summary",
-            "provenance",
+            "threshold_rule", "command",
         ):
             assert col in rx.LOCAL_HEADERS
+        for removed in ("source_anchor", "evidence_summary", "provenance"):
+            assert removed not in rx.LOCAL_HEADERS
 
     def test_errors_headers_cover_rr_section3_columns(self):
         for col in ("error_code", "message", "command", "output_summary"):
@@ -405,7 +411,11 @@ class TestFixtureSample:
     def test_sample_sheets_and_headers(self):
         wb = load_workbook(FIXTURE_XLSX / "host-result-valid.xlsx")
         assert wb.sheetnames == list(rx.SHEET_NAMES)
-        assert [c.value for c in wb[rx.SHEET_LOCAL][1]] == list(rx.LOCAL_HEADERS)
+        # This checked-in workbook is a legacy sample; new headers are tested
+        # against freshly rendered output below without rewriting the fixture.
+        legacy_headers = [c.value for c in wb[rx.SHEET_LOCAL][1]]
+        assert legacy_headers[0] == "host"
+        assert "source_anchor" in legacy_headers
         assert [c.value for c in wb[rx.SHEET_ERRORS][1]] == list(rx.ERRORS_HEADERS)
 
     def test_sample_overview_contents(self):
@@ -554,31 +564,102 @@ class TestRenderWithStubXlsxwriter:
             if row >= 1
         }
         statuses = {
-            row: cols[6][0]
+            row: cols[7][0]
             for row, cols in rows.items()
-            if 6 in cols
+            if 7 in cols
         }
         assert sorted(statuses.values()) == ["CRIT", "OK", "OK", "UNKNOWN",
                                              "UNKNOWN", "UNKNOWN", "WARN"]
         for row, cols in rows.items():
-            status = cols[6][0]
-            fmt = cols[6][1]
+            status = cols[7][0]
+            fmt = cols[7][1]
             assert fmt.kwargs["bg_color"] == rx.STATUS_COLORS[status]
 
         # CRIT 值红色字体（用户需求）：raw_value/normalized_value 列
-        crit_row = next(row for row, cols in rows.items() if cols[6][0] == "CRIT")
-        for col in (3, 4):
+        crit_row = next(row for row, cols in rows.items() if cols[7][0] == "CRIT")
+        for col in (4, 5):
             fmt = rows[crit_row][col][1]
             assert fmt.kwargs.get("font_color") == rx.COLOR_CRIT
         # 非 CRIT 行值单元格不套红
-        ok_row = next(row for row, cols in rows.items() if cols[6][0] == "OK")
-        assert rows[ok_row][3][1].kwargs.get("font_color") != rx.COLOR_CRIT
+        ok_row = next(row for row, cols in rows.items() if cols[7][0] == "OK")
+        assert rows[ok_row][4][1].kwargs.get("font_color") != rx.COLOR_CRIT
 
-        # 阈值规则/来源锚点/证据摘要/provenance 列（RR §3 Local）
-        assert rows[crit_row][7][0]  # threshold 规则
-        assert rows[crit_row][8][0]  # 来源锚点
-        assert rows[crit_row][9][0]  # evidence 摘要
-        assert rows[crit_row][10][0]  # provenance
+        # 新 Local 列：ip、清晰阈值解释、事实源 command；旧冗余列删除。
+        assert rows[crit_row][1][0] == "<IP>"
+        assert rows[crit_row][8][0]
+        assert "判定规则：" in rows[crit_row][8][0]
+        assert rows[crit_row][9][0] == "echo test"
+
+    def test_local_expands_load_and_filesystem_details(self, monkeypatch, tmp_path):
+        stub = StubXlsxwriter()
+        monkeypatch.setitem(sys.modules, "xlsxwriter", stub)
+        details_doc = make_doc("node-detail", [
+            make_metric(
+                "local.cpu.load_1m", "OK", "0.5", 0.5,
+                name="系统负载", value="load <= CPU cores",
+                ev_command="cat /proc/loadavg; nproc",
+                ev_details=[
+                    {"window": "1 分钟", "load": 0.5, "cpu_cores": 2,
+                     "status": "OK", "judgement": "正常"},
+                    {"window": "5 分钟", "load": 0.4, "cpu_cores": 2,
+                     "status": "OK", "judgement": "正常"},
+                    {"window": "15 分钟", "load": 0.3, "cpu_cores": 2,
+                     "status": "OK", "judgement": "正常"},
+                ],
+            ),
+            make_metric(
+                "local.filesystem.used_percent", "CRIT", "100", 100.0,
+                name="磁盘使用率", value=">85",
+                ev_command="df -hT",
+                ev_details=[
+                    {"filesystem": "/dev/root", "mount": "/", "used_percent": 61.0,
+                     "status": "OK"},
+                    {"filesystem": "/dev/iso", "mount": "/mnt/iso", "used_percent": 100.0,
+                     "status": "CRIT"},
+                ],
+            ),
+            make_metric(
+                "local.filesystem.inode_used_percent", "OK", "1", 1.0,
+                name="inode 使用率", value="<80",
+                ev_command="df -i",
+                ev_details=[
+                    {"filesystem": "/dev/root", "mount": "/", "used_percent": 1.0,
+                     "status": "OK"},
+                    {"filesystem": "/dev/iso", "mount": "/mnt/iso", "used_percent": 1.0,
+                     "status": "OK"},
+                ],
+            ),
+        ])
+        rx.render_xlsx(details_doc, tmp_path / "r.xlsx")
+        local = stub.workbooks[-1].sheets[1]
+        rows = []
+        for row in range(1, 8):
+            rows.append({
+                rx.LOCAL_HEADERS[col]: local.cells[(row, col)][0]
+                for col in range(len(rx.LOCAL_HEADERS))
+            })
+        assert len(rows) == 7
+        assert [row["ip"] for row in rows] == ["<IP>"] * 7
+        assert [row["name"] for row in rows[:3]] == [
+            "1 分钟系统负载", "5 分钟系统负载", "15 分钟系统负载",
+        ]
+        assert [row["name"] for row in rows[3:5]] == [
+            "磁盘使用率: /", "磁盘使用率: /mnt/iso",
+        ]
+        assert [row["name"] for row in rows[5:]] == [
+            "inode 使用率: /", "inode 使用率: /mnt/iso",
+        ]
+        assert [row["raw_value"] for row in rows[:3]] == [0.5, 0.4, 0.3]
+        assert [row["raw_value"] for row in rows[3:5]] == [61.0, 100.0]
+        assert [row["status"] for row in rows] == [
+            "OK", "OK", "OK", "OK", "CRIT", "OK", "OK",
+        ]
+        assert all(row["command"] == "cat /proc/loadavg; nproc" for row in rows[:3])
+        assert all(row["command"] == "df -hT" for row in rows[3:5])
+        assert all(row["command"] == "df -i" for row in rows[5:])
+        assert "测量周期：1 分钟" in rows[0]["threshold_rule"]
+        assert "判定规则：load ≤ CPU cores" in rows[0]["threshold_rule"]
+        assert "挂载点：/mnt/iso" in rows[4]["threshold_rule"]
 
     def test_errors_evidence_rows(self, monkeypatch, tmp_path):
         stub = StubXlsxwriter()
@@ -699,22 +780,24 @@ class TestRenderWorkbook:
             assert row["host"] in ("node-fx01", "node-fx02")
             assert row["metric_id"]
             assert row["status"] in rx.VALID_STATUSES
+            assert row["ip"] == "<IP>"
             assert row["threshold_rule"]
-            assert row["source_anchor"]
+            assert row["command"]
+            assert "source_anchor" not in row
 
         # status 单元格：文字 + RR §5 背景色
         for r in range(2, 2 + len(rows)):
-            status = ws.cell(r, 7).value
-            rgb = ws.cell(r, 7).fill.start_color.rgb
+            status = ws.cell(r, 8).value
+            rgb = ws.cell(r, 8).fill.start_color.rgb
             assert rgb and rgb[-6:] == rx.STATUS_COLORS[status][1:]
 
         # CRIT 值红色字体（用户需求）：raw_value / normalized_value 列
         crit_rows = [row for row in rows if row["status"] == "CRIT"]
         assert len(crit_rows) == 1
         for r in range(2, 2 + len(rows)):
-            if ws.cell(r, 7).value != "CRIT":
+            if ws.cell(r, 8).value != "CRIT":
                 continue
-            for col in (4, 5):  # raw_value / normalized_value
+            for col in (5, 6):  # raw_value / normalized_value
                 rgb = ws.cell(r, col).font.color.rgb
                 assert rgb and rgb[-6:] == "C62828"
                 assert ws.cell(r, col).value is not None
@@ -744,6 +827,65 @@ class TestRenderWorkbook:
         for row in unknowns:
             assert row["status"] == "UNKNOWN"
             assert row["note"]  # 文档冲突/缺失原因（RR §3 UNKNOWN 清单）
+
+    def test_local_expands_load_windows_and_filesystem_mounts(self):
+        load = make_metric(
+            "local.cpu.load_1m", "OK", "0.5", 0.5, unit="数值",
+            name="系统负载", rule_id="linux-common-p0-v1.cpu.load.ok",
+            value="负载/CPU核数 <= 1.00", ev_command="cat /proc/loadavg; nproc",
+            ev_details=[
+                {"window": "1 分钟", "load": 0.50, "cpu_cores": 2,
+                 "status": "OK", "judgement": "负载/核数=0.25，正常"},
+                {"window": "5 分钟", "load": 0.25, "cpu_cores": 2,
+                 "status": "OK", "judgement": "负载/核数=0.12，正常"},
+                {"window": "15 分钟", "load": 0.10, "cpu_cores": 2,
+                 "status": "OK", "judgement": "负载/核数=0.05，正常"},
+            ],
+        )
+        disk = make_metric(
+            "local.filesystem.used_percent", "CRIT", "100", 100.0,
+            name="磁盘使用率", rule_id="linux-common-p0-v1.filesystem.used_percent.crit",
+            value=">85%", ev_command="df -hT",
+            ev_details=[
+                {"filesystem": "/dev/sda1", "mount": "/", "used_percent": 61, "status": "OK"},
+                {"filesystem": "/dev/sdb1", "mount": "/mnt/iso", "used_percent": 100, "status": "CRIT"},
+            ],
+        )
+        inode = make_metric(
+            "local.filesystem.inode_used_percent", "OK", "1", 1.0,
+            name="inode 使用率", rule_id="linux-common-p0-v1.filesystem.inode_used_percent.ok",
+            value="<80%", ev_command="df -i",
+            ev_details=[
+                {"filesystem": "/dev/sda1", "mount": "/", "used_percent": 3, "status": "OK"},
+                {"filesystem": "/dev/sdb1", "mount": "/mnt/iso", "used_percent": 1, "status": "OK"},
+            ],
+        )
+        doc = make_doc("node-detail", [load, disk, inode])
+
+        rows = []
+        for metric in doc["metrics"]:
+            rows.extend(
+                rx._local_row_values(doc, metric, item["detail"])
+                for item in rx._metric_rows(metric)
+            )
+
+        assert len(rows) == 7
+        assert [row["name"] for row in rows[:3]] == [
+            "1 分钟系统负载", "5 分钟系统负载", "15 分钟系统负载"
+        ]
+        assert [row["raw_value"] for row in rows[:3]] == [0.5, 0.25, 0.1]
+        assert [row["name"] for row in rows[3:5]] == [
+            "磁盘使用率: /", "磁盘使用率: /mnt/iso"
+        ]
+        assert [row["name"] for row in rows[5:]] == [
+            "inode 使用率: /", "inode 使用率: /mnt/iso"
+        ]
+        assert rows[4]["status"] == "CRIT"
+        assert rows[4]["raw_value"] == 100
+        assert "挂载点：/mnt/iso" in rows[4]["threshold_rule"]
+        assert "判定规则：>85%" in rows[4]["threshold_rule"]
+        assert rows[0]["command"] == "cat /proc/loadavg; nproc"
+        assert rows[5]["command"] == "df -i"
 
     def test_rendered_headers_match_contract_constants(self, tmp_path):
         out = rx.render_xlsx(rich_docs(), tmp_path / "r.xlsx")

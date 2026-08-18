@@ -8,9 +8,9 @@ host-result-v1.md §8，REQ-R-03/04/07/08）：
   - 三 Sheet 布局（RR §3 表格）：
       Overview         run 信息、主机×状态汇总、状态计数、阈值版本
                        （linux-common-p0-v1）、生成时间；
-      Local            每主机每指标一行：metric_id / raw_value /
-                       normalized_value / unit / status / threshold 规则 /
-                       来源锚点 / evidence 摘要 / provenance；
+      Local            每主机每条明细一行：host / ip / metric_id / name /
+                       raw_value / normalized_value / unit / status /
+                       可读 threshold 规则 / command；负载和文件系统明细逐行展开；
       Errors-Evidence  所有 error 非空的指标与主机：error.code / message /
                        command / output_summary；以及文档冲突/缺失导致的
                        UNKNOWN 清单。
@@ -60,12 +60,11 @@ SHEET_LOCAL = "Local"
 SHEET_ERRORS = "Errors-Evidence"
 SHEET_NAMES = (SHEET_OVERVIEW, SHEET_LOCAL, SHEET_ERRORS)
 
-# RR §3 Local 列（每主机每指标一行）：host 标识主机（多主机汇总），
-# name 为指标中文名；其余列与 RR 表格逐项对应
+# Local 列：以主机/IP 开始；详情指标逐行展开；只保留可读阈值解释和
+# 事实源提供的复现命令，不把来源/证据摘要/provenance 冗余复制到报表。
 LOCAL_HEADERS = (
-    "host", "metric_id", "name", "raw_value", "normalized_value", "unit",
-    "status", "threshold_rule", "source_anchor", "evidence_summary",
-    "provenance",
+    "host", "ip", "metric_id", "name", "raw_value", "normalized_value", "unit",
+    "status", "threshold_rule", "command",
 )
 
 # RR §3 Errors-Evidence 列：error.code/message/command/output_summary；
@@ -228,6 +227,119 @@ def _collect_threshold_versions(docs: Sequence[Mapping[str, Any]]) -> List[str]:
     return sorted(versions)
 
 
+def _detail_status(metric: Mapping[str, Any], detail: Mapping[str, Any]) -> str:
+    """Return a detail status without evaluating any threshold in the renderer."""
+    status = detail.get("status")
+    if status in VALID_STATUSES:
+        return str(status)
+    status = metric.get("status")
+    return str(status) if status in VALID_STATUSES else "UNKNOWN"
+
+
+def _detail_value(detail: Mapping[str, Any]) -> Any:
+    """Return the value already normalized into a detail object."""
+    if "load" in detail:
+        return detail.get("load")
+    if "used_percent" in detail:
+        return detail.get("used_percent")
+    return None
+
+
+def _metric_rows(metric: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Expand fact-source metric details into Local-sheet rows.
+
+    The function only copies values already present in ``metric`` and its
+    ``evidence.details``.  A legacy metric without details produces one row.
+    """
+    evidence = metric.get("evidence") or {}
+    details = evidence.get("details")
+    if not isinstance(details, list):
+        return [dict(metric=metric, detail=None)]
+    rows = [
+        {"metric": metric, "detail": detail}
+        for detail in details
+        if isinstance(detail, Mapping)
+    ]
+    return rows or [dict(metric=metric, detail=None)]
+
+
+def _threshold_rule_text(
+    metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]] = None
+) -> str:
+    """Build a Chinese, human-readable rule explanation from fact fields."""
+    threshold = metric.get("threshold") or {}
+    parts: List[str] = []
+    if detail:
+        window = detail.get("window")
+        mount = detail.get("mount")
+        filesystem = detail.get("filesystem")
+        cpu_cores = detail.get("cpu_cores")
+        if window is not None and str(window) != "":
+            parts.append(f"测量周期：{window}")
+        if cpu_cores is not None and str(cpu_cores) != "":
+            parts.append(f"CPU核数：{cpu_cores}")
+        if mount is not None and str(mount) != "":
+            parts.append(f"挂载点：{mount}")
+        if filesystem is not None and str(filesystem) != "":
+            parts.append(f"文件系统：{filesystem}")
+    if not parts:
+        parts.append(f"测量对象：{metric.get('name') or metric.get('metric_id') or '指标'}")
+
+    value = threshold.get("value")
+    if value is not None and str(value) != "":
+        display_value = str(value).replace(">=", "≥").replace("<=", "≤")
+        parts.append(f"判定规则：{display_value}")
+    else:
+        notes = threshold.get("notes")
+        if notes is not None and str(notes) != "":
+            parts.append(f"判定说明：{notes}")
+        else:
+            layer = threshold.get("layer")
+            if layer is not None and str(layer) != "":
+                parts.append(f"判定层：{layer}")
+            else:
+                parts.append("判定规则：事实源未提供")
+
+    rule_id = threshold.get("rule_id")
+    if rule_id is not None and str(rule_id) != "":
+        parts.append(f"规则标识：{rule_id}")
+    return "；".join(str(part) for part in parts)
+
+
+def _local_row_values(
+    doc: Mapping[str, Any], metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]]
+) -> Dict[str, Any]:
+    """Map one fact-source metric/detail pair to the Local headers."""
+    status = _detail_status(metric, detail or {})
+    detail_value = _detail_value(detail or {}) if detail else None
+    has_detail_value = detail is not None and detail_value is not None
+    raw_value = detail_value if has_detail_value else metric.get("raw_value")
+    normalized_value = (
+        detail_value if has_detail_value else metric.get("normalized_value")
+    )
+    name = str(metric.get("name") or metric.get("metric_id") or "")
+    if detail:
+        mount = detail.get("mount")
+        window = detail.get("window")
+        if window is not None and str(window) != "":
+            name = f"{window}系统负载"
+        elif mount is not None and str(mount) != "":
+            name = f"{name}: {mount}"
+    host = doc.get("host") or {}
+    return {
+        "host": host.get("name", ""),
+        "ip": host.get("ip", "—"),
+        "metric_id": metric.get("metric_id", ""),
+        "name": name,
+        "raw_value": raw_value,
+        "normalized_value": normalized_value,
+        "unit": metric.get("unit", ""),
+        "status": status,
+        "threshold_rule": _threshold_rule_text(metric, detail),
+        "command": (metric.get("evidence") or {}).get("command") or "—",
+    }
+
+
 def _require_xlsxwriter():
     """惰性导入 xlsxwriter；缺失 → RendererError（exit_code=10 语义）。"""
     try:
@@ -348,7 +460,7 @@ def _write_workbook(
 
     # ================= Local（RR §3：每主机每指标一行） =================
     ws = workbook.add_worksheet(SHEET_LOCAL)
-    local_widths = (14, 34, 16, 14, 16, 8, 12, 46, 56, 52, 44)
+    local_widths = (14, 18, 34, 24, 14, 16, 8, 12, 72, 52)
     for col, width in enumerate(local_widths):
         ws.set_column(col, col, width)
     for col, header in enumerate(LOCAL_HEADERS):
@@ -357,41 +469,18 @@ def _write_workbook(
 
     r = 1
     for doc in docs:
-        host_name = doc["host"]["name"]
         for metric in doc["metrics"]:
-            threshold = metric.get("threshold") or {}
-            evidence = metric.get("evidence") or {}
-            provenance = metric.get("provenance") or {}
-            status = metric["status"]
-
-            rule_parts = [
-                str(x) for x in (threshold.get("rule_id"), threshold.get("value"))
-                if x is not None and str(x) != ""
-            ]
-            rule = " | ".join(rule_parts) or threshold.get("layer") or "—"
-            anchor = threshold.get("source_anchor") or "—"
-            ev_summary = evidence.get("output_summary") or "—"
-            prov_parts = [provenance.get("notes")]
-            prov_parts += list(provenance.get("doc_sources") or [])
-            prov_parts += list(provenance.get("config_sources") or [])
-            provenance_text = "；".join(
-                str(x) for x in prov_parts if x is not None and str(x) != ""
-            ) or "—"
-
-            ws.write(r, 0, host_name, cell_fmt)
-            ws.write(r, 1, metric["metric_id"], cell_fmt)
-            ws.write(r, 2, metric.get("name", ""), cell_fmt)
-            # CRIT 值红色字体（用户需求）：raw_value / normalized_value
-            value_fmt = crit_value_fmt if status == "CRIT" else cell_fmt
-            ws.write(r, 3, metric["raw_value"], value_fmt)
-            ws.write(r, 4, metric.get("normalized_value"), value_fmt)
-            ws.write(r, 5, metric.get("unit", ""), cell_fmt)
-            ws.write(r, 6, status, status_fmts[status])
-            ws.write(r, 7, rule, cell_fmt)
-            ws.write(r, 8, anchor, cell_fmt)
-            ws.write(r, 9, ev_summary, cell_fmt)
-            ws.write(r, 10, provenance_text, cell_fmt)
-            r += 1
+            for expanded in _metric_rows(metric):
+                detail = expanded["detail"]
+                values = _local_row_values(doc, metric, detail)
+                status = values["status"]
+                value_fmt = crit_value_fmt if status == "CRIT" else cell_fmt
+                for col, header in enumerate(LOCAL_HEADERS):
+                    fmt = value_fmt if header in {"raw_value", "normalized_value"} else cell_fmt
+                    if header == "status":
+                        fmt = status_fmts[status]
+                    ws.write(r, col, values[header], fmt)
+                r += 1
 
     # ============ Errors-Evidence（RR §3：error 非空指标与主机 +
     # 文档冲突/缺失 UNKNOWN 清单） ============

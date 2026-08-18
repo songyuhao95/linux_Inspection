@@ -27,11 +27,12 @@
 | Sheet | 内容 |
 | --- | --- |
 | Overview | run 信息、主机×状态汇总、状态计数、阈值版本（linux-common-p0-v1）、生成时间 |
-| Local | 每主机每指标一行：metric_id、raw_value、normalized_value、unit、status、threshold 规则、来源锚点、evidence 摘要、provenance |
+| Local | 每主机每条明细一行：host、ip、metric_id、name、raw_value、normalized_value、unit、status、清晰 threshold_rule、command；系统负载按 1/5/15 分钟展开，磁盘/inode 按挂载点展开 |
 | Errors-Evidence | 所有 error 非空的指标与主机：error.code、message、command、output_summary；以及文档冲突/缺失导致的 UNKNOWN 清单 |
 
 - 首版三 Sheet（Overview / Local / Errors-Evidence），后续按产品 profile 增加 Sheet。
 - 文件名：`<inspection-id>.xlsx`（`--excel PATH` 可覆盖路径）。
+- Local Sheet 不聚合多值指标：负载的 1 分钟、5 分钟、15 分钟分别成行；磁盘使用率和 inode 使用率按每个挂载点分别成行。每行的 command 仅用于运维复现，报表渲染不执行该命令。
 
 ## 4. HTML 报表（离线单文件）
 
@@ -57,7 +58,7 @@
 
 1. 所有报表由同一份 JSON 渲染；同一 inspection 的三类报表状态计数必须一致。
 2. -UNKNOWN- 必须在报表中可见（不得静默过滤）；-ERROR-/技术失败必须可见（Errors-Evidence）。
-3. 阈值规则与来源锚点随指标展示，便于审计（对应 evidence_types 的 source-traceability）。
+3. Local Sheet 的 threshold_rule 使用可读中文解释，command 保留事实源中的指标取值命令；source_anchor/evidence_summary/provenance 仍保留在 JSON/HTML 事实消费链路中，但不作为 Local Sheet 列重复展示。
 4. 报表不含凭据与明文 IP；脱敏规则同 host-result-v1.md 第 3 节。
 
 ## 7. 路线（后续版本，非本合同交付）
