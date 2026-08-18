@@ -111,7 +111,7 @@
 | normalized_value | 否 | 规范化数值（统一单位、可比较）；无法规范化时 null |
 | unit | 是 | 单位 |
 | threshold | 是 | 阈值层 + 规则 ID + 判定值 + 来源锚点；UNKNOWN 时 value 可为 null 并注明原因（missing/conflict） |
-| evidence | 是 | 命令、输出摘要、原始输出引用、采样时间 |
+| evidence | 是 | 命令、输出摘要、原始输出引用、采样时间；文件系统指标可选 `details` 数组，逐挂载点保存 `filesystem`、`mount`、`used_percent` |
 | error | 否 | 技术错误（error_code + message）；仅执行失败时非空 |
 | provenance | 是 | 配置来源、文档来源、解释性备注（含冲突/缺失说明） |
 
@@ -182,7 +182,16 @@ error code 枚举（首版）：`CONNECTION_FAILED`、`TIMEOUT`、`PERMISSION_DE
         "value": "<75",
         "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §P0/表T5R9/指纹67ae309b"
       },
-      "evidence": { "command": "df -hT /opt/mysql/data", "output_summary": "/dev/mapper/vg-data 62%", "sampled_at": "2026-08-15T10:30:02+08:00" },
+      "evidence": {
+        "command": "df -hT",
+        "output_summary": "/dev/mapper/vg-data 62%（/）；/dev/mapper/vg-log 81%（/var/log）",
+        "raw_ref": "raw/local.filesystem.used_percent.out",
+        "sampled_at": "2026-08-15T10:30:02+08:00",
+        "details": [
+          { "filesystem": "/dev/mapper/vg-data", "mount": "/", "used_percent": 62 },
+          { "filesystem": "/dev/mapper/vg-log", "mount": "/var/log", "used_percent": 81 }
+        ]
+      },
       "error": null,
       "provenance": { "config_sources": [], "doc_sources": ["Mysql 巡检手册 v1.0 表T5R9"] }
     },

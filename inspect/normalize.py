@@ -882,6 +882,27 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
     return None
 
 
+def _evidence_details(metric_id: str, parsed: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """返回可选的结构化证据明细（兼容旧指标/旧 fixture）。
+
+    磁盘与 inode 指标保留每个文件系统的挂载点和使用率；
+    normalized_value/raw_value 仍由 max_pct 派生，继续承担阈值判定。
+    """
+    if metric_id not in {
+        "local.filesystem.used_percent",
+        "local.filesystem.inode_used_percent",
+    }:
+        return None
+    return [
+        {
+            "filesystem": mask_output(str(row["filesystem"])),
+            "mount": mask_output(str(row["mount"])),
+            "used_percent": int(row["pct"]),
+        }
+        for row in parsed.get("rows", [])
+    ]
+
+
 def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
     """evidence.output_summary（已脱敏；HR §3.1 evidence.output_summary）。"""
     if metric_id == "local.process.present":
@@ -1067,6 +1088,9 @@ def _judged_metric_document(
         "raw_ref": f"raw/{metric_id}.out",
         "sampled_at": collected_at,
     }
+    details = _evidence_details(metric_id, parsed)
+    if details is not None:
+        evidence["details"] = details
     return _build_metric_document(
         metric_id,
         status=status,
@@ -1326,6 +1350,9 @@ def normalize_host_result(
                 "raw_ref": f"raw/{metric_id}.out",
                 "sampled_at": collected_at,
             }
+            details = _evidence_details(metric_id, parsed)
+            if details is not None:
+                evidence["details"] = details
             metric_docs.append(
                 _build_metric_document(
                     metric_id,
@@ -1483,6 +1510,7 @@ METRIC_KEYS = {
 }
 THRESHOLD_KEYS = {"layer", "rule_id", "value", "source_anchor", "notes"}
 EVIDENCE_KEYS = {"command", "output_summary", "raw_ref", "sampled_at"}
+EVIDENCE_OPTIONAL_KEYS = {"details"}
 ERROR_KEYS = {"code", "message", "metric_status"}
 PROVENANCE_KEYS = {"config_sources", "doc_sources", "notes"}
 
@@ -1634,13 +1662,31 @@ def _validate_threshold(threshold: Any, where: str) -> None:
 
 
 def _validate_evidence(evidence: Any, where: str) -> None:
-    if not isinstance(evidence, dict) or set(evidence) != EVIDENCE_KEYS:
+    if not isinstance(evidence, dict):
+        _fail(where, "evidence 必须为对象")
+    keys = set(evidence)
+    if not EVIDENCE_KEYS.issubset(keys) or keys - EVIDENCE_KEYS - EVIDENCE_OPTIONAL_KEYS:
         _fail(where, "evidence 键集不符")
     if not isinstance(evidence["command"], str):
         _fail(where, "evidence.command 必须为字符串")
     for key in ("output_summary", "raw_ref", "sampled_at"):
         if evidence[key] is not None and not isinstance(evidence[key], str):
             _fail(where, f"evidence.{key} 必须为字符串或 null")
+    if "details" in evidence:
+        details = evidence["details"]
+        if not isinstance(details, list):
+            _fail(where, "evidence.details 必须为数组")
+        for index, detail in enumerate(details):
+            detail_where = f"{where}.details[{index}]"
+            if not isinstance(detail, dict) or set(detail) != {"filesystem", "mount", "used_percent"}:
+                _fail(detail_where, "挂载点明细键集不符")
+            if not isinstance(detail["filesystem"], str) or not detail["filesystem"]:
+                _fail(detail_where, "filesystem 必须为非空字符串")
+            if not isinstance(detail["mount"], str) or not detail["mount"]:
+                _fail(detail_where, "mount 必须为非空字符串")
+            used = detail["used_percent"]
+            if isinstance(used, bool) or not isinstance(used, (int, float)) or not 0 <= used <= 100:
+                _fail(detail_where, "used_percent 必须为 0..100 数值")
 
 
 def _validate_provenance(provenance: Any, where: str) -> None:

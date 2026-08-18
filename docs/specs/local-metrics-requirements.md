@@ -165,8 +165,8 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 数据源 | `df -hT <路径>`（路径来自产品 profile：数据/日志/备份目录，如 `/opt/elasticsearch/data`） |
-| 计算/采样 | used/total × 100；按目录对应文件系统取最大值 |
+| 数据源 | `df -hT`（采集全部文件系统；不再限定 `/` 或 profile 路径） |
+| 计算/采样 | used/total × 100；所有挂载点进入 `evidence.details`，`normalized_value` 保留全部挂载点最大值用于阈值判定 |
 | 单位 | % |
 | 来源锚点 | 9 份巡检手册 P0 磁盘行（ES T5R5、Kafka T5R9、Mysql T5R9、Nacos T5R9、Rabbitmq T5R10、Redis T5R10、Rocketmq T5R10、Nginx T5R10、Tomcat T5R8） |
 | 阈值层 | 文档基线（75/85/95 分层）+ 外部配置覆盖；Nginx/Tomcat 建议线 80% 差异见冲突 C1 |
@@ -181,8 +181,8 @@
 
 | 字段 | 内容 |
 | --- | --- |
-| 数据源 | `df -i <路径>` |
-| 计算/采样 | used/total × 100；按目录对应文件系统取最大值 |
+| 数据源 | `df -i`（采集全部文件系统；不再限定 `/` 或 profile 路径） |
+| 计算/采样 | used/total × 100；所有挂载点进入 `evidence.details`，`normalized_value` 保留全部挂载点最大值用于阈值判定 |
 | 单位 | % |
 | 来源锚点 | 9 份巡检手册 P0 磁盘行（ES T5R5、Kafka T5R9、Mysql T5R9、Nacos T5R9、Rabbitmq T5R10、Redis T5R10、Rocketmq T5R10、Nginx T5R10、Tomcat T5R8） |
 | 阈值层 | 文档基线 + 外部配置覆盖；≥80% 边界缺失见冲突 C5 |

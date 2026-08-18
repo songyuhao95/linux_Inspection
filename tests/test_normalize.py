@@ -224,6 +224,8 @@ class TestParsers:
         parsed = n.parse_filesystem_used_percent(raw("node-a", "local.filesystem.used_percent"))
         assert parsed["max_pct"] == 91
         assert len(parsed["rows"]) == 2
+        assert [row["mount"] for row in parsed["rows"]] == ["/", "/data"]
+        assert [row["pct"] for row in parsed["rows"]] == [66, 91]
 
     def test_parse_filesystem_used_percent_empty_raises(self):
         with pytest.raises(n.ParseError):
@@ -234,6 +236,8 @@ class TestParsers:
             raw("node-a", "local.filesystem.inode_used_percent")
         )
         assert parsed["max_pct"] == 1
+        assert len(parsed["rows"]) == 2
+        assert [row["mount"] for row in parsed["rows"]] == ["/", "/data"]
 
     def test_parse_logs_key_evidence(self):
         parsed = n.parse_logs_key_evidence(raw("node-a", "local.logs.key_evidence"))
@@ -889,8 +893,40 @@ class TestStructure:
         for metric in doc["metrics"]:
             assert set(metric) == n.METRIC_KEYS
             assert set(metric["threshold"]) == n.THRESHOLD_KEYS
-            assert set(metric["evidence"]) == n.EVIDENCE_KEYS
+            assert n.EVIDENCE_KEYS.issubset(metric["evidence"])
+            if metric["metric_id"] in {
+                "local.filesystem.used_percent",
+                "local.filesystem.inode_used_percent",
+            }:
+                assert len(metric["evidence"]["details"]) == 2
+                assert all(
+                    set(detail) == {"filesystem", "mount", "used_percent"}
+                    for detail in metric["evidence"]["details"]
+                )
+            else:
+                assert "details" not in metric["evidence"]
             assert set(metric["provenance"]) == n.PROVENANCE_KEYS
+
+    def test_filesystem_evidence_details_and_max_value_are_compatible(self):
+        results = [
+            metric_result("local.filesystem.used_percent", raw("node-a", "local.filesystem.used_percent")),
+            metric_result("local.filesystem.inode_used_percent", raw("node-a", "local.filesystem.inode_used_percent")),
+        ]
+        doc = n.normalize_host_result(
+            host_result("node-a", results),
+            run_id=RUN_ID,
+            collected_at=COLLECTED,
+        )
+        by_id = {metric["metric_id"]: metric for metric in doc["metrics"]}
+        disk = by_id["local.filesystem.used_percent"]
+        inode = by_id["local.filesystem.inode_used_percent"]
+        assert disk["normalized_value"] == 91.0
+        assert disk["raw_value"] == "91"
+        assert [d["mount"] for d in disk["evidence"]["details"]] == ["/", "/data"]
+        assert inode["normalized_value"] == 1.0
+        assert [d["mount"] for d in inode["evidence"]["details"]] == ["/", "/data"]
+        n.validate_host_result(doc)
+
 
     def test_registry_alignment_with_metrics_py(self):
         assert set(n.PARSERS) == set(metrics_mod.ALL_METRIC_IDS)

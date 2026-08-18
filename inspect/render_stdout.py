@@ -360,6 +360,25 @@ def _metric_display_value(metric: Mapping[str, Any]) -> str:
     return f"{text} {unit}".rstrip()
 
 
+def _filesystem_detail_lines(metric: Mapping[str, Any]) -> Optional[List[str]]:
+    """Return one Chinese report line per structured filesystem detail."""
+    details = (metric.get("evidence") or {}).get("details")
+    if not isinstance(details, list):
+        return None
+    lines: List[str] = []
+    for detail in details:
+        if not isinstance(detail, Mapping):
+            continue
+        mount = str(detail.get("mount") or "-")
+        used = detail.get("used_percent")
+        if isinstance(used, (int, float)) and not isinstance(used, bool):
+            value = f"{float(used):.2f}"
+        else:
+            value = "-"
+        lines.append(f"{mount} {value} %")
+    return lines
+
+
 def render_metric_values(
     doc: Mapping[str, Any],
     *,
@@ -380,10 +399,20 @@ def render_metric_values(
         shown = True
         status = str(metric.get("status") or STATUS_UNKNOWN)
         name = str(metric.get("name") or metric.get("metric_id") or "-")
-        lines.append(
-            f"    {badge(status, color=color, stream=stream)} {name}: "
-            f"{_metric_display_value(metric)}"
-        )
+        detail_lines = None
+        if metric.get("metric_id") in {
+            "local.filesystem.used_percent",
+            "local.filesystem.inode_used_percent",
+        }:
+            detail_lines = _filesystem_detail_lines(metric)
+        if detail_lines:
+            prefix = f"    {badge(status, color=color, stream=stream)} {name}: "
+            lines.extend(prefix + detail for detail in detail_lines)
+        else:
+            lines.append(
+                f"    {badge(status, color=color, stream=stream)} {name}: "
+                f"{_metric_display_value(metric)}"
+            )
     if not shown:
         lines.append("    （无已执行指标）")
     return "\n".join(lines)

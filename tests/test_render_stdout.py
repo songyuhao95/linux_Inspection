@@ -19,6 +19,7 @@
 只读）夹具；不连接、不执行命令。
 """
 
+import copy
 import json
 import re
 import subprocess
@@ -151,6 +152,62 @@ class TestMetricValueOutput:
         assert "指标结果（从 JSON 事实源读取）" in out
         assert "Swap 使用率: 0.00 %" in out
         assert "local.swap.used_percent" not in out
+
+    def test_filesystem_metrics_render_each_mount_from_json_details(self):
+        doc = valid_doc()
+        template = copy.deepcopy(doc["metrics"][0])
+
+        def filesystem_metric(metric_id, name, details, max_pct):
+            metric = copy.deepcopy(template)
+            metric.update(
+                {
+                    "metric_id": metric_id,
+                    "name": name,
+                    "status": "OK",
+                    "raw_value": str(max_pct),
+                    "normalized_value": float(max_pct),
+                    "unit": "%",
+                    "error": None,
+                }
+            )
+            metric["evidence"] = {
+                "command": "df -hT" if "used_percent" in metric_id else "df -i",
+                "output_summary": None,
+                "raw_ref": f"raw/{metric_id}.out",
+                "sampled_at": doc["collected_at"],
+                "details": details,
+            }
+            return metric
+
+        doc["metrics"] = [
+            doc["metrics"][0],
+            filesystem_metric(
+                "local.filesystem.used_percent",
+                "磁盘使用率",
+                [
+                    {"filesystem": "/dev/root", "mount": "/", "used_percent": 61},
+                    {"filesystem": "/dev/data", "mount": "/data", "used_percent": 83},
+                ],
+                83,
+            ),
+            filesystem_metric(
+                "local.filesystem.inode_used_percent",
+                "inode 使用率",
+                [
+                    {"filesystem": "/dev/root", "mount": "/", "used_percent": 1},
+                    {"filesystem": "/dev/data", "mount": "/data", "used_percent": 2},
+                ],
+                2,
+            ),
+        ]
+        out = render(doc)
+        assert "磁盘使用率: / 61.00 %" in out
+        assert "磁盘使用率: /data 83.00 %" in out
+        assert "inode 使用率: / 1.00 %" in out
+        assert "inode 使用率: /data 2.00 %" in out
+        assert "磁盘使用率: 83.00 %" not in out
+        assert "inode 使用率: 2.00 %" not in out
+
 
     def test_unknown_metric_is_kept_in_problem_list_not_value_section(self):
         out = render(partial_doc())

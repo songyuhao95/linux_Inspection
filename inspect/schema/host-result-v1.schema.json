@@ -85,7 +85,20 @@
         "command": { "type": "string" },
         "output_summary": { "type": ["string", "null"] },
         "raw_ref": { "type": ["string", "null"] },
-        "sampled_at": { "type": ["string", "null"] }
+        "sampled_at": { "type": ["string", "null"] },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["filesystem", "mount", "used_percent"],
+            "properties": {
+              "filesystem": { "type": "string", "minLength": 1 },
+              "mount": { "type": "string", "minLength": 1 },
+              "used_percent": { "type": "number", "minimum": 0, "maximum": 100 }
+            }
+          }
+        }
       }
     },
     "error": {

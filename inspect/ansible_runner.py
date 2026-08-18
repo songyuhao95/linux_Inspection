@@ -269,13 +269,13 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "anchor": "MR §5.5 内存行 + TD §5.2 local.swap.used_percent",
     },
     "local.filesystem.used_percent": {
-        "command": "df -hT /",
+        "command": "df -hT",
         "profile_keys": (),
         "become": False,
         "anchor": "MR §5.6 磁盘行 + TD §5.2 local.filesystem.used_percent",
     },
     "local.filesystem.inode_used_percent": {
-        "command": "df -i /",
+        "command": "df -i",
         "profile_keys": (),
         "become": False,
         "anchor": "MR §5.6 磁盘行 + TD §5.2 local.filesystem.inode_used_percent",

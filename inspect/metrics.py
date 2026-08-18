@@ -177,7 +177,7 @@ METRICS = [
     {
         "metric_id": "local.filesystem.used_percent",
         "name": "磁盘使用率",
-        "command": "df -hT /（根文件系统；按文件系统取最大值）",
+        "command": "df -hT（全部文件系统；按文件系统取最大值）",
         "timeout_sec": 10,
         "parser": "parse_filesystem_used_percent",
         "unit": "%",
@@ -197,7 +197,7 @@ METRICS = [
     {
         "metric_id": "local.filesystem.inode_used_percent",
         "name": "inode 使用率",
-        "command": "df -i /（根文件系统；按文件系统取最大值）",
+        "command": "df -i（全部文件系统；按文件系统取最大值）",
         "timeout_sec": 10,
         "parser": "parse_filesystem_inode_used_percent",
         "unit": "%",

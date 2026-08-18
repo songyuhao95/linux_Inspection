@@ -41,12 +41,12 @@ def test_default_collection_excludes_unselected_middleware_metrics():
     assert all(spec.error_code is None for spec in specs)
 
 
-def test_linux_basic_uses_interval_cpu_and_root_filesystem():
+def test_linux_basic_uses_interval_cpu_and_all_filesystems():
     specs = {spec.metric_id: spec for spec in runner_mod.build_metric_command_specs()}
     assert "top -bn2 -d 1" in specs["local.cpu.utilization"].command
     assert "grep 'Cpu(s)' | tail -1" in specs["local.cpu.utilization"].command
-    assert specs["local.filesystem.used_percent"].command == "df -hT /"
-    assert specs["local.filesystem.inode_used_percent"].command == "df -i /"
+    assert specs["local.filesystem.used_percent"].command == "df -hT"
+    assert specs["local.filesystem.inode_used_percent"].command == "df -i"
 
 
 def test_profile_dependent_module_stays_unknown_when_explicitly_selected():
