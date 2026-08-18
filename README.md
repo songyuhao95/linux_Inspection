@@ -51,8 +51,8 @@
 `inspect/modules/linux_basic.py` 是独立的 profile-free 基础模块，当前采集并进入
 `out/<inspection_id>/hosts/<host>.json` 事实源的指标包括：
 
-- `local.filesystem.used_percent`：所有文件系统挂载点的磁盘使用率；JSON `evidence.details` 保存 `filesystem`、`mount`、`used_percent` 明细，`normalized_value` 仍为所有挂载点中的最大值；
-- `local.filesystem.inode_used_percent`：所有文件系统挂载点的 inode 使用率，结构与磁盘使用率相同；
+- `local.filesystem.used_percent`：所有文件系统挂载点的磁盘使用率；JSON `evidence.details` 保存 `filesystem`、`mount`、`used_percent` 和挂载点级 `status` 明细，终端逐挂载点显示独立状态；`normalized_value` 仍为所有挂载点中的最大值；
+- `local.filesystem.inode_used_percent`：所有文件系统挂载点的 inode 使用率，结构与磁盘使用率相同；挂载点级状态与指标整体状态分别保存，整体状态仍按最大使用率聚合；
 - `local.memory.available_percent`：可用内存百分比；
 - `local.cpu.utilization`：`top -bn2 -d 1` 的一秒窗口 CPU 使用率；
 - `local.cpu.load_1m`：1 分钟系统负载与 CPU 核数；

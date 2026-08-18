@@ -111,7 +111,7 @@
 | normalized_value | 否 | 规范化数值（统一单位、可比较）；无法规范化时 null |
 | unit | 是 | 单位 |
 | threshold | 是 | 阈值层 + 规则 ID + 判定值 + 来源锚点；UNKNOWN 时 value 可为 null 并注明原因（missing/conflict） |
-| evidence | 是 | 命令、输出摘要、原始输出引用、采样时间；文件系统指标可选 `details` 数组，逐挂载点保存 `filesystem`、`mount`、`used_percent` |
+| evidence | 是 | 命令、输出摘要、原始输出引用、采样时间；文件系统指标可选 `details` 数组，逐挂载点保存 `filesystem`、`mount`、`used_percent` 和可选 `status`；新事实源写入挂载点级状态，旧事实源缺少该字段时展示层回退到指标整体状态 |
 | error | 否 | 技术错误（error_code + message）；仅执行失败时非空 |
 | provenance | 是 | 配置来源、文档来源、解释性备注（含冲突/缺失说明） |
 
@@ -188,8 +188,8 @@ error code 枚举（首版）：`CONNECTION_FAILED`、`TIMEOUT`、`PERMISSION_DE
         "raw_ref": "raw/local.filesystem.used_percent.out",
         "sampled_at": "2026-08-15T10:30:02+08:00",
         "details": [
-          { "filesystem": "/dev/mapper/vg-data", "mount": "/", "used_percent": 62 },
-          { "filesystem": "/dev/mapper/vg-log", "mount": "/var/log", "used_percent": 81 }
+          { "filesystem": "/dev/mapper/vg-data", "mount": "/", "used_percent": 62, "status": "OK" },
+          { "filesystem": "/dev/mapper/vg-log", "mount": "/var/log", "used_percent": 81, "status": "WARN" }
         ]
       },
       "error": null,
@@ -239,3 +239,5 @@ error code 枚举（首版）：`CONNECTION_FAILED`、`TIMEOUT`、`PERMISSION_DE
 
 - stdout/Excel/HTML 按 `execution_status` 与 `status` 两个维度汇总：业务状态只描述业务；`execution_status != SUCCESS` 时报表必须展示技术失败计数（Errors-Evidence），不得掩盖为业务正常。
 - 状态颜色/排序约定见 docs/specs/reporting-roadmap.md。
+
+> 说明：文件系统指标的 metric 级 `status`、`raw_value` 和 `normalized_value` 仍按所有挂载点中的最大使用率聚合，用于主机摘要和阈值判定；`evidence.details[].status` 仅表示对应挂载点自身状态，报表不得把整体状态复制到每个挂载点。

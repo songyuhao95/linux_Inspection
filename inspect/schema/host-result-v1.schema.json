@@ -95,7 +95,8 @@
             "properties": {
               "filesystem": { "type": "string", "minLength": 1 },
               "mount": { "type": "string", "minLength": 1 },
-              "used_percent": { "type": "number", "minimum": 0, "maximum": 100 }
+              "used_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+              "status": { "enum": ["OK", "WARN", "CRIT", "UNKNOWN"] }
             }
           }
         }

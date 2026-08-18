@@ -882,11 +882,38 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
     return None
 
 
-def _evidence_details(metric_id: str, parsed: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-    """返回可选的结构化证据明细（兼容旧指标/旧 fixture）。
+def _filesystem_detail_status(
+    metric_id: str,
+    used_percent: float,
+    resolved: Dict[str, Any],
+    profile: Optional[Dict[str, Any]] = None,
+) -> str:
+    """按单个挂载点数值复用现有阈值判定，返回该明细自身状态。
 
-    磁盘与 inode 指标保留每个文件系统的挂载点和使用率；
-    normalized_value/raw_value 仍由 max_pct 派生，继续承担阈值判定。
+    指标整体仍以 parsed["max_pct"] 判定；这里仅把单行值临时作为
+    max_pct 传给同一判定函数，避免复制或发明阈值。外部配置规则同样
+    先按声明顺序匹配，未命中时沿用现有的文档基线回退语义。
+    """
+    value = float(used_percent)
+    matched_rule = _apply_external_rules(metric_id, value, resolved)
+    if matched_rule is not None:
+        return str(matched_rule["status"])
+    if resolved.get("layer") == LAYER_EXTERNAL_CONFIG:
+        resolved = _fallback_to_baseline(resolved, metric_id)
+    detail_parsed = {"max_pct": value}
+    return str(JUDGERS[metric_id](detail_parsed, resolved, profile)["status"])
+
+
+def _evidence_details(
+    metric_id: str,
+    parsed: Dict[str, Any],
+    resolved: Dict[str, Any],
+    profile: Optional[Dict[str, Any]] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """返回带挂载点级状态的结构化证据明细。
+
+    ``normalized_value``/``raw_value`` 仍由 ``max_pct`` 派生，继续承担
+    指标级聚合和阈值判定；每条明细额外保存自身状态，供报表直接读取。
     """
     if metric_id not in {
         "local.filesystem.used_percent",
@@ -898,6 +925,9 @@ def _evidence_details(metric_id: str, parsed: Dict[str, Any]) -> Optional[List[D
             "filesystem": mask_output(str(row["filesystem"])),
             "mount": mask_output(str(row["mount"])),
             "used_percent": int(row["pct"]),
+            "status": _filesystem_detail_status(
+                metric_id, row["pct"], resolved, profile
+            ),
         }
         for row in parsed.get("rows", [])
     ]
@@ -1029,6 +1059,7 @@ def _judged_metric_document(
     *,
     inspection_id: str,
     collected_at: str,
+    profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """判定完成 → 组装 threshold/provenance（HR §3 字段语义，REQ-D-04 可追溯）。"""
     status = decision["status"]
@@ -1088,7 +1119,7 @@ def _judged_metric_document(
         "raw_ref": f"raw/{metric_id}.out",
         "sampled_at": collected_at,
     }
-    details = _evidence_details(metric_id, parsed)
+    details = _evidence_details(metric_id, parsed, resolved, profile)
     if details is not None:
         evidence["details"] = details
     return _build_metric_document(
@@ -1350,7 +1381,7 @@ def normalize_host_result(
                 "raw_ref": f"raw/{metric_id}.out",
                 "sampled_at": collected_at,
             }
-            details = _evidence_details(metric_id, parsed)
+            details = _evidence_details(metric_id, parsed, resolved, profile)
             if details is not None:
                 evidence["details"] = details
             metric_docs.append(
@@ -1385,6 +1416,7 @@ def normalize_host_result(
                 resolved,
                 inspection_id=inspection_id,
                 collected_at=collected_at,
+                profile=profile,
             )
         )
 
@@ -1678,7 +1710,11 @@ def _validate_evidence(evidence: Any, where: str) -> None:
             _fail(where, "evidence.details 必须为数组")
         for index, detail in enumerate(details):
             detail_where = f"{where}.details[{index}]"
-            if not isinstance(detail, dict) or set(detail) != {"filesystem", "mount", "used_percent"}:
+            if not isinstance(detail, dict):
+                _fail(detail_where, "挂载点明细必须为对象")
+            detail_keys = set(detail)
+            required_detail_keys = {"filesystem", "mount", "used_percent"}
+            if not required_detail_keys.issubset(detail_keys) or detail_keys - required_detail_keys - {"status"}:
                 _fail(detail_where, "挂载点明细键集不符")
             if not isinstance(detail["filesystem"], str) or not detail["filesystem"]:
                 _fail(detail_where, "filesystem 必须为非空字符串")
@@ -1687,6 +1723,8 @@ def _validate_evidence(evidence: Any, where: str) -> None:
             used = detail["used_percent"]
             if isinstance(used, bool) or not isinstance(used, (int, float)) or not 0 <= used <= 100:
                 _fail(detail_where, "used_percent 必须为 0..100 数值")
+            if "status" in detail and detail["status"] not in STATUSES:
+                _fail(detail_where, "status 必须为 OK/WARN/CRIT/UNKNOWN")
 
 
 def _validate_provenance(provenance: Any, where: str) -> None:

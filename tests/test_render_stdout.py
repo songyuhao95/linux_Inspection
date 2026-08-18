@@ -185,8 +185,8 @@ class TestMetricValueOutput:
                 "local.filesystem.used_percent",
                 "磁盘使用率",
                 [
-                    {"filesystem": "/dev/root", "mount": "/", "used_percent": 61},
-                    {"filesystem": "/dev/data", "mount": "/data", "used_percent": 83},
+                    {"filesystem": "/dev/root", "mount": "/", "used_percent": 61, "status": "OK"},
+                    {"filesystem": "/dev/data", "mount": "/data", "used_percent": 83, "status": "WARN"},
                 ],
                 83,
             ),
@@ -194,20 +194,43 @@ class TestMetricValueOutput:
                 "local.filesystem.inode_used_percent",
                 "inode 使用率",
                 [
-                    {"filesystem": "/dev/root", "mount": "/", "used_percent": 1},
-                    {"filesystem": "/dev/data", "mount": "/data", "used_percent": 2},
+                    {"filesystem": "/dev/root", "mount": "/", "used_percent": 1, "status": "OK"},
+                    {"filesystem": "/dev/data", "mount": "/data", "used_percent": 2, "status": "OK"},
                 ],
                 2,
             ),
         ]
         out = render(doc)
-        assert "磁盘使用率: / 61.00 %" in out
-        assert "磁盘使用率: /data 83.00 %" in out
-        assert "inode 使用率: / 1.00 %" in out
-        assert "inode 使用率: /data 2.00 %" in out
+        assert "[OK] 磁盘使用率: / 61.00 %" in out
+        assert "[WARN] 磁盘使用率: /data 83.00 %" in out
+        assert "[OK] inode 使用率: / 1.00 %" in out
+        assert "[OK] inode 使用率: /data 2.00 %" in out
         assert "磁盘使用率: 83.00 %" not in out
         assert "inode 使用率: 2.00 %" not in out
 
+
+    def test_legacy_filesystem_details_fall_back_to_metric_status(self):
+        doc = valid_doc()
+        metric = copy.deepcopy(doc["metrics"][0])
+        metric.update({
+            "metric_id": "local.filesystem.used_percent",
+            "name": "磁盘使用率",
+            "status": "CRIT",
+            "raw_value": "91",
+            "normalized_value": 91.0,
+            "unit": "%",
+            "error": None,
+        })
+        metric["evidence"] = {
+            "command": "df -hT",
+            "output_summary": None,
+            "raw_ref": "raw/local.filesystem.used_percent.out",
+            "sampled_at": doc["collected_at"],
+            "details": [{"filesystem": "/dev/root", "mount": "/", "used_percent": 1}],
+        }
+        doc["metrics"] = [metric]
+        out = render(doc)
+        assert "[CRIT] 磁盘使用率: / 1.00 %" in out
 
     def test_unknown_metric_is_kept_in_problem_list_not_value_section(self):
         out = render(partial_doc())

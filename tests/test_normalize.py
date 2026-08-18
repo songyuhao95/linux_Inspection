@@ -900,7 +900,7 @@ class TestStructure:
             }:
                 assert len(metric["evidence"]["details"]) == 2
                 assert all(
-                    set(detail) == {"filesystem", "mount", "used_percent"}
+                    set(detail) == {"filesystem", "mount", "used_percent", "status"}
                     for detail in metric["evidence"]["details"]
                 )
             else:
@@ -923,10 +923,44 @@ class TestStructure:
         assert disk["normalized_value"] == 91.0
         assert disk["raw_value"] == "91"
         assert [d["mount"] for d in disk["evidence"]["details"]] == ["/", "/data"]
+        assert [d["status"] for d in disk["evidence"]["details"]] == [n.STATUS_OK, n.STATUS_CRIT]
         assert inode["normalized_value"] == 1.0
         assert [d["mount"] for d in inode["evidence"]["details"]] == ["/", "/data"]
+        assert [d["status"] for d in inode["evidence"]["details"]] == [n.STATUS_OK, n.STATUS_OK]
         n.validate_host_result(doc)
 
+
+    def test_filesystem_detail_status_uses_each_mount_value(self):
+        metric = normalize_one(
+            "local.filesystem.used_percent",
+            "Filesystem Type Size Used Avail Use% Mounted on\n"
+            "/dev/root ext4 100G 61G 39G 61% /\n"
+            "/dev/data ext4 100G 83G 17G 83% /data\n",
+        )
+        details = metric["evidence"]["details"]
+        assert metric["status"] == n.STATUS_WARN
+        assert [d["status"] for d in details] == [n.STATUS_OK, n.STATUS_WARN]
+
+    def test_filesystem_detail_status_respects_external_rules(self):
+        resolved = override_resolved(
+            {
+                "local.filesystem.used_percent": {
+                    "rules": [
+                        {"status": "CRIT", "op": ">=", "value": 80, "note": "critical threshold"},
+                        {"status": "WARN", "op": ">=", "value": 50, "note": "warning threshold"},
+                    ]
+                }
+            }
+        )
+        metric = normalize_one(
+            "local.filesystem.used_percent",
+            "Filesystem Type Size Used Avail Use% Mounted on\n"
+            "/dev/root ext4 100G 10G 90G 10% /\n"
+            "/dev/data ext4 100G 85G 15G 85% /data\n",
+            resolved=resolved,
+        )
+        assert metric["status"] == n.STATUS_CRIT
+        assert [d["status"] for d in metric["evidence"]["details"]] == [n.STATUS_OK, n.STATUS_CRIT]
 
     def test_registry_alignment_with_metrics_py(self):
         assert set(n.PARSERS) == set(metrics_mod.ALL_METRIC_IDS)

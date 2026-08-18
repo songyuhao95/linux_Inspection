@@ -360,12 +360,20 @@ def _metric_display_value(metric: Mapping[str, Any]) -> str:
     return f"{text} {unit}".rstrip()
 
 
-def _filesystem_detail_lines(metric: Mapping[str, Any]) -> Optional[List[str]]:
-    """Return one Chinese report line per structured filesystem detail."""
+def _filesystem_detail_lines(metric: Mapping[str, Any]) -> Optional[List[tuple[str, str]]]:
+    """Return ``(status, text)`` for each filesystem detail from JSON.
+
+    New facts carry a mount-point status. For old facts without it, fall back
+    to the metric status for backward compatibility; no threshold is evaluated
+    in the rendering layer.
+    """
     details = (metric.get("evidence") or {}).get("details")
     if not isinstance(details, list):
         return None
-    lines: List[str] = []
+    metric_status = str(metric.get("status") or STATUS_UNKNOWN)
+    if metric_status not in STATUSES:
+        metric_status = STATUS_UNKNOWN
+    lines: List[tuple[str, str]] = []
     for detail in details:
         if not isinstance(detail, Mapping):
             continue
@@ -375,7 +383,10 @@ def _filesystem_detail_lines(metric: Mapping[str, Any]) -> Optional[List[str]]:
             value = f"{float(used):.2f}"
         else:
             value = "-"
-        lines.append(f"{mount} {value} %")
+        detail_status = detail.get("status")
+        if detail_status not in STATUSES:
+            detail_status = metric_status
+        lines.append((str(detail_status), f"{mount} {value} %"))
     return lines
 
 
@@ -406,8 +417,10 @@ def render_metric_values(
         }:
             detail_lines = _filesystem_detail_lines(metric)
         if detail_lines:
-            prefix = f"    {badge(status, color=color, stream=stream)} {name}: "
-            lines.extend(prefix + detail for detail in detail_lines)
+            lines.extend(
+                f"    {badge(detail_status, color=color, stream=stream)} {name}: {detail}"
+                for detail_status, detail in detail_lines
+            )
         else:
             lines.append(
                 f"    {badge(status, color=color, stream=stream)} {name}: "
