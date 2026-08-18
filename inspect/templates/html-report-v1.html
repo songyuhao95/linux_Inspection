@@ -101,6 +101,7 @@ body {
   border-radius: 8px; padding: 14px 18px; margin-bottom: 12px;
 }
 .run-header h1 { font-size: 19px; margin: 0 0 6px; }
+.run-summary-title { font-size: 14px; margin: 0 0 6px; color: var(--text-dim); }
 .run-header .run-stream { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; }
 .run-conclusion { font-size: 13px; margin: 0; }
 .run-meta {
@@ -154,6 +155,12 @@ body {
 .host-section { margin-bottom: 28px; }
 .host-title { font-size: 17px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
 .host-meta { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; word-break: break-all; }
+.host-error {
+  margin: 0 0 10px; padding: 10px 12px; border: 1px solid #C62828;
+  border-left: 4px solid #C62828; border-radius: 6px; background: #fff4f4;
+}
+.host-error strong { color: #C62828; }
+.host-error p { margin: 4px 0 0; color: var(--text); word-break: break-word; }
 
 .metric-card {
   background: var(--card-bg); border: 1px solid var(--border);
@@ -318,7 +325,7 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
 
   function applyFilters() {
     var activeView = document.querySelector(".group-view.active");
-    var cards, groups, i, card, visible, groupCards, j, anyVisible;
+    var cards, errors, groups, i, card, error, visible, groupCards, j, anyVisible;
     if (!activeView) { return; }
     cards = activeView.querySelectorAll(".metric-card");
     for (i = 0; i < cards.length; i += 1) {
@@ -329,12 +336,27 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
       if (visible) { card.classList.remove("hidden"); }
       else { card.classList.add("hidden"); }
     }
+    errors = activeView.querySelectorAll(".host-error");
+    for (i = 0; i < errors.length; i += 1) {
+      error = errors[i];
+      visible = matches(filters.host, error.getAttribute("data-host")) &&
+                matches(filters.status, error.getAttribute("data-status")) &&
+                middlewareMatches(filters.middleware, error.getAttribute("data-middleware"));
+      if (visible) { error.classList.remove("hidden"); }
+      else { error.classList.add("hidden"); }
+    }
     groups = activeView.querySelectorAll(".report-group");
     for (i = 0; i < groups.length; i += 1) {
       groupCards = groups[i].querySelectorAll(".metric-card");
+      errors = groups[i].querySelectorAll(".host-error");
       anyVisible = false;
       for (j = 0; j < groupCards.length; j += 1) {
         if (!groupCards[j].classList.contains("hidden")) { anyVisible = true; break; }
+      }
+      if (!anyVisible) {
+        for (j = 0; j < errors.length; j += 1) {
+          if (!errors[j].classList.contains("hidden")) { anyVisible = true; break; }
+        }
       }
       if (anyVisible) { groups[i].classList.remove("hidden"); }
       else { groups[i].classList.add("hidden"); }
@@ -394,8 +416,12 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
     resetBtn.addEventListener("click", function () {
       filters = { status: {}, host: {}, middleware: {} };
       var checks = document.querySelectorAll(".filter-check");
+      var searches = document.querySelectorAll(".filter-search");
+      var options = document.querySelectorAll(".filter-option");
       var i;
       for (i = 0; i < checks.length; i += 1) { checks[i].checked = false; }
+      for (i = 0; i < searches.length; i += 1) { searches[i].value = ""; }
+      for (i = 0; i < options.length; i += 1) { options[i].classList.remove("hidden"); }
       updateSelectionCounts();
       applyFilters();
     });

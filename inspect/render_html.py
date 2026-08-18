@@ -126,13 +126,12 @@ def _value_or_dash(value: Any) -> str:
 def _embed_json(docs: Sequence[Mapping[str, Any]]) -> str:
     """内嵌 JSON 文本（只读展示数据，TD §8）。
 
-    安全防御："</" 序列内的反斜杠转义为 "<\\/"（文档注释中写作
-    反斜杠+斜杠）：字符串值内的 `</script>` 不得提前闭合内嵌脚本标签
-    （json 合法转义，浏览器解析后原样恢复）。映射值经 string.Template
-    原样插入，数据内美元符号无需处理。
+    安全防御：将 JSON 中所有 `<` 编码为 `\u003c`，避免任意大小写
+    形式的 `</script>` 提前闭合内嵌脚本标签（浏览器 JSON 解析后原样恢复）。
+    映射值经 string.Template 原样插入，数据内美元符号无需处理。
     """
     text = json.dumps(list(docs), ensure_ascii=False, indent=1)
-    text = text.replace("</", "<\\/")
+    text = text.replace("<", "\\u003c")
     return text
 
 
@@ -332,6 +331,32 @@ def _macro_card(doc: Mapping[str, Any]) -> str:
     return "".join(parts)
 
 
+def _host_error_block(doc: Mapping[str, Any], *, show_host: bool = False) -> str:
+    """渲染无业务指标主机的技术失败提示，供三种分组视图复用。"""
+    execution_status = doc.get("execution_status", "UNKNOWN")
+    if execution_status == "SUCCESS" or doc.get("metrics"):
+        return ""
+    host = doc.get("host") or {}
+    host_name = str(host.get("name", ""))
+    host_error = doc.get("host_error")
+    error_code = ""
+    error_message = "主机未产生可执行的业务指标。"
+    if isinstance(host_error, Mapping):
+        error_code = str(host_error.get("code") or "")
+        error_message = str(host_error.get("message") or error_message)
+    label = "主机级技术失败"
+    if error_code:
+        label += "（" + error_code + "）"
+    context = "（主机：" + host_name + "）" if show_host else ""
+    middleware = "Linux 基础"
+    return (
+        '<div class="host-error" data-host="' + esc(host_name)
+        + '" data-status="UNKNOWN" data-middleware="' + esc(middleware) + '">'
+        '<strong>' + esc(label + context) + '</strong><p>' + esc(error_message) + '</p>'
+        '</div>'
+    )
+
+
 def _host_section(doc: Mapping[str, Any]) -> str:
     """按主机分组的详情区：标题/徽标/元信息 + 逐指标卡片。"""
     host = doc.get("host") or {}
@@ -351,11 +376,13 @@ def _host_section(doc: Mapping[str, Any]) -> str:
         _metric_card(m, host_name, _middleware_values(doc, m))
         for m in doc.get("metrics") or []
     ]
+    error_block = _host_error_block(doc)
     return "".join([
         '<section class="report-group host-section" data-host="' + esc(host_name)
         + '" id="host-' + esc(host_name) + '">',
         '<h2 class="host-title">' + esc(host_name) + " " + _badge(execution_status) + "</h2>",
         '<p class="host-meta">' + meta + "</p>",
+        error_block,
         "".join(cards),
         "</section>",
     ])
@@ -406,6 +433,9 @@ def _middleware_dimensions(docs: Sequence[Mapping[str, Any]]) -> List[str]:
     """中间件维度：优先使用 metric/host product_profiles，空时归入 Linux 基础。"""
     result: List[str] = []
     for doc in docs:
+        host_error = _host_error_block(doc)
+        if host_error and "Linux 基础" not in result:
+            result.append("Linux 基础")
         for metric in doc.get("metrics") or []:
             for value in _middleware_values(doc, metric):
                 if value not in result:
@@ -437,6 +467,7 @@ def _run_summary_nav(docs, totals, inspection_id, run_id, collected_at, generate
     return (
         '<header class="run-header" aria-label="Run 摘要">'
         '<h1>巡检 HTML 报表 — ' + esc(inspection_id) + "</h1>"
+        '<h2 class="run-summary-title">Run 摘要</h2>'
         '<p class="run-stream">' + _run_conclusion(docs, totals) + "</p>"
         '<dl class="run-meta">' + rows + "</dl>"
         "</header>"
@@ -493,6 +524,10 @@ def _status_details(docs: Sequence[Mapping[str, Any]]) -> str:
     for status in STATUSES:
         cards: List[str] = []
         for doc in docs:
+            if status == "UNKNOWN":
+                host_error = _host_error_block(doc, show_host=True)
+                if host_error:
+                    cards.append(host_error)
             host_name = str((doc.get("host") or {}).get("name", ""))
             for metric in doc.get("metrics") or []:
                 metric_status = metric.get("status") if metric.get("status") in STATUSES else "UNKNOWN"
@@ -514,6 +549,9 @@ def _middleware_details(docs: Sequence[Mapping[str, Any]]) -> str:
     for middleware in _middleware_dimensions(docs):
         cards: List[str] = []
         for doc in docs:
+            host_error = _host_error_block(doc, show_host=True)
+            if host_error and middleware == "Linux 基础":
+                cards.append(host_error)
             host_name = str((doc.get("host") or {}).get("name", ""))
             for metric in doc.get("metrics") or []:
                 values = _middleware_values(doc, metric)

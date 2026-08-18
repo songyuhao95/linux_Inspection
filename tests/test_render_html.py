@@ -167,9 +167,19 @@ class TestEmbeddedJson:
         )
         s = render_str(docs, tmp_path)
         blob = embedded_blob(s)
-        assert "</script>" not in blob
-        assert "<\\/script>" in blob
-        # 转义后仍是合法 JSON，且与事实源一致（浏览器解析 `\/` 后原样）
+        assert "</script" not in blob.lower()
+        assert "\\u003c/script>" in blob
+        # 转义后仍是合法 JSON，且与事实源一致（浏览器 JSON 解析后恢复 `<`）
+        assert json.loads(blob) == docs
+
+    def test_script_tag_breakout_mixed_case_is_escaped(self, tmp_path):
+        docs = fixture_docs()
+        docs[0]["metrics"][0]["evidence"]["output_summary"] = (
+            "</SCRIPT><ScRiPt>alert(1)</sCrIpT>"
+        )
+        blob = embedded_blob(render_str(docs, tmp_path))
+        assert "</script" not in blob.lower()
+        assert "\\u003c/SCRIPT>" in blob
         assert json.loads(blob) == docs
 
     def test_embedded_json_keeps_dollar_signs(self, tmp_path):
@@ -267,6 +277,10 @@ class TestLayout:
         for section in ("Run 摘要", "主机列表", "状态筛选", "中间件"):
             assert section in body, "报表缺少: %s" % section
         assert body.index('<header class="run-header"') > body.index('<main class="content">')
+        main = body[body.index('<main class="content">'):]
+        main = re.sub(r'^<main class="content">\s*<!--.*?-->\s*', '<main class="content">', main, count=1, flags=re.S)
+        assert main.startswith('<main class="content"><header class="run-header"')
+        assert '<h2 class="run-summary-title">Run 摘要</h2>' in body
         assert "指标维度" not in body
 
     def test_left_nav_before_content(self, tmp_path):
@@ -413,7 +427,8 @@ class TestFilterInteraction:
         for needle in (
             "addEventListener", "data-filter-kind", "data-filter-value", "data-middleware",
             "classList", "applyFilters", "filter-reset", "filter-search", "group-by-select",
-            "group-view", "hidden",
+            "group-view", "host-error", "searches[i].value = \"\"", "options[i].classList.remove",
+            "hidden",
         ):
             assert needle in js, "JS 缺少交互接线: %s" % needle
 
@@ -442,6 +457,26 @@ class TestFilterInteraction:
         assert 'count-ok">OK<b>2</b>' in body
         assert 'count-crit">CRIT<b>1</b>' in body
         assert 'count-unknown">UNKNOWN<b>2</b>' in body
+
+    def test_empty_error_host_keeps_host_level_failure_visible(self, tmp_path):
+        import copy
+        docs = fixture_docs()
+        error_doc = copy.deepcopy(docs[0])
+        error_doc["host"] = {"name": "node-error", "ip": "<IP>", "inventory_source": "inventory"}
+        error_doc["execution_status"] = "ERROR"
+        error_doc["metrics"] = []
+        error_doc["host_error"] = {"code": "PROBE_FAILED", "message": "能力探测任务失败"}
+        error_doc["execution_summary"] = {
+            "total_metrics": 4, "ok": 0, "warn": 0, "crit": 0, "unknown": 0,
+            "executed": 0, "failed": 4,
+        }
+        body = body_text(render_str([error_doc], tmp_path))
+        assert body.count('class="host-error"') == 3
+        assert "PROBE_FAILED" in body
+        assert "能力探测任务失败" in body
+        assert 'data-group-mode="host"' in body
+        assert 'data-group-mode="status"' in body
+        assert 'data-group-mode="middleware"' in body
 
 
 # --------------------------------------------------------------------------
