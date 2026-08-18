@@ -125,6 +125,11 @@ def test_manifest_hash_mismatch_fails_closed(tmp_path, monkeypatch):
         runtime.resolve_runtime(tmp_path)
 
 
+def test_materializer_uses_posix_bundle_paths():
+    source = (ROOT / "tools" / "build-runtime.sh").read_text(encoding="utf-8")
+    assert "path.relative_to(root).as_posix()" in source
+    assert "str(path.relative_to(root))" not in source
+
 def test_bundle_hash_ignores_generated_bytecode(tmp_path):
     root = tmp_path / "ansible"
     root.mkdir()

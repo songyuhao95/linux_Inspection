@@ -57,7 +57,7 @@ for path in sorted(
     for p in root.rglob("*")
     if p.is_file() and "__pycache__" not in p.parts and p.suffix not in {".pyc", ".pyo"}
 ):
-    h.update(str(path.relative_to(root)).encode("utf-8"))
+    h.update(path.relative_to(root).as_posix().encode("utf-8"))
     h.update(b"\0")
     h.update(path.read_bytes())
     h.update(b"\0")

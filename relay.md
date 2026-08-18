@@ -508,3 +508,30 @@ platform: Linux x86_64; target glibc compatibility remains to be verified on Kyl
 The runtime bundle is intentionally symlink-free so it can be transferred from the Windows development host; the Linux materializer and target checkout must still verify executable mode and ELF/glibc compatibility. The wrapper now uses `runtime/bin/python3.12` for real, fixture, and query modes and no longer searches `PYTHON3`, `python3`, or `python` on `PATH`. It also replaces inherited `PYTHONPATH` with the project source directory.
 
 This is deployment-artifact evidence only. `kylin01` remains `DEPLOYMENT_ARTIFACT_MISSING` until the materialized runtime is transferred or pulled and successfully executed there; `node01` has no new VM evidence. No VM smoke success is claimed by this section.
+
+
+## 16. T-111 bundled Ansible hash mismatch diagnosis and fix (2026-08-18)
+
+The Kylin validation checkout was at commit `621743e` (`fix: ignore generated runtime bytecode in hash`) and contained the project-local Python 3.12 runtime plus ansible-core 2.18.9. The runtime executable and Ansible imports were verified from the project tree, not from system Python or system Ansible. `bash inspect.sh --local` nevertheless failed closed at the bundled Ansible hash gate:
+
+```text
+bundled Ansible sha256 does not match manifest; category=dedicated_python_unavailable
+```
+
+The target checkout contained 1321 materialized Ansible files. After excluding `__pycache__`, `.pyc`, and `.pyo`, the actual bytes matched the tracked Git blobs exactly, and the canonical runtime resolver calculated:
+
+```text
+manifest bundle_sha256: 8476120eb5d1552fe1fea95ddb1f1b61ee132d31eadbe0a503a631ecabdce811
+recomputed bundle_sha256: 7f06cae99f21f57b8cd4b53d5e46a18af031e17b4f158f9c9913f358acb0ba33
+```
+
+Root cause: `inspect/runtime.py` used POSIX relative paths while `tools/build-runtime.sh` used the platform-dependent `str(Path.relative_to(...))`. The checked-in manifest was therefore generated with a non-canonical path representation and failed the runtime verifier on the Linux target.
+
+Fix in contract T-111:
+
+1. Make the materializer use `path.relative_to(root).as_posix()` for bundle hash input.
+2. Regenerate `runtime/manifest.json` with the canonical hash `7f06cae99f21f57b8cd4b53d5e46a18af031e17b4f158f9c9913f358acb0ba33`.
+3. Add a regression test preventing reintroduction of platform-dependent path hashing.
+4. Re-run local focused tests and the authorized Kylin VM smoke test after publishing to `origin/main`.
+
+This incident was an artifact-verification failure only. It was not fixed by changing the manifest alone: the materializer and resolver now share the same canonical hash algorithm.
