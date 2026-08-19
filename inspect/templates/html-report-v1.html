@@ -198,9 +198,9 @@ body {
 
 .card-short-fields {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px 10px;
-  margin-top: 10px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px 8px;
+  margin-top: 8px;
 }
 .short-field { min-width: 0; }
 .short-field-label {
@@ -244,6 +244,10 @@ body {
 footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); }
 
 /* ---------------- 打印友好（RR §4）：默认宏观摘要，详情可展开 ---------------- */
+@media (max-width: 1200px) {
+  .card-short-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
 @media (max-width: 760px) {
   .card-short-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -346,6 +350,7 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
       card = cards[i];
       visible = matches(filters.status, card.getAttribute("data-status")) &&
                 matches(filters.host, card.getAttribute("data-host")) &&
+                matches(filters.metric, card.getAttribute("data-metric-id")) &&
                 middlewareMatches(filters.middleware, card.getAttribute("data-middleware"));
       if (visible) { card.classList.remove("hidden"); }
       else { card.classList.add("hidden"); }

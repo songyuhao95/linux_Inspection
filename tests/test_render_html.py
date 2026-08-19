@@ -329,6 +329,10 @@ class TestLayout:
         assert 'class="short-field-label">host</span>' in body
         assert 'class="short-field-label">normalized_value</span>' in body
         assert '<table class="card-fields"><tbody>' in body
+        template = TEMPLATE.read_text(encoding="utf-8")
+        assert "grid-template-columns: repeat(8, minmax(0, 1fr));" in template
+        assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in template
+        assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in template
         assert '<th scope="row">threshold_rule</th>' in body
         assert '<th scope="row">command</th>' in body
 
@@ -471,6 +475,7 @@ class TestFilterInteraction:
         for needle in (
             "addEventListener", "data-filter-kind", "data-filter-value", "data-middleware",
             "data-metric-id", "filters.metric",
+            "matches(filters.metric, card.getAttribute(\"data-metric-id\"))",
             "classList", "applyFilters", "filter-reset", "filter-search", "group-by-select",
             "group-view", "host-error", "searches[i].value = \"\"", "options[i].classList.remove",
             "hidden",
