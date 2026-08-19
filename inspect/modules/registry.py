@@ -112,10 +112,12 @@ def _build_default_registry() -> ModuleRegistry:
     # a separate, reviewable registration file.
     from .linux_basic import MODULE as BASIC_MODULE
     from .linux_common import MODULE as COMMON_MODULE
+    from .nginx import MODULE as NGINX_MODULE
 
     registry = ModuleRegistry()
     registry.register(COMMON_MODULE)
     registry.register(BASIC_MODULE)
+    registry.register(NGINX_MODULE)
     return registry
 
 
@@ -125,6 +127,23 @@ DEFAULT_REGISTRY = _build_default_registry()
 # selects a middleware module.  This keeps an unspecified inspection focused
 # and avoids manufacturing UNSUPPORTED_PROFILE results for future adapters.
 DEFAULT_COLLECTION_MODULE_IDS = ("linux_basic",)
+
+# Non-Linux middleware modules (e.g. "nginx").  The CLI default collects
+# ``linux_basic`` plus every middleware module; ``--nginx`` narrows the
+# middleware selection to Nginx only.  New middleware adapters register here
+# implicitly by being added to the default registry.
+_MIDDLEWARE_EXCLUDED = frozenset({"linux_basic", "linux_common"})
+
+
+def middleware_module_ids(registry: ModuleRegistry | None = None) -> tuple[str, ...]:
+    """Registered middleware module IDs (everything outside Linux host basics)."""
+    reg = registry if registry is not None else DEFAULT_REGISTRY
+    return tuple(
+        module.module_id
+        for module in reg.iter_modules()
+        if module.module_id not in _MIDDLEWARE_EXCLUDED
+    )
+
 
 # Function form keeps the call site readable and leaves room for a future
 # configured registry without changing the runner API.
@@ -138,4 +157,5 @@ __all__ = [
     "ModuleRegistry",
     "MonitorModule",
     "default_registry",
+    "middleware_module_ids",
 ]

@@ -88,7 +88,12 @@ def _run_shell(
     return completed.returncode, completed.stdout, completed.stderr
 
 
-def _fixture_result(selection: Any, specs: Sequence[runner_mod.CommandSpec], fixture_dir: Path) -> Dict[str, Any]:
+def _fixture_result(
+    selection: Any,
+    specs: Sequence[runner_mod.CommandSpec],
+    fixture_dir: Path,
+    nginx_whitelist: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
     """Reuse the existing fixture reader; it does not create a playbook or connect."""
     plan = runner_mod.RunPlan(
         playbook_path=Path(".runtime") / "local-fixture-unused.yml",
@@ -98,6 +103,7 @@ def _fixture_result(selection: Any, specs: Sequence[runner_mod.CommandSpec], fix
         metric_specs=list(specs),
         probe_command=probe_mod.build_probe_command(),
         selection_kind="local",
+        nginx_whitelist=tuple(nginx_whitelist or ()),
     )
     result = runner_mod._execute_fixture(plan, fixture_dir)
     result["local_mode"] = True
@@ -109,6 +115,7 @@ def run_local(
     specs: Sequence[runner_mod.CommandSpec],
     fixture_dir: Optional[Path] = None,
     runtime_dir: Optional[Path] = None,
+    nginx_whitelist: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Collect the selected local host directly; never call Ansible."""
     del runtime_dir  # kept for the CLI runner signature symmetry
@@ -120,7 +127,9 @@ def run_local(
     runner_mod.validate_command_specs(specs)
     resolved_fixture = runner_mod._resolve_fixture_dir(fixture_dir)
     if resolved_fixture is not None:
-        return _fixture_result(selection, specs, resolved_fixture)
+        return _fixture_result(
+            selection, specs, resolved_fixture, nginx_whitelist=nginx_whitelist
+        )
 
     bash_path = shutil.which("bash")
     host = selection.hosts[0]
@@ -232,6 +241,11 @@ def run_local(
             )
         )
 
+    metric_results = runner_mod.select_nginx_metrics(
+        metric_results,
+        host_ip=str(host.ip),
+        nginx_whitelist=nginx_whitelist,
+    )
     host_result = runner_mod.build_host_result(
         host,
         probe_matrix,

@@ -219,6 +219,11 @@ class CommandSpec:
     source_anchor: str
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    # Substituted command binaries captured at spec-build time.  Profile
+    # placeholders in command position (e.g. ``{nginx_bin}``) are resolved
+    # only after substitution, so the allow-list validator uses this set when
+    # present and falls back to the template binaries otherwise.
+    allowed_binaries: Tuple[str, ...] = ()
 
 
 # 每指标：命令模板（TD §5.2 数据源列逐字转写，{…} 为 profile 占位）、
@@ -286,10 +291,83 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "become": True,  # 读取其他用户日志（AE §5 最小化 become 原文示例）
         "anchor": "MR §5.10 关键日志行 + TD §5.2 local.logs.key_evidence",
     },
+    # ---- Nginx 中间件（nginx-p0-v1；安徽农金Nginx、Keepalived运维巡检手册）----
+    "local.nginx.process.present": {
+        "command": "pgrep -fa 'nginx: master|nginx: worker|/usr/sbin/nginx|/opt/nginx/sbin/nginx'",
+        "profile_keys": (),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx本节点服务」行",
+    },
+    "local.nginx.config.valid": {
+        "command": "{nginx_bin} -t -c {nginx_conf}",
+        "profile_keys": ("nginx_bin", "nginx_conf"),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx配置有效性」行",
+    },
+    "local.nginx.port.listening": {
+        "command": (
+            "ss -tlnp | grep ':{nginx_port}'; "
+            "curl -sS -I --connect-timeout 3 http://127.0.0.1:{nginx_port}/ | head -n 1"
+        ),
+        "profile_keys": ("nginx_port",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx端口与本地访问」行",
+    },
+    "local.nginx.error_log.key_evidence": {
+                "command": (
+            "ls -1 {nginx_error_log} 2>/dev/null; "
+            "tail -n 1000 {nginx_error_log} | egrep -i "
+            "'emerg|alert|crit|error|permission denied|bind\\(|connect\\(\\) failed|"
+            "upstream timed out' | tail -n 20"
+        ),
+        "profile_keys": ("nginx_error_log",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「关键日志」行",
+    },
+    "local.nginx.connections.status": {
+        "command": "curl -sS --connect-timeout 3 http://127.0.0.1:{nginx_port}/nginx_status",
+        "profile_keys": ("nginx_port",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「Nginx连接状态」行",
+    },
+    "local.nginx.access_log.status_codes": {
+        "command": (
+            "ls -1 {nginx_access_log} 2>/dev/null; "
+            "tail -n 1000 {nginx_access_log} | grep -E ' [1-5][0-9][0-9] '"
+        ),
+        "profile_keys": ("nginx_access_log",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「访问日志状态码」行",
+    },
+    "local.nginx.config.baseline": {
+        "command": (
+            "ls -1 {nginx_conf} 2>/dev/null; "
+            "grep -E 'worker_processes|worker_rlimit_nofile|worker_connections|"
+            "use epoll|multi_accept|keepalive_timeout|client_max_body_size|limit_req|"
+            "limit_conn' {nginx_conf}"
+        ),
+        "profile_keys": ("nginx_conf",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「Nginx配置基线」行",
+    },
+    "local.nginx.security.baseline": {
+        "command": (
+            "ls -1 {nginx_conf} 2>/dev/null; "
+            "grep -E 'server_tokens|autoindex|X-Frame-Options|X-Content-Type-Options|"
+            "Content-Security-Policy|request_method' {nginx_conf}"
+        ),
+        "profile_keys": ("nginx_conf",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「安全配置基线」行",
+    },
 }
 
 # 日志类指标（超时 15s，AE §7 / TD §5.2 超时列）
-_LOG_METRIC_IDS = {"local.logs.key_evidence"}
+_LOG_METRIC_IDS = {
+    "local.logs.key_evidence",
+    "local.nginx.error_log.key_evidence",
+    "local.nginx.access_log.status_codes",
+}
 
 
 # --------------------------------------------------------------------------
@@ -333,6 +411,22 @@ def _validate_profile_value(key: str, value: Any) -> str:
     if key == "unit":
         if not isinstance(value, str) or not _SAFE_UNIT.fullmatch(value):
             raise CommandConfigError(f"profile unit 非法: {value!r}")
+        return value
+    if key == "nginx_bin":
+        # nginx 可执行文件路径或命令名（手动路径 /usr/sbin/nginx、
+        # 源码路径 /opt/nginx/sbin/nginx）；安全字符集防注入
+        if not isinstance(value, str) or not _SAFE_WORD.fullmatch(value) or not value:
+            raise CommandConfigError(f"profile nginx_bin 非法: {value!r}")
+        return value
+    if key == "nginx_port":
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+            raise CommandConfigError(f"profile nginx_port 必须为 1..65535 整数: {value!r}")
+        return str(value)
+    if key in ("nginx_conf", "nginx_error_log", "nginx_access_log"):
+        if not isinstance(value, str) or not _SAFE_PATH.fullmatch(value):
+            raise CommandConfigError(
+                f"profile {key} 路径非法（需绝对路径，仅限安全字符）: {value!r}"
+            )
         return value
     # process_pattern / log_keywords
     if isinstance(value, list):
@@ -443,6 +537,7 @@ def build_metric_command_specs(
                     become=bool(entry["become"]),
                     required_commands=required,
                     source_anchor=entry["anchor"],
+                    allowed_binaries=tuple(parse_binaries(command)),
                 )
             )
         else:
@@ -590,7 +685,7 @@ def validate_command_specs(specs: Sequence[CommandSpec]) -> None:
                     f"allow-list 拒绝：命令缺失且非 UNSUPPORTED_PROFILE: {spec.metric_id}"
                 )
             continue
-        allowed = _allowed_binaries(spec.metric_id)
+        allowed = spec.allowed_binaries or _allowed_binaries(spec.metric_id)
         found = parse_binaries(spec.command)
         if not found:
             raise CommandNotAllowedError(
@@ -714,6 +809,7 @@ class RunPlan:
     argv: List[str] = field(default_factory=list)
     cleanup_paths: Tuple[Path, ...] = field(default_factory=tuple)
     selection_kind: str = "unknown"
+    nginx_whitelist: Tuple[str, ...] = ()
 
 
 def _default_runtime_dir() -> Path:
@@ -724,11 +820,14 @@ def prepare_run(
     selection: Any,
     specs: Sequence[CommandSpec],
     runtime_dir: Optional[Path] = None,
+    nginx_whitelist: Optional[Sequence[str]] = None,
 ) -> RunPlan:
     """allow-list 校验 → 生成 playbook 与 argv → RunPlan（不执行不连接）。
 
     selection：inventory.HostSelection 鸭子类型（.inventory_file/.hosts/
     .limit）；playbook 写入 runtime_dir（默认 <仓库根>/.runtime）。
+    nginx_whitelist：Nginx 白名单 IP（白名单内未运行 → CRIT「未运行」；
+    白名单外未运行 → 跳过该主机 Nginx 指标）。
     """
     validate_command_specs(specs)
     runtime_dir = Path(runtime_dir) if runtime_dir is not None else _default_runtime_dir()
@@ -754,6 +853,7 @@ def prepare_run(
             else (playbook_path,)
         ),
         selection_kind=str(getattr(selection, "kind", "unknown")),
+        nginx_whitelist=tuple(nginx_whitelist or ()),
     )
     plan.argv = build_playbook_argv(
         plan.playbook_path, plan.inventory_file, plan.limit
@@ -960,6 +1060,55 @@ def host_deadline_exceeded(start_mono: float, now_mono: float) -> bool:
 
 
 # --------------------------------------------------------------------------
+# 中间件按进程发现选择（nginx）：未运行主机跳过 / 白名单内 CRIT 未运行
+# --------------------------------------------------------------------------
+
+NGINX_METRIC_PREFIX = "local.nginx."
+NGINX_PROCESS_METRIC = "local.nginx.process.present"
+
+
+def _nginx_process_present(metric_result: Dict[str, Any]) -> bool:
+    """进程发现结果是否命中 Nginx（rc=0 且 stdout 非空 = pgrep 有匹配）。"""
+    return (
+        metric_result.get("error") is None
+        and metric_result.get("rc") == 0
+        and bool((metric_result.get("stdout") or "").strip())
+    )
+
+
+def select_nginx_metrics(
+    metric_results: Sequence[Dict[str, Any]],
+    *,
+    host_ip: str,
+    nginx_whitelist: Optional[Sequence[str]] = None,
+) -> List[Dict[str, Any]]:
+    """按进程发现结果决定主机保留哪些 Nginx 指标。
+
+    - 该主机无 Nginx 指标 → 原样返回；
+    - 进程发现结果缺失/采集失败 → 原样返回（UNKNOWN+error 由 normalize 呈现）；
+    - Nginx 运行中 → 原样返回（保留全部 Nginx 指标）；
+    - Nginx 未运行：
+        * 主机 IP 在 nginx 白名单 → 只保留 local.nginx.process.present
+          （normalize 判定 CRIT「未运行」），其余 Nginx 指标丢弃；
+        * 白名单外 → 丢弃全部 Nginx 指标（该主机不是 Nginx 节点，跳过）。
+    """
+    results = list(metric_results)
+    nginx = [m for m in results if m["metric_id"].startswith(NGINX_METRIC_PREFIX)]
+    if not nginx:
+        return results
+    process = next((m for m in nginx if m["metric_id"] == NGINX_PROCESS_METRIC), None)
+    if process is None or process.get("error") is not None:
+        return results
+    if _nginx_process_present(process):
+        return results
+    other = [m for m in results if not m["metric_id"].startswith(NGINX_METRIC_PREFIX)]
+    whitelist = set(nginx_whitelist or [])
+    if str(host_ip) in whitelist:
+        return other + [process]
+    return other
+
+
+# --------------------------------------------------------------------------
 # 执行（本任务仅 fixture 模式；真实执行 G0 前置）
 # --------------------------------------------------------------------------
 
@@ -1046,6 +1195,11 @@ def _execute_fixture(plan: RunPlan, fixture_dir: Path) -> Dict[str, Any]:
             _fixture_metric_result(host_dir, spec, probe_matrix)
             for spec in plan.metric_specs
         ]
+        metric_results = select_nginx_metrics(
+            metric_results,
+            host_ip=str(host.ip),
+            nginx_whitelist=plan.nginx_whitelist,
+        )
         host_results.append(
             build_host_result(
                 host,
@@ -1498,6 +1652,11 @@ def _parse_callback_results(
                     },
                 )
             )
+        metrics = select_nginx_metrics(
+            metrics,
+            host_ip=str(state["host"].ip),
+            nginx_whitelist=plan.nginx_whitelist,
+        )
         results.append(
             build_host_result(
                 state["host"],
@@ -1542,9 +1701,12 @@ def run(
     specs: Sequence[CommandSpec],
     fixture_dir: Optional[Path] = None,
     runtime_dir: Optional[Path] = None,
+    nginx_whitelist: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """prepare_run + execute_plan 便捷入口（cli 编排挂接点）。"""
-    plan = prepare_run(selection, specs, runtime_dir=runtime_dir)
+    plan = prepare_run(
+        selection, specs, runtime_dir=runtime_dir, nginx_whitelist=nginx_whitelist
+    )
     return execute_plan(plan, fixture_dir=fixture_dir)
 
 
@@ -1573,6 +1735,8 @@ __all__ = [
     "LOG_METRIC_TIMEOUT_SEC",
     "METRIC_ERROR_STATUS",
     "METRIC_TIMEOUT_SEC",
+    "NGINX_METRIC_PREFIX",
+    "NGINX_PROCESS_METRIC",
     "PROBE_TIMEOUT_SEC",
     "RunPlan",
     "STATUS_ERROR",
@@ -1590,5 +1754,6 @@ __all__ = [
     "prepare_run",
     "run",
     "run_status_for_hosts",
+    "select_nginx_metrics",
     "validate_command_specs",
 ]

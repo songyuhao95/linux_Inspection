@@ -44,6 +44,9 @@ PROBE_COMMANDS = (
     "tail",
     "grep",
     "nproc",
+    "curl",
+    "head",
+    "ls",
 )
 
 # 探测结果取值
@@ -140,6 +143,14 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     "local.filesystem.used_percent": ("bash", "df"),
     "local.filesystem.inode_used_percent": ("bash", "df"),
     "local.logs.key_evidence": ("bash", "tail", "grep"),
+    "local.nginx.process.present": ("bash", "pgrep"),
+    "local.nginx.config.valid": ("bash",),
+    "local.nginx.port.listening": ("bash", "ss", "grep", "curl", "head"),
+    "local.nginx.error_log.key_evidence": ("bash", "ls", "tail", "grep"),
+    "local.nginx.connections.status": ("bash", "curl"),
+    "local.nginx.access_log.status_codes": ("bash", "ls", "tail", "grep"),
+    "local.nginx.config.baseline": ("bash", "ls", "grep"),
+    "local.nginx.security.baseline": ("bash", "ls", "grep"),
 }
 
 

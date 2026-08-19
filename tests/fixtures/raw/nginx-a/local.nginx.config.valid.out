@@ -1,0 +1,3 @@
+# 非实测数据（fixture）
+nginx: the configuration file /opt/nginx/conf/nginx.conf syntax is ok
+nginx: configuration file /opt/nginx/conf/nginx.conf test is successful

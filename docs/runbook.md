@@ -26,6 +26,20 @@ SSH 连接参数 / become 方式，AE §8）后显式启用；未设置 `INSPECT
 
 ## 2. 本地调试（无目标主机时，TD §10）
 
+### 2.0 Nginx 中间件（--nginx / nginx.yml）
+
+默认巡检 = Linux 主机基础指标 + 全部已注册中间件（当前为 Nginx）。只巡检 Nginx：
+
+```bash
+bash inspect.sh --local --nginx          # 本机
+bash inspect.sh -H inspection --nginx    # 远程 inventory 主机组
+```
+
+Nginx 进程发现：未运行且不在 `nginx.yml` 白名单 → 跳过该主机 Nginx 指标；
+白名单内未运行 → CRIT「未运行」。Nginx 路径与白名单在仓库根 `nginx.yml` 配置
+（模板 `nginx.yml.example`，被 gitignore 忽略）。详见 `docs/specs/nginx-middleware.md`。
+
+
 ### 2.1 --local 本机自巡检
 
 控制端兼受控端即可跑通全链路；本机命令缺失 → 对应指标 UNKNOWN，链路不断。

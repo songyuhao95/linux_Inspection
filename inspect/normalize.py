@@ -545,6 +545,151 @@ def parse_logs_key_evidence(output: str) -> Dict[str, Any]:
     }
 
 
+# -- local.nginx.* -----------------------------------------------------------
+
+
+def _strip_ls_marker(output: str) -> str:
+    """去掉 nginx 命令前置的 `ls -1 <path>` 标记行。
+
+    nginx 采集命令用 `ls -1 <path> 2>/dev/null;` 区分“文件缺失”与“无命中”：
+    文件存在时输出首行为路径（标记），随后才是指标内容；文件缺失时输出为空。
+    """
+    lines = _content_lines(output)
+    if not lines:
+        return ""
+    return "\n".join(lines[1:])
+
+
+def _has_file_marker(output: str) -> bool:
+    """nginx 命令输出是否包含 `ls -1` 文件标记（非空即文件存在）。"""
+    return bool(_content_lines(output))
+
+
+def parse_nginx_config_valid(output: str) -> Dict[str, Any]:
+    """nginx -t 输出 → valid/invalid（syntax is ok + test is successful）。
+
+    输入基准（tests/fixtures/raw/nginx-*/local.nginx.config.valid.out）：
+      `nginx: configuration file /opt/nginx/conf/nginx.conf test is successful`
+      （首行为 `nginx: the configuration file ... syntax is ok`）。
+    """
+    text = output.lower()
+    valid = "syntax is ok" in text and "test is successful" in text
+    return {
+        "valid": valid,
+        "summary": [mask_output(ln) for ln in _content_lines(output)[:5]],
+    }
+
+
+_NGINX_HTTP_STATUS_RE = re.compile(r"\bHTTP/[0-9.]+[ \t]+(?P<status>[1-5][0-9]{2})")
+
+
+def parse_nginx_port_listening(output: str) -> Dict[str, Any]:
+    """ss + curl 输出 → 端口监听状态与本地 HTTP 状态（P0 端口与本地访问）。
+
+    输入基准：ss LISTEN 行 + curl -I 的 `HTTP/1.1 200 OK` 状态行。
+    """
+    lines = _content_lines(output)
+    listening = any(ln.lstrip().startswith("LISTEN") for ln in lines)
+    http_status: Optional[int] = None
+    for ln in lines:
+        m = _NGINX_HTTP_STATUS_RE.search(ln)
+        if m:
+            http_status = int(m.group("status"))
+            break
+    return {
+        "listening": listening,
+        "http_status": http_status,
+        "rows": [mask_output(ln) for ln in lines[:6]],
+    }
+
+
+def parse_nginx_error_log(output: str) -> Dict[str, Any]:
+    """Nginx error.log 关键错误扫描（P0 关键日志）。
+
+    前置 `ls -1` 标记：输出为空 → 文件缺失/不可读 → ParseError（UNKNOWN）；
+    文件存在但无错误命中 → hit_count=0（OK）。
+    """
+    if not _has_file_marker(output):
+        raise ParseError("Nginx error.log 不可读（ls 无输出，文件缺失/无权限）")
+    return parse_logs_key_evidence(_strip_ls_marker(output))
+
+
+def parse_nginx_connections_status(output: str) -> Dict[str, Any]:
+    """curl /nginx_status → stub_status 连接数（未开启 → configured=False）。"""
+    active = re.search(r"Active connections:\s*(\d+)", output)
+    if not output.strip() or active is None:
+        return {
+            "configured": False, "active": 0,
+            "reading": 0, "writing": 0, "waiting": 0,
+        }
+    def _num(pat: str) -> int:
+        m = re.search(pat, output)
+        return int(m.group(1)) if m else 0
+    return {
+        "configured": True,
+        "active": int(active.group(1)),
+        "reading": _num(r"Reading:\s*(\d+)"),
+        "writing": _num(r"Writing:\s*(\d+)"),
+        "waiting": _num(r"Waiting:\s*(\d+)"),
+    }
+
+
+_NGINX_STATUS_CODE_RE = re.compile(r"(?<![0-9])(?P<code>[1-5][0-9]{2})(?![0-9])")
+
+
+def parse_nginx_access_log_status_codes(output: str) -> Dict[str, Any]:
+    """访问日志状态码行 → 5xx 命中数与分布（P1 访问日志状态码）。
+
+    前置 `ls -1` 标记：输出为空 → 文件缺失 → ParseError（UNKNOWN）。
+    """
+    if not _has_file_marker(output):
+        raise ParseError("Nginx 访问日志不可读（ls 无输出，文件缺失/无权限）")
+    lines = _content_lines(_strip_ls_marker(output))
+    counts: Dict[str, int] = {}
+    for ln in lines:
+        m = _NGINX_STATUS_CODE_RE.search(ln)
+        if not m:
+            continue
+        code = int(m.group("code"))
+        key = f"{code // 100}xx"
+        counts[key] = counts.get(key, 0) + 1
+    return {
+        "five_xx": counts.get("5xx", 0),
+        "counts": counts,
+        "last_hits": [mask_output(ln) for ln in lines[-5:]],
+    }
+
+
+def parse_nginx_config_baseline(output: str) -> Dict[str, Any]:
+    """Nginx 配置基线 grep 输出 → 关键指令命中集合（P1 配置基线）。"""
+    if not _has_file_marker(output):
+        raise ParseError("Nginx 配置文件不可读（ls 无输出，文件缺失/无权限）")
+    directives: List[str] = []
+    seen: set = set()
+    for ln in _content_lines(_strip_ls_marker(output)):
+        key = ln.strip().split(None, 1)[0].split(";", 1)[0].strip()
+        if key and key not in seen:
+            seen.add(key)
+            directives.append(key)
+    return {
+        "directives": sorted(directives),
+        "rows": [mask_output(ln) for ln in _content_lines(_strip_ls_marker(output))[:10]],
+    }
+
+
+def parse_nginx_security_baseline(output: str) -> Dict[str, Any]:
+    """Nginx 安全配置基线 grep 输出 → server_tokens/autoindex 状态（P1 安全基线）。"""
+    if not _has_file_marker(output):
+        raise ParseError("Nginx 配置文件不可读（ls 无输出，文件缺失/无权限）")
+    lines = _content_lines(_strip_ls_marker(output))
+    lower = "\n".join(lines).lower()
+    return {
+        "server_tokens_off": bool(re.search(r"server_tokens\s+off", lower)),
+        "autoindex_off": bool(re.search(r"autoindex\s+off", lower)),
+        "rows": [mask_output(ln) for ln in lines[:10]],
+    }
+
+
 # --------------------------------------------------------------------------
 # 解析器注册表（metrics.py parser 字段名 ↔ 函数；TD §5.2 按名注册）
 # --------------------------------------------------------------------------
@@ -560,6 +705,14 @@ PARSERS: Dict[str, Any] = {
     "local.filesystem.used_percent": parse_filesystem_used_percent,
     "local.filesystem.inode_used_percent": parse_filesystem_inode_used_percent,
     "local.logs.key_evidence": parse_logs_key_evidence,
+    "local.nginx.process.present": parse_process_present,
+    "local.nginx.config.valid": parse_nginx_config_valid,
+    "local.nginx.port.listening": parse_nginx_port_listening,
+    "local.nginx.error_log.key_evidence": parse_nginx_error_log,
+    "local.nginx.connections.status": parse_nginx_connections_status,
+    "local.nginx.access_log.status_codes": parse_nginx_access_log_status_codes,
+    "local.nginx.config.baseline": parse_nginx_config_baseline,
+    "local.nginx.security.baseline": parse_nginx_security_baseline,
 }
 
 # parser 字段名与注册表一一对应（tests 机械校验）
@@ -805,6 +958,91 @@ def _judge_logs_key_evidence(
     )
 
 
+# -- local.nginx.* 判定（nginx-p0-v1 文档基线）--------------------------------
+
+
+def _judge_nginx_config_valid(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """配置语法通过 → OK；语法失败/文件缺失/端口冲突/权限错误 → CRIT（故障）。"""
+    if parsed["valid"]:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+
+
+def _judge_nginx_port_listening(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """端口监听且本地可访问 → OK；不监听/连接失败/5xx → CRIT（故障）。"""
+    if not parsed["listening"]:
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    status = parsed["http_status"]
+    if status is None or status >= 500:
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
+def _judge_nginx_error_log(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """无关键错误命中 → OK；命中 → WARN（记录时间点与错误内容，优先处理）。"""
+    if parsed["hit_count"] == 0:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN)}
+
+
+def _judge_nginx_connections_status(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """stub_status 开启且返回连接数 → OK；未开启 → UNKNOWN（记录为未配置）。"""
+    if not parsed["configured"]:
+        return _unknown_decision(
+            resolved, extra_note="stub_status 未开启或 URL 不可访问（记录为未配置）"
+        )
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
+def _judge_nginx_access_log_status_codes(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """5xx=0 → OK；5xx>0 → WARN（记录 URL/来源 IP/状态码/时间段，关联 error.log）。"""
+    if parsed["five_xx"] == 0:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN)}
+
+
+_NGINX_CORE_DIRECTIVES = frozenset(
+    {"worker_processes", "worker_connections", "keepalive_timeout"}
+)
+
+
+def _judge_nginx_config_baseline(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """核心指令齐全 → OK；配置漂移/缺失 → WARN（记录差异与变更依据）。"""
+    missing = sorted(_NGINX_CORE_DIRECTIVES - set(parsed["directives"]))
+    if not missing:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {
+        "status": STATUS_WARN,
+        "rule": _baseline_rule(resolved, STATUS_WARN),
+        "note": "配置漂移：缺失核心指令 " + "、".join(missing),
+    }
+
+
+def _judge_nginx_security_baseline(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """server_tokens off 且 autoindex off → OK；安全配置缺失 → WARN。"""
+    if parsed["server_tokens_off"] and parsed["autoindex_off"]:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {
+        "status": STATUS_WARN,
+        "rule": _baseline_rule(resolved, STATUS_WARN),
+        "note": "安全配置缺失（server_tokens/autoindex 未按基线关闭）",
+    }
+
+
 # 指标 → 判定函数（数值边界全部来自 MR §5/§6 已批准基线）
 JUDGERS: Dict[str, Any] = {
     "local.process.present": _judge_process_present,
@@ -817,6 +1055,14 @@ JUDGERS: Dict[str, Any] = {
     "local.filesystem.used_percent": _judge_filesystem_used_percent,
     "local.filesystem.inode_used_percent": _judge_filesystem_inode_used_percent,
     "local.logs.key_evidence": _judge_logs_key_evidence,
+    "local.nginx.process.present": _judge_process_present,
+    "local.nginx.config.valid": _judge_nginx_config_valid,
+    "local.nginx.port.listening": _judge_nginx_port_listening,
+    "local.nginx.error_log.key_evidence": _judge_nginx_error_log,
+    "local.nginx.connections.status": _judge_nginx_connections_status,
+    "local.nginx.access_log.status_codes": _judge_nginx_access_log_status_codes,
+    "local.nginx.config.baseline": _judge_nginx_config_baseline,
+    "local.nginx.security.baseline": _judge_nginx_security_baseline,
 }
 
 # 数值化指标（normalized_value 非 null，可参与外部配置数值规则；MR §5）
@@ -829,6 +1075,9 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.filesystem.used_percent",
         "local.filesystem.inode_used_percent",
         "local.logs.key_evidence",
+        "local.nginx.error_log.key_evidence",
+        "local.nginx.connections.status",
+        "local.nginx.access_log.status_codes",
     }
 )
 
@@ -854,6 +1103,12 @@ def _normalized_value(metric_id: str, parsed: Dict[str, Any]) -> Optional[float]
         return float(parsed["max_pct"])
     if metric_id == "local.logs.key_evidence":
         return float(parsed["hit_count"])
+    if metric_id == "local.nginx.error_log.key_evidence":
+        return float(parsed["hit_count"])
+    if metric_id == "local.nginx.connections.status":
+        return float(parsed["active"]) if parsed["configured"] else None
+    if metric_id == "local.nginx.access_log.status_codes":
+        return float(parsed["five_xx"])
     return None
 
 
@@ -879,6 +1134,27 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
         return str(parsed["max_pct"])
     if metric_id == "local.logs.key_evidence":
         return str(parsed["hit_count"])
+    if metric_id == "local.nginx.process.present":
+        return "present" if parsed["present"] else "absent"
+    if metric_id == "local.nginx.config.valid":
+        return "valid" if parsed["valid"] else "invalid"
+    if metric_id == "local.nginx.port.listening":
+        status = "null" if parsed["http_status"] is None else str(parsed["http_status"])
+        return f"listening={parsed['listening']};http_status={status}"
+    if metric_id == "local.nginx.error_log.key_evidence":
+        return str(parsed["hit_count"])
+    if metric_id == "local.nginx.connections.status":
+        if not parsed["configured"]:
+            return "not_configured"
+        return (f"active={parsed['active']};reading={parsed['reading']};"
+                f"writing={parsed['writing']};waiting={parsed['waiting']}")
+    if metric_id == "local.nginx.access_log.status_codes":
+        return str(parsed["five_xx"])
+    if metric_id == "local.nginx.config.baseline":
+        return ";".join(parsed["directives"])
+    if metric_id == "local.nginx.security.baseline":
+        return (f"server_tokens_off={parsed['server_tokens_off']};"
+                f"autoindex_off={parsed['autoindex_off']}")
     return None
 
 
@@ -1016,6 +1292,35 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
         dist = " ".join(f"{k}={v}" for k, v in sorted(parsed["keyword_counts"].items()))
         last = " / ".join(parsed["last_hits"]) if parsed["last_hits"] else "无命中"
         return f"hits={parsed['hit_count']}；{dist}；最近命中: {last}"
+    if metric_id == "local.nginx.process.present":
+        if not parsed["present"]:
+            return "未匹配到 Nginx 进程（absent）"
+        return "；".join(parsed["summary"])
+    if metric_id == "local.nginx.config.valid":
+        if parsed["valid"]:
+            return "nginx -t：syntax is ok + test is successful"
+        return "nginx -t：配置校验失败（" + " / ".join(parsed["summary"]) + "）"
+    if metric_id == "local.nginx.port.listening":
+        status = "null" if parsed["http_status"] is None else str(parsed["http_status"])
+        return f"listening={parsed['listening']}；http_status={status}"
+    if metric_id == "local.nginx.error_log.key_evidence":
+        dist = " ".join(f"{k}={v}" for k, v in sorted(parsed["keyword_counts"].items()))
+        last = " / ".join(parsed["last_hits"]) if parsed["last_hits"] else "无命中"
+        return f"hits={parsed['hit_count']}；{dist}；最近命中: {last}"
+    if metric_id == "local.nginx.connections.status":
+        if not parsed["configured"]:
+            return "stub_status 未开启或 URL 不可访问（记录为未配置）"
+        return (f"active={parsed['active']} reading={parsed['reading']} "
+                f"writing={parsed['writing']} waiting={parsed['waiting']}")
+    if metric_id == "local.nginx.access_log.status_codes":
+        dist = " ".join(f"{k}={v}" for k, v in sorted(parsed["counts"].items()))
+        last = " / ".join(parsed["last_hits"]) if parsed["last_hits"] else "无 5xx"
+        return f"5xx={parsed['five_xx']}；{dist}；最近 5xx: {last}"
+    if metric_id == "local.nginx.config.baseline":
+        return "核心指令: " + ("、".join(parsed["directives"]) if parsed["directives"] else "无命中")
+    if metric_id == "local.nginx.security.baseline":
+        return (f"server_tokens off={parsed['server_tokens_off']}；"
+                f"autoindex off={parsed['autoindex_off']}")
     return ""
 
 
@@ -1025,6 +1330,13 @@ def _metric_definition(metric_id: str) -> Dict[str, Any]:
     if m is None:
         raise ValueError(f"指标注册表缺少定义: {metric_id}")
     return m
+
+
+def _scope_for(metric_id: str) -> str:
+    """指标 scope：Nginx 指标归 nginx-p0-v1，其余走 linux-common-p0-v1。"""
+    if metric_id.startswith("local.nginx."):
+        return "nginx-p0-v1"
+    return SCOPE
 
 
 def _build_metric_document(
@@ -1043,7 +1355,7 @@ def _build_metric_document(
     return {
         "metric_id": metric_id,
         "name": m["name"],
-        "scope": SCOPE,
+        "scope": _scope_for(metric_id),
         "status": status,
         "raw_value": raw_value,
         "normalized_value": normalized_value,
@@ -1540,6 +1852,15 @@ def normalize_run_results(
     documents: List[Dict[str, Any]] = []
     host_errors: Dict[str, Any] = {}
     for host_result in run_result.get("hosts", []):
+        # Per-host product profiles: hosts whose Nginx metrics survived the
+        # process-discovery selection are Nginx nodes (HR §2 host.product_profiles).
+        host_profiles = list(product_profiles or [])
+        if any(
+            str(m.get("metric_id", "")).startswith("local.nginx.")
+            for m in host_result.get("metrics", [])
+        ):
+            if "nginx" not in host_profiles:
+                host_profiles.append("nginx")
         documents.append(
             normalize_host_result(
                 host_result,
@@ -1547,7 +1868,7 @@ def normalize_run_results(
                 inspection_id=inspection_id,
                 collected_at=collected_at,
                 profile=profile,
-                product_profiles=product_profiles,
+                product_profiles=host_profiles,
                 resolved_thresholds=resolved_thresholds,
                 inventory_source=inventory_source,
                 meta=meta,
@@ -1839,6 +2160,13 @@ __all__ = [
     "parse_logs_key_evidence",
     "parse_memory_available_percent",
     "parse_port_listening",
+    "parse_nginx_access_log_status_codes",
+    "parse_nginx_config_baseline",
+    "parse_nginx_config_valid",
+    "parse_nginx_connections_status",
+    "parse_nginx_error_log",
+    "parse_nginx_port_listening",
+    "parse_nginx_security_baseline",
     "parse_process_present",
     "parse_service_active",
     "parse_swap_used_percent",

@@ -1,0 +1,3 @@
+# 非实测数据（fixture）
+LISTEN 0 511 0.0.0.0:8010 0.0.0.0:* users:(("nginx",pid=1234,fd=10))
+HTTP/1.1 200 OK

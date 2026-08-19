@@ -22,6 +22,7 @@
 - 已完成项目内 Python 3.12 和 bundled Ansible runtime 的强制执行路径；
 - Linux x86_64/CPython 3.12 的报表依赖已随项目 runtime 提交（`pandas`、`numpy`、`xlsxwriter` 及其依赖），新 Linux 环境无需重复安装；精确版本见 `runtime/report-requirements.lock`；
 - 已完成 `--local` 本地 Linux 基础指标采集，以及远程 `-H` 的统一 JSON 事实源；
+- 已完成第一个中间件模块 **Nginx**（`inspect/modules/nginx.py`）：进程发现 + 白名单、8 个指标、Excel `nginx` Sheet、HTML 中间件卡片/筛选/分组、`--nginx` 只巡检 Nginx；
 - 当前远程认证以项目 inventory 为配置入口，公开模板不包含可用主机或真实凭据；
 - 远程真实 VM 验证按 `docs/g0-real-vm.md` 执行，部署到 VM 按 `docs/local-vm-deploy.md` 执行；
 - 新增中间件时只扩展 `inspect/modules/`，并同步更新 `docs/specs/`、测试和本 README 的交接状态。
@@ -56,7 +57,7 @@ HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态
 
 ## 监控模块扩展
 
-监控模块注册在 `inspect/modules/`，统一通过 `MonitorModule` 和 `ModuleRegistry` 暴露指标。当前内置模块为 `linux_basic`（Linux 主机基础指标）和 `linux_common`（需要产品 profile 的通用指标）。以后新增中间件时，应：
+监控模块注册在 `inspect/modules/`，统一通过 `MonitorModule` 和 `ModuleRegistry` 暴露指标。当前内置模块为 `linux_basic`（Linux 主机基础指标）、`linux_common`（需要产品 profile 的通用指标）和 `nginx`（Nginx 中间件）。以后新增中间件时，应：
 
 1. 在 `inspect/metrics.py` 增加带版本/来源锚点的指标定义；
 2. 在 `inspect/modules/` 增加模块文件并显式注册；
@@ -64,9 +65,9 @@ HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态
 4. 为模块增加 fixture 与测试。
 
 仅把任意 `.sh`/`.py` 文件放入目录不会自动执行，必须显式注册并通过 allow-list 校验。
-默认巡检只启用 `linux_basic`；未选择中间件时，`linux_common` 不进入执行计划，
-因此不会生成 `UNSUPPORTED_PROFILE` 的 UNKNOWN 指标。后续中间件适配器接入后，
-由编排层显式选择对应模块。
+默认巡检 = `linux_basic` + 全部已注册中间件（当前为 `nginx`）；`--nginx` 只巡检
+Nginx 中间件（仍保留 Linux 主机基础指标）。未选择的模块不进入执行计划，不会生成
+`UNSUPPORTED_PROFILE` 的 UNKNOWN 指标。
 
 ### Linux 主机基础指标
 
@@ -83,6 +84,42 @@ HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态
 这组指标不依赖中间件 profile，在 `--local` 和远程 `-H/--hosts` 模式都复用同一套
 命令模板、解析器、状态判定和 `host-result-v1` JSON 事实源。报表只读消费这些 JSON，
 不会再次采集。
+
+### Nginx 中间件监控（nginx-p0-v1）
+
+`inspect/modules/nginx.py` 是第一个中间件适配器，指标按《安徽农金Nginx、Keepalived
+运维巡检手册v1.0》P0/P1 指标表转写，共 8 个：
+
+- `local.nginx.process.present`：Nginx 进程存在性（进程发现 + 白名单 CRIT）；
+- `local.nginx.config.valid`：配置有效性（`nginx -t`）；
+- `local.nginx.port.listening`：端口监听与本地访问（`ss` + `curl 127.0.0.1`）；
+- `local.nginx.error_log.key_evidence`：关键日志（error.log 扫描）；
+- `local.nginx.connections.status`：连接状态（stub_status）；
+- `local.nginx.access_log.status_codes`：访问日志状态码（5xx 分布）；
+- `local.nginx.config.baseline`：配置基线（核心指令存在性）；
+- `local.nginx.security.baseline`：安全配置基线（server_tokens/autoindex）。
+
+**进程发现与白名单**：默认巡检先执行 `local.nginx.process.present` 判断主机是否运行
+Nginx。运行中 → 采集全部 Nginx 指标；未运行且主机 IP **不在** `nginx.yml` 白名单 →
+跳过该主机 Nginx 指标（该主机不是 Nginx 节点）；未运行且 **在** 白名单 → 标记
+`CRIT 未运行`（只保留进程存在性指标）。进程发现本身采集失败（无权限等）→ 保留全部
+Nginx 指标为 UNKNOWN（不伪装结论）。
+
+**Nginx 配置**：仓库根 `nginx.yml`（可选，模板见 `nginx.yml.example`）配置
+`nginx_bin` / `nginx_conf` / `nginx_error_log` / `nginx_access_log` / `nginx_port` /
+`whitelist`。缺省值采用手册环境信息（`/opt/nginx`、端口 `8010`）。`nginx.yml` 被
+`.gitignore` 忽略，白名单等现场信息不入库。
+
+**报表**：Excel 新增 `nginx` Sheet（只列 `local.nginx.*` 指标，字段与 `Local` 一致）；
+HTML 指标卡片按 metric_id 前缀归入「nginx」中间件维度，左侧中间件/监控指标筛选与
+按中间件/按监控指标分组自动生效。
+
+**只巡检 Nginx**：
+
+```bash
+bash inspect.sh --local --nginx
+bash inspect.sh -H inspection --nginx
+```
 
 ## 终端指标输出
 

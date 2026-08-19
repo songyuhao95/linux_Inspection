@@ -1,0 +1,4 @@
+# 非实测数据（fixture）
+1234 nginx: master process /usr/sbin/nginx -c /opt/nginx/conf/nginx.conf
+1235 nginx: worker process
+1236 nginx: worker process

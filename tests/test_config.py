@@ -77,6 +77,14 @@ EXPECTED_METRIC_IDS = [
     "local.filesystem.used_percent",
     "local.filesystem.inode_used_percent",
     "local.logs.key_evidence",
+    "local.nginx.process.present",
+    "local.nginx.config.valid",
+    "local.nginx.port.listening",
+    "local.nginx.error_log.key_evidence",
+    "local.nginx.connections.status",
+    "local.nginx.access_log.status_codes",
+    "local.nginx.config.baseline",
+    "local.nginx.security.baseline",
 ]
 
 # MR §6 表格"已定义"单元格（未列出的层 = "（文档未定义）" → rule: null）
@@ -142,7 +150,9 @@ INVALID_OVERRIDE_CASES = [
 
 def test_baseline_exactly_10_metrics_in_mr_order():
     baseline = cfg.load_document_baseline()
-    assert list(baseline) == EXPECTED_METRIC_IDS
+    assert list(baseline) == EXPECTED_METRIC_IDS[:10]
+    nginx = cfg.load_nginx_baseline()
+    assert list(nginx) == EXPECTED_METRIC_IDS[10:]
 
 
 def test_baseline_rules_match_mr_section6_verbatim():
@@ -204,8 +214,13 @@ def test_no_override_all_document_baseline():
     resolved = cfg.build_resolved_thresholds()
     assert set(resolved) == set(EXPECTED_METRIC_IDS)
     for metric_id, entry in resolved.items():
+        expected_version = (
+            cfg.NGINX_BASELINE_VERSION
+            if metric_id.startswith("local.nginx.")
+            else cfg.DOC_BASELINE_VERSION
+        )
         assert entry["layer"] == cfg.LAYER_DOCUMENT_BASELINE, metric_id
-        assert entry["version"] == cfg.DOC_BASELINE_VERSION
+        assert entry["version"] == expected_version, metric_id
         assert entry["provenance"]["config_sources"] == []
         assert len(entry["provenance"]["doc_sources"]) == 1
         assert entry["provenance"]["notes"] is None

@@ -22,6 +22,7 @@
 | `-i`, `--inventory` | PATH | 使用已有 inventory 文件；配合 `--limit` 选择主机 |
 | `--limit` | PATTERN | inventory 主机模式（同 ansible 语义）；仅与 `--inventory` 一起使用 |
 | `--local` | 无 | 显式巡检本机（默认行为）；与 `-H`/`--inventory` 互斥 |
+| `--nginx` | 无 | 只巡检 Nginx 中间件（默认巡检全部已注册中间件；Nginx 进程发现见 nginx-middleware.md） |
 | `--all` | 无 | 巡检 inventory 中全部主机（等价 `--limit all`） |
 | `--list-metrics` | 无 | 列出已实现指标清单（ID、名称、阈值层、来源锚点），不采集不连接 |
 | `--info METRIC_ID` | 指标 ID | 显示单个指标定义（数据源/单位/阈值层/来源/冲突备注），不采集 |
@@ -68,6 +69,7 @@
   -i, --inventory PATH     使用已有 inventory
       --limit PATTERN      inventory 主机模式（与 --inventory 搭配）
       --local              显式巡检本机（默认）
+      --nginx              只巡检 Nginx 中间件
       --all                inventory 全部主机
       --list-metrics       列出已实现指标，不采集
       --info METRIC_ID     显示指标定义，不采集

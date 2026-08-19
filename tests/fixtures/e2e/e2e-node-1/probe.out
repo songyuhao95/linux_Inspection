@@ -11,3 +11,6 @@
 /usr/bin/tail
 /usr/bin/grep
 /usr/bin/nproc
+/usr/bin/curl
+/usr/bin/head
+/usr/bin/ls

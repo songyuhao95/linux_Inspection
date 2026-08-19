@@ -1,0 +1,4 @@
+# 非实测数据（fixture）
+/opt/nginx/conf/nginx.conf
+server_tokens off;
+autoindex off;

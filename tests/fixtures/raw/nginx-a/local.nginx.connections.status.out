@@ -1,0 +1,5 @@
+# 非实测数据（fixture）
+Active connections: 42
+server accepts handled requests
+ 900 900 910
+Reading: 0 Writing: 1 Waiting: 41

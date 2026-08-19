@@ -762,8 +762,13 @@ class TestErrorSemantics:
 
 
 def pipeline(host: str, tmp_path: Path, hosts=None):
-    """ansible_runner fixture 模式 run() → normalize_run_results 全链路。"""
-    specs = ar.build_metric_command_specs(profile=PROFILE)
+    """ansible_runner fixture 模式 run() → normalize_run_results 全链路。
+
+    linux 精确断言只选 linux 模块；Nginx 全链路见 test_nginx.py。
+    """
+    specs = ar.build_metric_command_specs(
+        profile=PROFILE, module_ids=("linux_common", "linux_basic")
+    )
     selection = SimpleNamespace(
         inventory_file=str(tmp_path / "inv.ini"),
         hosts=hosts

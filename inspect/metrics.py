@@ -235,6 +235,181 @@ METRICS = [
     },
 ]
 
+
+# --------------------------------------------------------------------------
+# Nginx 中间件指标（nginx-p0-v1，安徽农金Nginx、Keepalived运维巡检手册v1.0）
+# --------------------------------------------------------------------------
+_NGINX_RULE_PREFIX = "nginx-p0-v1"
+_NGINX_ANCHOR = (
+    "安徽农金Nginx、Keepalived运维巡检手册v1.0.docx（P0 必看指标表：Nginx本节点服务/"
+    "配置有效性/端口与本地访问/关键日志；P1 关注指标表：连接状态/访问日志状态码/"
+    "配置基线/安全配置基线）；" + _MANUAL_SHA
+)
+
+NGINX_METRICS = [
+    {
+        "metric_id": "local.nginx.process.present",
+        "name": "Nginx 进程存在性",
+        "command": (
+            "pgrep -fa 'nginx: master|nginx: worker|/usr/sbin/nginx|/opt/nginx/sbin/nginx'"
+        ),
+        "timeout_sec": 10,
+        "parser": "parse_process_present",
+        "unit": "布尔（present/absent）+ 匹配行数",
+        "source_anchor": (
+            "P0 指标表「Nginx本节点服务」行（pgrep -fa 'nginx: master|nginx: worker|"
+            "/usr/sbin/nginx|/opt/nginx/sbin/nginx'）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（进程存在=正常；未运行=CRIT）+ nginx 白名单（白名单内未运行 → CRIT 未运行）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.process.present"],
+        "conflicts": [],
+        "doc_baseline": "进程存在 → OK；进程不存在 → CRIT（未运行/故障）；白名单外主机未运行 → 跳过该主机 nginx 指标",
+        "unknown_conditions": "无权限或 pgrep 不可用 → UNKNOWN，继续其余指标",
+    },
+    {
+        "metric_id": "local.nginx.config.valid",
+        "name": "Nginx 配置有效性",
+        "command": "{nginx_bin} -t -c {nginx_conf}",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_config_valid",
+        "unit": "枚举（valid/invalid）",
+        "source_anchor": (
+            "P0 指标表「Nginx配置有效性」行（/usr/sbin/nginx -e error.log -c "
+            "nginx.conf -t；返回 syntax is ok 和 test is successful）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（语法通过=正常；语法失败=CRIT）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.config.valid"],
+        "conflicts": [],
+        "doc_baseline": "syntax is ok + test is successful → OK；语法失败/文件缺失/端口冲突/权限错误 → CRIT（故障）",
+        "unknown_conditions": "nginx 可执行文件不可用、无权限读取配置 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.port.listening",
+        "name": "Nginx 端口监听与本地访问",
+        "command": (
+            "ss -tlnp | grep ':{nginx_port}'; "
+            "curl -sS -I --connect-timeout 3 http://127.0.0.1:{nginx_port}/ | head -n 1"
+        ),
+        "timeout_sec": 10,
+        "parser": "parse_nginx_port_listening",
+        "unit": "枚举（listening/reachable）+ 本地 HTTP 状态",
+        "source_anchor": (
+            "P0 指标表「Nginx端口与本地访问」行（ss -tlnp | grep ':8010'；"
+            "curl -sS -I --connect-timeout 3 http://127.0.0.1:8010/）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（监听且本地可访问=正常；不监听/连接失败/5xx=CRIT）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.port.listening"],
+        "conflicts": [],
+        "doc_baseline": "端口 LISTEN 且本地 HTTP 返回 200/302/401/403 等可解释状态 → OK；端口不监听、连接超时/拒绝或持续 5xx → CRIT（故障）",
+        "unknown_conditions": "ss/curl 不可用或无法读取 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.error_log.key_evidence",
+        "name": "Nginx 关键日志",
+                "command": (
+            "ls -1 {nginx_error_log} 2>/dev/null; "
+            "tail -n 1000 {nginx_error_log} | egrep -i "
+            "'emerg|alert|crit|error|permission denied|bind\\(|connect\\(\\) failed|"
+            "upstream timed out' | tail -n 20"
+        ),
+        "timeout_sec": 15,
+        "parser": "parse_nginx_error_log",
+        "unit": "命中行数 + 严重度分布",
+        "source_anchor": (
+            "P0 指标表「关键日志」行（tail -n 100 error.log；egrep -i 'emerg|alert|crit|"
+            "error|permission denied|bind(|connect() failed|upstream timed out'）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（无持续 emerg/alert/crit/error=正常；有命中=关注）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.error_log.key_evidence"],
+        "conflicts": [],
+        "doc_baseline": "无命中 → OK；命中 emerg/alert/crit/error 等 → WARN（记录时间点与错误内容，优先处理）",
+        "unknown_conditions": "日志不可读（不作为 OK）→ UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.connections.status",
+        "name": "Nginx 连接状态（stub_status）",
+        "command": "curl -sS --connect-timeout 3 http://127.0.0.1:{nginx_port}/nginx_status",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_connections_status",
+        "unit": "连接数（active/reading/writing/waiting）",
+        "source_anchor": (
+            "P1 指标表「Nginx连接状态」行（curl -sS --connect-timeout 3 "
+            "http://127.0.0.1:8010/nginx_status）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（返回 Active connections 等=正常；未开启 stub_status=未配置）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.connections.status"],
+        "conflicts": [],
+        "doc_baseline": "已开启 stub_status 且返回连接数 → OK；未开启 → UNKNOWN（记录为未配置）",
+        "unknown_conditions": "stub_status 未开启/URL 不可访问、curl 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.access_log.status_codes",
+        "name": "访问日志状态码",
+        "command": (
+            "tail -n 1000 {nginx_access_log} | grep -E ' [1-5][0-9][0-9] '"
+        ),
+        "timeout_sec": 15,
+        "parser": "parse_nginx_access_log_status_codes",
+        "unit": "5xx 命中数 + 状态码分布",
+        "source_anchor": (
+            "P1 指标表「访问日志状态码」行（tail -n 1000 access.log | awk '{print $9}' "
+            "| sort | uniq -c；5xx 无持续增长）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（2xx/3xx 为主、5xx 无持续增长=正常；5xx 命中=关注）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.access_log.status_codes"],
+        "conflicts": [],
+        "doc_baseline": "5xx=0 → OK；5xx>0 → WARN（记录 URL/来源 IP/状态码/时间段，关联 error.log 处理）",
+        "unknown_conditions": "访问日志不可读 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.config.baseline",
+        "name": "Nginx 配置基线",
+        "command": (
+            "grep -E 'worker_processes|worker_rlimit_nofile|worker_connections|"
+            "use epoll|multi_accept|keepalive_timeout|client_max_body_size|limit_req|"
+            "limit_conn' {nginx_conf}"
+        ),
+        "timeout_sec": 10,
+        "parser": "parse_nginx_config_baseline",
+        "unit": "关键指令命中集合（worker_processes/worker_connections/keepalive_timeout 等）",
+        "source_anchor": (
+            "P1 指标表「Nginx配置基线」行（grep -E 'worker_processes|worker_rlimit_nofile|"
+            "worker_connections|use epoll|multi_accept|keepalive_timeout|client_max_body_size|"
+            "limit_req|limit_conn' nginx.conf）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（关键指令齐全=正常；配置漂移=关注）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.config.baseline"],
+        "conflicts": [],
+        "doc_baseline": "worker_processes/worker_connections/keepalive_timeout 等核心指令存在 → OK；缺失 → WARN（配置漂移，记录差异与变更依据）",
+        "unknown_conditions": "配置文件不可读 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.security.baseline",
+        "name": "安全配置基线",
+        "command": (
+            "grep -E 'server_tokens|autoindex|X-Frame-Options|X-Content-Type-Options|"
+            "Content-Security-Policy|request_method' {nginx_conf}"
+        ),
+        "timeout_sec": 10,
+        "parser": "parse_nginx_security_baseline",
+        "unit": "安全指令命中集合（server_tokens/autoindex/安全响应头）",
+        "source_anchor": (
+            "P1 指标表「安全配置基线」行（grep -E 'server_tokens|autoindex|X-Frame-Options|"
+            "X-Content-Type-Options|Content-Security-Policy|request_method' nginx.conf）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（server_tokens off + autoindex off=正常；安全配置缺失=关注）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.security.baseline"],
+        "conflicts": [],
+        "doc_baseline": "server_tokens off 且 autoindex off → OK；缺失 → WARN（记录风险，按安全加固要求补齐）",
+        "unknown_conditions": "配置文件不可读 → UNKNOWN",
+    },
+]
+
+# 阈值规则 ID 前缀（nginx-p0-v1）
+NGINX_RULE_PREFIX = _NGINX_RULE_PREFIX
+
+METRICS.extend(NGINX_METRICS)
+
 _METRICS_BY_ID = {m["metric_id"]: m for m in METRICS}
 
 # 注册表字段契约（tests/test_metrics.py 校验每个条目的键集）

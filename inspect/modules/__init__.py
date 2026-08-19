@@ -12,6 +12,7 @@ from .registry import (
     ModuleRegistry,
     MonitorModule,
     default_registry,
+    middleware_module_ids,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "ModuleRegistry",
     "MonitorModule",
     "default_registry",
+    "middleware_module_ids",
 ]

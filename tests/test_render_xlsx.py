@@ -241,7 +241,9 @@ class TestConstants:
         }
 
     def test_sheet_names_match_rr_section3(self):
-        assert rx.SHEET_NAMES == ("Overview", "Local", "Errors-Evidence")
+        assert rx.SHEET_NAMES == ("Overview", "Local", "nginx", "Errors-Evidence")
+        assert rx.SHEET_NGINX == "nginx"
+        assert rx.NGINX_HEADERS == rx.LOCAL_HEADERS
 
     def test_local_headers_cover_rr_section3_columns(self):
         assert rx.LOCAL_HEADERS[:2] == ("host", "ip")
@@ -410,7 +412,10 @@ class TestRenderXlsxFileErrors:
 class TestFixtureSample:
     def test_sample_sheets_and_headers(self):
         wb = load_workbook(FIXTURE_XLSX / "host-result-valid.xlsx")
-        assert wb.sheetnames == list(rx.SHEET_NAMES)
+        # 该检查入库样例为 nginx Sheet 引入前的旧版三 Sheet 工作簿；
+        # 新 Sheet 布局在 test_sheets_registered_and_counts 用 stub 校验。
+        assert wb.sheetnames == ["Overview", "Local", "Errors-Evidence"]
+        assert list(rx.SHEET_NAMES) == ["Overview", "Local", "nginx", "Errors-Evidence"]
         # This checked-in workbook is a legacy sample; new headers are tested
         # against freshly rendered output below without rewriting the fixture.
         legacy_headers = [c.value for c in wb[rx.SHEET_LOCAL][1]]
@@ -689,7 +694,7 @@ class TestRenderWithStubXlsxwriter:
         monkeypatch.setitem(sys.modules, "xlsxwriter", stub)
         rx.render_xlsx(rich_docs(), tmp_path / "r.xlsx")
         wb = stub.workbooks[-1]
-        errors = wb.sheets[2]
+        errors = wb.sheets[3]  # Overview(0) Local(1) nginx(2) Errors-Evidence(3)
 
         # error 非空指标（PERMISSION_DENIED）+ 文档冲突/缺失 UNKNOWN 清单
         metric_ids = {

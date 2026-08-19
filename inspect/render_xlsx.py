@@ -54,11 +54,12 @@ STATUS_COLORS: Dict[str, str] = {
 }
 VALID_STATUSES = tuple(STATUS_COLORS)
 
-# RR §3 三 Sheet
+# RR §3 三 Sheet + nginx 中间件明细 Sheet
 SHEET_OVERVIEW = "Overview"
 SHEET_LOCAL = "Local"
+SHEET_NGINX = "nginx"
 SHEET_ERRORS = "Errors-Evidence"
-SHEET_NAMES = (SHEET_OVERVIEW, SHEET_LOCAL, SHEET_ERRORS)
+SHEET_NAMES = (SHEET_OVERVIEW, SHEET_LOCAL, SHEET_NGINX, SHEET_ERRORS)
 
 # Local 列：以主机/IP 开始；详情指标逐行展开；只保留可读阈值解释和
 # 事实源提供的复现命令，不把来源/证据摘要/provenance 冗余复制到报表。
@@ -66,6 +67,9 @@ LOCAL_HEADERS = (
     "host", "ip", "metric_id", "name", "raw_value", "normalized_value", "unit",
     "status", "threshold_rule", "command",
 )
+
+# nginx 明细 Sheet 复用的列（与 Local 一致；只筛选 Nginx 中间件指标）
+NGINX_HEADERS = LOCAL_HEADERS
 
 # RR §3 Errors-Evidence 列：error.code/message/command/output_summary；
 # UNKNOWN（文档冲突/缺失）清单行 error_code 为空，note 注明原因
@@ -357,6 +361,57 @@ def _require_xlsxwriter():
     return xlsxwriter
 
 
+def _metric_prefix_filter(prefix: str):
+    """指标筛选谓词：metric_id 以给定前缀开头（用于中间件明细 Sheet）。"""
+
+    def _keep(metric: Mapping[str, Any]) -> bool:
+        return str(metric.get("metric_id") or "").startswith(prefix)
+
+    return _keep
+
+
+def _write_detail_sheet(
+    workbook: Any,
+    sheet_name: str,
+    headers: Sequence[str],
+    widths: Sequence[int],
+    docs: Sequence[Mapping[str, Any]],
+    host_ips: Optional[Mapping[str, str]],
+    header_fmt: Any,
+    cell_fmt: Any,
+    status_fmts: Mapping[str, Any],
+    crit_value_fmt: Any,
+    metric_filter=None,
+) -> None:
+    """写一张每主机每指标一行的明细 Sheet（Local 与 nginx 共用）。
+
+    metric_filter=None → 全部指标；否则仅保留谓词为真的指标。
+    """
+    ws = workbook.add_worksheet(sheet_name)
+    for col, width in enumerate(widths):
+        ws.set_column(col, col, width)
+    for col, header in enumerate(headers):
+        ws.write(0, col, header, header_fmt)
+    ws.freeze_panes(1, 0)
+
+    r = 1
+    for doc in docs:
+        for metric in doc["metrics"]:
+            if metric_filter is not None and not metric_filter(metric):
+                continue
+            for expanded in _metric_rows(metric):
+                detail = expanded["detail"]
+                values = _local_row_values(doc, metric, detail, host_ips=host_ips)
+                status = values["status"]
+                value_fmt = crit_value_fmt if status == "CRIT" else cell_fmt
+                for col, header in enumerate(headers):
+                    fmt = value_fmt if header in {"raw_value", "normalized_value"} else cell_fmt
+                    if header == "status":
+                        fmt = status_fmts[status]
+                    ws.write(r, col, values[header], fmt)
+                r += 1
+
+
 def _write_workbook(
     docs: Sequence[Mapping[str, Any]],
     target: Path,
@@ -466,28 +521,18 @@ def _write_workbook(
     )
 
     # ================= Local（RR §3：每主机每指标一行） =================
-    ws = workbook.add_worksheet(SHEET_LOCAL)
     local_widths = (14, 18, 34, 24, 14, 16, 8, 12, 72, 52)
-    for col, width in enumerate(local_widths):
-        ws.set_column(col, col, width)
-    for col, header in enumerate(LOCAL_HEADERS):
-        ws.write(0, col, header, header_fmt)
-    ws.freeze_panes(1, 0)
+    _write_detail_sheet(
+        workbook, SHEET_LOCAL, LOCAL_HEADERS, local_widths,
+        docs, host_ips, header_fmt, cell_fmt, status_fmts, crit_value_fmt,
+    )
 
-    r = 1
-    for doc in docs:
-        for metric in doc["metrics"]:
-            for expanded in _metric_rows(metric):
-                detail = expanded["detail"]
-                values = _local_row_values(doc, metric, detail, host_ips=host_ips)
-                status = values["status"]
-                value_fmt = crit_value_fmt if status == "CRIT" else cell_fmt
-                for col, header in enumerate(LOCAL_HEADERS):
-                    fmt = value_fmt if header in {"raw_value", "normalized_value"} else cell_fmt
-                    if header == "status":
-                        fmt = status_fmts[status]
-                    ws.write(r, col, values[header], fmt)
-                r += 1
+    # ============ nginx（Nginx 中间件明细；只列 local.nginx.* 指标） ============
+    _write_detail_sheet(
+        workbook, SHEET_NGINX, NGINX_HEADERS, local_widths,
+        docs, host_ips, header_fmt, cell_fmt, status_fmts, crit_value_fmt,
+        metric_filter=_metric_prefix_filter("local.nginx."),
+    )
 
     # ============ Errors-Evidence（RR §3：error 非空指标与主机 +
     # 文档冲突/缺失 UNKNOWN 清单） ============
@@ -629,10 +674,12 @@ __all__ = [
     "ERRORS_HEADERS",
     "EXIT_RENDER_ERROR",
     "LOCAL_HEADERS",
+    "NGINX_HEADERS",
     "RendererError",
     "SHEET_ERRORS",
     "SHEET_LOCAL",
     "SHEET_NAMES",
+    "SHEET_NGINX",
     "SHEET_OVERVIEW",
     "STATUS_COLORS",
     "VALID_STATUSES",

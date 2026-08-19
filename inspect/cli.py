@@ -26,6 +26,7 @@ from inspect import fact_source as fact_source_mod
 from inspect import inventory as inventory_mod
 from inspect import local_runner
 from inspect import metrics as metrics_registry
+from inspect.modules import middleware_module_ids
 from inspect import normalize as normalize_mod
 from inspect import render_html as html_mod
 from inspect import render_stdout as stdout_mod
@@ -84,6 +85,12 @@ _HELP_EPILOG = """主机选择示例:
   -H/--hosts 或 -i/--inventory 使用项目内打包的 Ansible；
   INSPECT_FIXTURE_DIR 为两种模式共用的零连接调试路径。
 
+中间件选择:
+  默认巡检全部已注册中间件（当前：Nginx）+ Linux 主机基础指标；
+  --nginx 只巡检 Nginx 中间件 + Linux 主机基础指标；
+  Nginx 进程发现：未运行且不在 nginx.yml 白名单 → 跳过该主机 Nginx 指标；
+  白名单内未运行 → CRIT「未运行」。
+
 退出码: 0 成功 / 2 用法错误 / 10 执行失败 / 20 业务告警(--fail-on critical)
 
 脱敏声明: 本工具为只读巡检，不修改目标主机配置、不写入业务数据、不导入凭据；
@@ -92,10 +99,10 @@ _HELP_EPILOG = """主机选择示例:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """cli-contract §2 选项总表（冻结集，不新增选项）。"""
+    """cli-contract §2 选项总表（主机/报表/中间件选择）。"""
     parser = InspectArgumentParser(
         prog="inspect.sh",
-        description="中间件运维巡检 CLI（local 垂直切片，默认 6 个 Linux 基础指标）："
+        description="中间件运维巡检 CLI（默认 Linux 主机基础指标 + 全部已注册中间件）："
                     "只读巡检本机或远程主机，输出事实源与三类报表。",
         epilog=_HELP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -112,6 +119,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit", metavar="PATTERN", help="inventory 主机模式（与 --inventory 搭配）",
     )
     parser.add_argument("--local", action="store_true", help="显式巡检本机（默认）")
+    parser.add_argument(
+        "--nginx", action="store_true",
+        help="只巡检 Nginx 中间件（默认巡检全部已注册中间件）",
+    )
     parser.add_argument("--all", action="store_true", help="inventory 全部主机")
     parser.add_argument(
         "--list-metrics", action="store_true", help="列出已实现指标，不采集",
@@ -239,8 +250,8 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     步骤：
       1. 配置加载（inspect.yml 可选，缺省 out_dir=out）与阈值合并（文档基线）；
       2. 主机选择解析（inventory.py；-H/-i/--limit/--all，用法错误 2 / 执行失败 10）；
-      3. 指标命令规格：默认只选择 linux_basic 的 6 个 profile-free 基础指标；
-         未显式选择中间件模块时，linux_common 不进入执行计划；
+      3. 指标命令规格：默认选择 linux_basic + 全部已注册中间件（当前 nginx）；
+         未选择的模块不进入执行计划；--nginx 只选择 linux_basic + nginx；
       4. 执行：--local 走 local_runner 直接执行本机 shell，完全不调用
          Ansible；-H/--hosts 与 -i/--inventory 走 ansible_runner 的项目内
          Ansible；INSPECT_FIXTURE_DIR 两种模式均为零连接调试路径；
@@ -264,16 +275,26 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     except inventory_mod.InventoryError as exc:
         return _fail(exc)
 
-    specs = runner_mod.build_metric_command_specs()
+    nginx_cfg = config_mod.load_nginx_config()
+    if ns.nginx:
+        selected_modules = ("linux_basic", "nginx")
+    else:
+        selected_modules = ("linux_basic",) + tuple(middleware_module_ids())
+    specs = runner_mod.build_metric_command_specs(
+        module_ids=selected_modules, profile=nginx_cfg
+    )
     fixture_dir = os.environ.get(runner_mod.FIXTURE_ENV_VAR)
+    nginx_whitelist = list(nginx_cfg.get("whitelist") or [])
     try:
         if host_selection.kind == "local":
             run_result = local_runner.run_local(
-                host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir
+                host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir,
+                nginx_whitelist=nginx_whitelist,
             )
         else:
             run_result = runner_mod.run(
-                host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir
+                host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir,
+                nginx_whitelist=nginx_whitelist,
             )
     except (
         local_runner.LocalExecutionError,

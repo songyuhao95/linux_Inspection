@@ -1,0 +1,5 @@
+# 非实测数据（fixture）
+/opt/nginx/logs/access.log
+10.0.0.5 - - [18/Aug/2026:10:00:01 +0800] "GET / HTTP/1.1" 200 1024 "-" "curl/8"
+10.0.0.6 - - [18/Aug/2026:10:00:02 +0800] "GET /api HTTP/1.1" 503 512 "-" "agent"
+10.0.0.7 - - [18/Aug/2026:10:00:03 +0800] "GET /favicon.ico HTTP/1.1" 404 0 "-" "browser"

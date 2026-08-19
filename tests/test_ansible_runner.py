@@ -36,6 +36,16 @@ _PROFILE = {
     "log_keywords": ["error", "exception"],
 }
 
+# linux profile + Nginx 手册默认配置（让全目录 fixture 全部可执行）
+_FULL_PROFILE = {
+    **_PROFILE,
+    "nginx_bin": "/usr/sbin/nginx",
+    "nginx_conf": "/opt/nginx/conf/nginx.conf",
+    "nginx_error_log": "/opt/nginx/logs/error.log",
+    "nginx_access_log": "/opt/nginx/logs/access.log",
+    "nginx_port": 8010,
+}
+
 # --- 包加载：worktree 中无 inspect/__init__.py（stdlib 同名吸收，
 #    集成后走真实包）；以 spec_from_file_location 独立加载 ---
 
@@ -89,7 +99,7 @@ def _spec(metric_id, command, timeout=10, become=False, error_code=None, error_m
 def test_registry_covers_all_metrics():
     ids = [s.metric_id for s in _specs(_PROFILE)]
     assert set(ids) == set(metrics.ALL_METRIC_IDS)
-    assert len(ids) == 10
+    assert len(ids) == len(metrics.ALL_METRIC_IDS) == 18
 
 
 def test_registry_timeouts_match_metrics_registry():
@@ -103,7 +113,12 @@ def test_registry_templates_only_allowed_binaries():
         allowed = ar._allowed_binaries(s.metric_id)
         assert allowed, s.metric_id
         for b in allowed:
-            assert b in ("timeout",) or b not in ("rm", "curl", "wget", "ssh", "sh", "bash")
+            # Nginx 手册要求的本地 HTTP 探测使用 curl（P0 端口与本地访问 /
+            # P1 连接状态），属白名单命令；其余指标仍禁止网络类命令。
+            if s.metric_id.startswith("local.nginx."):
+                assert b not in ("rm", "wget", "ssh", "sh", "bash")
+            else:
+                assert b in ("timeout",) or b not in ("rm", "curl", "wget", "ssh", "sh", "bash")
 
 
 # ==========================================================================
@@ -127,7 +142,9 @@ def test_playbook_contract_markers():
 def test_playbook_minimal_become_only_declared_metrics():
     pb = ar.generate_playbook(_specs(_PROFILE))
     assert pb.count("become: true") == 2  # 仅 port.listening + logs.key_evidence
-    assert pb.count("become: false") == 9  # probe + 其余 8 个指标
+    # probe + 8 个 linux 基础 false + nginx.process.present（无 profile 占位、
+    # 无 become）；其余 nginx 指标缺 profile 不进 playbook
+    assert pb.count("become: false") == 10
 
 
 def test_playbook_no_retries():
@@ -177,8 +194,8 @@ def test_playbook_no_unsupported_profile_tasks():
     specs = _specs({})
     unsupported = [s for s in specs if s.error_code == ar.ERROR_UNSUPPORTED_PROFILE]
     supported = [s for s in specs if s.error_code is None]
-    assert len(unsupported) == 4
-    assert len(supported) == 6
+    assert len(unsupported) == 11  # 4 linux + 7 nginx（process.present 无 profile 占位）
+    assert len(supported) == 7  # 6 linux + nginx.process.present
     pb = ar.generate_playbook(specs)
     for s in unsupported:
         assert s.metric_id not in pb
@@ -321,6 +338,13 @@ def test_profile_missing_marks_unsupported():
         "local.service.active",
         "local.port.listening",
         "local.logs.key_evidence",
+        "local.nginx.config.valid",
+        "local.nginx.port.listening",
+        "local.nginx.error_log.key_evidence",
+        "local.nginx.connections.status",
+        "local.nginx.access_log.status_codes",
+        "local.nginx.config.baseline",
+        "local.nginx.security.baseline",
     }
     for s in specs:
         if s.metric_id in need_profile:
@@ -587,11 +611,11 @@ def _run_fixture(hosts, profile=None, fixture_dir=None, runtime_dir=None):
 
 
 def test_fixture_full_success_host(capsys, tmp_path):
-    result = _run_fixture([_host("node-a", "10.0.0.1")], _PROFILE, _FIXTURES, tmp_path)
+    result = _run_fixture([_host("node-a", "10.0.0.1")], _FULL_PROFILE, _FIXTURES, tmp_path)
     assert result["execution_status"] == ar.STATUS_SUCCESS
     host = result["hosts"][0]
     assert host["probe_status"] == probe.PROBE_OK
-    assert host["summary"]["total"] == 10
+    assert host["summary"]["total"] == 18  # 10 linux + 8 nginx
     assert host["summary"]["failed"] == 0
     # 预录输出（剥离 # 头）原样回传
     m = next(x for x in host["metrics"] if x["metric_id"] == "local.process.present")
@@ -609,17 +633,29 @@ def test_fixture_full_success_host(capsys, tmp_path):
 
 def test_fixture_env_var_mode(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv(ar.FIXTURE_ENV_VAR, str(_FIXTURES))
-    result = ar.run(_selection([_host("node-a", "10.0.0.1")]), _specs(_PROFILE),
+    result = ar.run(_selection([_host("node-a", "10.0.0.1")]), _specs(_FULL_PROFILE),
                     runtime_dir=tmp_path)
     assert result["fixture_mode"] is True
     assert result["execution_status"] == ar.STATUS_SUCCESS
     assert "调试模式（fixture）" in capsys.readouterr().err
 
 
+def _linux_specs(profile=None):
+    """Linux-only specs（linux_common + linux_basic）用于 linux 行为精确断言。"""
+    return ar.build_metric_command_specs(
+        profile=profile or _PROFILE, module_ids=("linux_common", "linux_basic")
+    )
+
+
 def test_fixture_partial_host_classification(tmp_path):
     """node-b：pgrep 缺失→COMMAND_NOT_FOUND；端口超时→TIMEOUT；
     cpu 权限→PERMISSION_DENIED；主机 PARTIAL。"""
-    result = _run_fixture([_host("node-b", "10.0.0.2")], _PROFILE, _FIXTURES, tmp_path)
+    result = ar.run(
+        _selection([_host("node-b", "10.0.0.2")]),
+        _linux_specs(),
+        fixture_dir=_FIXTURES,
+        runtime_dir=tmp_path,
+    )
     host = result["hosts"][0]
     assert host["execution_status"] == ar.STATUS_PARTIAL
     by_id = {m["metric_id"]: m for m in host["metrics"]}

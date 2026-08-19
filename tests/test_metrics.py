@@ -25,20 +25,33 @@ EXPECTED_IDS = [
     "local.filesystem.used_percent",
     "local.filesystem.inode_used_percent",
     "local.logs.key_evidence",
+    "local.nginx.process.present",
+    "local.nginx.config.valid",
+    "local.nginx.port.listening",
+    "local.nginx.error_log.key_evidence",
+    "local.nginx.connections.status",
+    "local.nginx.access_log.status_codes",
+    "local.nginx.config.baseline",
+    "local.nginx.security.baseline",
 ]
 
 # MR §5 超时列：指标命令 10s、日志类 15s（TD §5.2）
-TIMEOUT_10S = set(EXPECTED_IDS) - {"local.logs.key_evidence"}
+LOG_IDS = {
+    "local.logs.key_evidence",
+    "local.nginx.error_log.key_evidence",
+    "local.nginx.access_log.status_codes",
+}
+TIMEOUT_10S = set(EXPECTED_IDS) - LOG_IDS
 
 
-def test_registry_has_exactly_10_metrics():
-    """注册表恰好 10 条（MR §1 范围）。"""
-    assert reg.count_metrics() == 10
-    assert len(reg.METRICS) == 10
+def test_registry_has_exactly_18_metrics():
+    """注册表共 18 条（10 个共同 P0 + 8 个 Nginx 中间件）。"""
+    assert reg.count_metrics() == 18
+    assert len(reg.METRICS) == 18
 
 
 def test_metric_ids_are_exact_expected_set():
-    """metric_id 集合与 MR §5 的 10 个 ID 完全一致（顺序即注册顺序）。"""
+    """metric_id 集合与 EXPECTED_IDS 完全一致（顺序即注册顺序）。"""
     assert reg.ALL_METRIC_IDS == tuple(EXPECTED_IDS)
 
 
@@ -86,22 +99,45 @@ def test_source_anchors_reference_manuals_and_sha256():
 
 
 def test_anchor_table_positions():
-    """锚点含表位置 T#R#（MR §5 来源锚点列）。"""
+    """锚点含表位置 T#R#（MR §5 来源锚点列）。
+
+    Nginx 手册指标表没有 T#R# 编号，改用「P0/P1 指标表」段落定位；
+    共同 P0 指标仍要求 T#R#。
+    """
     for m in reg.METRICS:
-        assert re.search(r"T\d+R\d+", m["source_anchor"]), m["metric_id"]
+        if m["metric_id"].startswith("local.nginx."):
+            assert "指标表" in m["source_anchor"], m["metric_id"]
+        else:
+            assert re.search(r"T\d+R\d+", m["source_anchor"]), m["metric_id"]
 
 
 def test_parser_names_unique():
-    """解析器名唯一（T-104 normalize 按名注册）。"""
+    """解析器名唯一（T-104 normalize 按名注册）。
+
+    两个通用解析器（parse_process_present / parse_logs_key_evidence）被
+    Nginx 指标复用是有意的：进程存在性与日志命中判定与共同 P0 语义一致。
+    """
     parsers = [m["parser"] for m in reg.METRICS]
-    assert len(parsers) == len(set(parsers))
+    shared = {
+        "parse_process_present",
+        "parse_logs_key_evidence",
+    }
+    unique = [p for p in parsers if p not in shared]
+    assert len(unique) == len(set(unique))
+    # 共享解析器的复用次数是有界且固定的：parse_process_present 被
+    # local.process.present 与 local.nginx.process.present 复用；
+    # parse_logs_key_evidence 只被 local.logs.key_evidence 使用
+    # （nginx 关键日志用带 ls 标记剥离的 parse_nginx_error_log）。
+    assert parsers.count("parse_process_present") == 2
+    assert parsers.count("parse_logs_key_evidence") == 1
 
 
 def test_threshold_rule_ids_reference_version():
-    """阈值规则 ID 引用文档基线版本标识 linux-common-p0-v1（MR §3/§6）。"""
+    """阈值规则 ID 引用文档基线版本标识（linux-common-p0-v1 / nginx-p0-v1）。"""
     for m in reg.METRICS:
+        prefix = reg.NGINX_RULE_PREFIX if m["metric_id"].startswith("local.nginx.") else reg.VERSION
         for rid in m["threshold_rule_ids"]:
-            assert rid.startswith(reg.VERSION + ":"), f"{m['metric_id']} 规则 ID 前缀错误"
+            assert rid.startswith(prefix + ":"), f"{m['metric_id']} 规则 ID 前缀错误"
 
 
 def test_get_metric_lookup():

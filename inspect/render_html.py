@@ -223,8 +223,20 @@ def _as_strings(value: Any) -> List[str]:
     return result
 
 
+# metric_id 前缀 → 中间件维度（渲染层只读映射，不改变事实源）。
+# host-result-v1 schema 不允许在 metric 上附加额外字段，因此中间件归属
+# 由版本化 metric_id 前缀确定；未来新增中间件在此登记。
+_MIDDLEWARE_PREFIXES: tuple = (
+    ("local.nginx.", "nginx"),
+)
+
+
 def _middleware_values(doc: Mapping[str, Any], metric: Mapping[str, Any]) -> List[str]:
     """为指标确定展示/筛选用的中间件维度，不改变事实源。"""
+    metric_id = str(metric.get("metric_id") or "")
+    for prefix, middleware in _MIDDLEWARE_PREFIXES:
+        if metric_id.startswith(prefix):
+            return [middleware]
     for key in ("middleware", "middleware_id", "module_id", "module"):
         values = _as_strings(metric.get(key))
         if values:

@@ -31,6 +31,14 @@ ALL_METRIC_IDS = [
     "local.filesystem.used_percent",
     "local.filesystem.inode_used_percent",
     "local.logs.key_evidence",
+    "local.nginx.process.present",
+    "local.nginx.config.valid",
+    "local.nginx.port.listening",
+    "local.nginx.error_log.key_evidence",
+    "local.nginx.connections.status",
+    "local.nginx.access_log.status_codes",
+    "local.nginx.config.baseline",
+    "local.nginx.security.baseline",
 ]
 
 EXIT_CODE_TABLE_LINE = "退出码: 0 成功 / 2 用法错误 / 10 执行失败 / 20 业务告警"
@@ -69,8 +77,8 @@ def test_help_contains_exit_code_table_exact_line():
     assert EXIT_CODE_TABLE_LINE in r.stdout
 
 
-def test_list_metrics_lists_all_10_ids():
-    """--list-metrics 退出码 0，输出全部 10 个 P0 指标 ID（不采集）。"""
+def test_list_metrics_lists_all_18_ids():
+    """--list-metrics 退出码 0，输出全部 18 个指标 ID（10 共同 P0 + 8 Nginx）。"""
     r = run_cli("--list-metrics")
     assert r.returncode == 0
     for mid in ALL_METRIC_IDS:
@@ -113,6 +121,26 @@ def test_unsupported_middleware_option_exit_2():
     r = run_cli("--profile", "kafka-unknown")
     assert r.returncode == 2
     assert "不支持" in r.stderr
+
+
+def test_nginx_flag_is_supported_option():
+    """--nginx 为已实现中间件选择参数：帮助文本含说明，不与未知选项混淆。"""
+    r = run_cli("--help")
+    assert r.returncode == 0
+    assert "--nginx" in r.stdout
+    assert "只巡检 Nginx 中间件" in r.stdout
+
+
+def test_nginx_flag_alone_enters_inspection_not_usage_error():
+    """--nginx（无主机参数）→ 巡检本机语义：进入执行路径（未启用真实 → 10），
+    而非用法错误 2。"""
+    r = run_cli("--nginx")
+    assert r.returncode == 10
+    assert (
+        "真实 ansible-playbook 执行未启用" in r.stderr
+        or "unsupported_control_platform" in r.stderr
+        or "Linux or WSL" in r.stderr
+    )
 
 
 def test_missing_option_value_exit_2():
@@ -313,7 +341,7 @@ def test_run_inspection_passes_inventory_ips_to_report_renderers(monkeypatch, tm
     monkeypatch.setattr(cli.config_mod, "build_resolved_thresholds", lambda: {})
     monkeypatch.setattr(cli.inventory_mod, "default_runtime_dir", lambda: tmp_path / "runtime")
     monkeypatch.setattr(cli.inventory_mod, "resolve_host_selection", lambda *_args: selection)
-    monkeypatch.setattr(cli.runner_mod, "build_metric_command_specs", lambda: [])
+    monkeypatch.setattr(cli.runner_mod, "build_metric_command_specs", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         cli.runner_mod,
         "run",
@@ -350,6 +378,7 @@ def test_run_inspection_passes_inventory_ips_to_report_renderers(monkeypatch, tm
         excel=str(tmp_path / "report.xlsx"),
         html=str(tmp_path / "report.html"),
         fail_on=False,
+        nginx=False,
     )
     assert cli.run_inspection(ns, {"kind": "inventory", "inventory": "inventory.ini"}) == cli.EXIT_OK
     assert captured["xlsx"]["host_ips"] == {"node-01": "192.0.2.10"}

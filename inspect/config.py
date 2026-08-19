@@ -46,9 +46,15 @@ EXIT_CONFIG_ERROR = 10
 # 文档基线版本标识（MR §3 / §6：linux-common-p0-v1）
 DOC_BASELINE_VERSION = "linux-common-p0-v1"
 
+# Nginx 中间件文档基线版本（安徽农金Nginx、Keepalived运维巡检手册v1.0）
+NGINX_BASELINE_VERSION = "nginx-p0-v1"
+
 # 包内数据/模式文件（相对本模块定位，随包分发）
 BASELINE_FILE = (
     Path(__file__).resolve().parent / "data" / "thresholds" / "linux-common-p0-v1.yaml"
+)
+NGINX_BASELINE_FILE = (
+    Path(__file__).resolve().parent / "data" / "thresholds" / "nginx-p0-v1.yaml"
 )
 OVERRIDE_SCHEMA_FILE = (
     Path(__file__).resolve().parent / "schema" / "threshold-override-v1.schema.json"
@@ -522,8 +528,44 @@ def load_document_baseline(
     return result
 
 
+def load_nginx_baseline(
+    path: Optional[Union[str, Path]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """加载 Nginx 文档基线阈值 nginx-p0-v1.yaml（巡检手册转写）。
+
+    结构校验与 load_document_baseline 一致，仅版本标识使用
+    NGINX_BASELINE_VERSION（nginx-p0-v1），rule_id 前缀随之不同。
+    """
+    if path is None:
+        path = NGINX_BASELINE_FILE
+    data = _read_yaml_file(path)
+    if not isinstance(data, dict):
+        raise ConfigError(f"Nginx 文档基线顶层应为映射: {path}")
+    if data.get("schema") != "threshold-baseline-v1":
+        raise ConfigError(
+            f"Nginx 文档基线 schema 不匹配（期望 threshold-baseline-v1）: {path}"
+        )
+    if data.get("version") != NGINX_BASELINE_VERSION:
+        raise ConfigError(
+            f"Nginx 文档基线 version 不匹配（期望 {NGINX_BASELINE_VERSION}）: {path}"
+        )
+    metrics = data.get("metrics")
+    if not isinstance(metrics, dict) or not metrics:
+        raise ConfigError(f"Nginx 文档基线 metrics 必须为非空映射: {path}")
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for metric_id, spec in metrics.items():
+        result[metric_id] = _validate_baseline_metric(
+            metric_id, spec, path, version=NGINX_BASELINE_VERSION
+        )
+    return result
+
+
 def _validate_baseline_metric(
-    metric_id: Any, spec: Any, path: Union[str, Path]
+    metric_id: Any,
+    spec: Any,
+    path: Union[str, Path],
+    version: str = DOC_BASELINE_VERSION,
 ) -> Dict[str, Any]:
     if not isinstance(metric_id, str) or not re.fullmatch(r"local\.[a-z0-9_.]+", metric_id):
         raise ConfigError(f"文档基线 metric_id 非法: {metric_id!r}: {path}")
@@ -563,7 +605,7 @@ def _validate_baseline_metric(
         if rule is not None:
             if not isinstance(rule, str) or not rule.strip():
                 raise ConfigError(f"文档基线 {metric_id} boundaries.{status} rule 非法: {path}")
-            expected_id = f"{DOC_BASELINE_VERSION}.{slug}.{status.lower()}"
+            expected_id = f"{version}.{slug}.{status.lower()}"
             if rule_id != expected_id:
                 raise ConfigError(
                     f"文档基线 {metric_id} boundaries.{status} rule_id 应等于 {expected_id}: "
@@ -589,7 +631,7 @@ def _validate_baseline_metric(
     return {
         "metric_id": metric_id,
         "name": name,
-        "version": DOC_BASELINE_VERSION,
+        "version": version,
         "source_anchor": anchor,
         "boundaries": levels,
         "layer": LAYER_DOCUMENT_BASELINE,
@@ -769,7 +811,11 @@ def build_resolved_thresholds(
       （本基线文件 10 指标均有 OK 边界，此分支仅防御）。
     """
     if baseline is None:
-        baseline = load_document_baseline()
+        # Default baseline merges the Linux common P0 file and the Nginx
+        # middleware file so both document-baseline layers resolve together.
+        baseline = {}
+        baseline.update(load_document_baseline())
+        baseline.update(load_nginx_baseline())
 
     if override is None:
         override_doc: Dict[str, Any] = {}
@@ -830,7 +876,7 @@ def _resolve_one(
         unknown = dict(baseline_spec["boundaries"]["UNKNOWN"])
         return {
             "metric_id": metric_id,
-            "version": DOC_BASELINE_VERSION,
+            "version": baseline_spec.get("version") or DOC_BASELINE_VERSION,
             "layer": LAYER_DOCUMENT_BASELINE if defined else LAYER_UNRESOLVED,
             "rules": defined,
             "unknown": unknown,
@@ -844,6 +890,76 @@ def _resolve_one(
     raise ConfigError(f"无法解析指标阈值（无文档基线、无外部配置）: {metric_id}")
 
 
+# --------------------------------------------------------------------------
+# Nginx 中间件配置（nginx.yml 可选；缺省用巡检手册环境信息默认值）
+# --------------------------------------------------------------------------
+
+# 默认 Nginx 配置来源：《安徽农金Nginx、Keepalived运维巡检手册v1.0》
+# 环境信息/巡检关注指标（NGINX_HOME=/opt/nginx、NGINX_PORT=8010、
+# VIP=192.168.0.253）。现场路径不同时在仓库根 nginx.yml 覆盖。
+NGINX_CONFIG_NAME = "nginx.yml"
+
+NGINX_DEFAULTS: Dict[str, Any] = {
+    "nginx_bin": "/usr/sbin/nginx",
+    "nginx_conf": "/opt/nginx/conf/nginx.conf",
+    "nginx_error_log": "/opt/nginx/logs/error.log",
+    "nginx_access_log": "/opt/nginx/logs/access.log",
+    "nginx_port": 8010,
+    "whitelist": [],
+}
+
+# nginx.yml 允许字段（未知字段 → ConfigError，避免拼写错误静默丢失）
+_NGINX_CONFIG_ALLOWED = set(NGINX_DEFAULTS)
+
+
+def load_nginx_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+    """加载 nginx.yml（可选；仓库根 <root>/nginx.yml）。
+
+    - 文件不存在 → 返回 NGINX_DEFAULTS（巡检手册默认值）；
+    - path 显式给出：文件必须存在且可解析；
+    - 未知字段、类型错误 → ConfigError（退出码 10）。
+
+    返回 {"nginx_bin", "nginx_conf", "nginx_error_log", "nginx_access_log",
+          "nginx_port", "whitelist"}。whitelist 为 Nginx 白名单 IP 列表：
+    白名单内的主机上 Nginx 未运行 → CRIT「未运行」；白名单外未运行 →
+    跳过该主机 Nginx 指标。
+    """
+    if path is None:
+        candidate = _repo_root() / NGINX_CONFIG_NAME
+        if not candidate.is_file():
+            return dict(NGINX_DEFAULTS)
+        path = candidate
+
+    data = _read_yaml_file(path)
+    if not isinstance(data, dict):
+        raise ConfigError(f"nginx.yml 顶层应为映射: {path}")
+
+    unknown = set(data) - _NGINX_CONFIG_ALLOWED
+    if unknown:
+        raise ConfigError(f"nginx.yml 未知字段: {sorted(unknown)}: {path}")
+
+    result: Dict[str, Any] = dict(NGINX_DEFAULTS)
+    for key in NGINX_DEFAULTS:
+        if key not in data:
+            continue
+        value = data[key]
+        if key == "nginx_port":
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+                raise ConfigError(f"nginx.yml {key} 必须为 1..65535 整数: {path}")
+            result[key] = int(value)
+        elif key == "whitelist":
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) and item.strip() for item in value
+            ):
+                raise ConfigError(f"nginx.yml whitelist 必须为非空字符串 IP 列表: {path}")
+            result[key] = [str(item) for item in value]
+        else:
+            if not isinstance(value, str) or not value.strip():
+                raise ConfigError(f"nginx.yml {key} 必须为非空字符串: {path}")
+            result[key] = str(value)
+    return result
+
+
 __all__ = [
     "ConfigError",
     "DOC_BASELINE_VERSION",
@@ -851,9 +967,13 @@ __all__ = [
     "LAYER_DOCUMENT_BASELINE",
     "LAYER_EXTERNAL_CONFIG",
     "LAYER_UNRESOLVED",
+    "NGINX_BASELINE_VERSION",
+    "NGINX_DEFAULTS",
     "build_resolved_thresholds",
     "load_document_baseline",
     "load_inspect_config",
+    "load_nginx_baseline",
+    "load_nginx_config",
     "load_override",
     "validate_override_document",
 ]

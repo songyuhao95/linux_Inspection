@@ -86,14 +86,18 @@ def extract_inspection_id(stdout: str) -> str:
 
 
 def assert_doc(doc, inspection_id: str, host: str) -> None:
-    """事实源 host-result-v1 文档断言：计数与夹具预期一致（OK=4/UNKNOWN=6）。"""
+    """事实源 host-result-v1 文档断言：计数与夹具预期一致（OK=4/UNKNOWN=2）。
+
+    默认巡检 = linux_basic + 全部中间件；夹具主机无 Nginx 进程且不在
+    白名单 → Nginx 指标被跳过，仅剩 6 个 Linux 基础指标。
+    """
     assert doc["inspection_id"] == inspection_id
     assert doc["host"]["name"] == host
     es = doc["execution_summary"]
-    assert es["total_metrics"] == 10
+    assert es["total_metrics"] == 6
     assert es["ok"] == 4 and es["warn"] == 0 and es["crit"] == 0
-    assert es["unknown"] == 6
-    assert es["executed"] == 4 and es["failed"] == 6
+    assert es["unknown"] == 2
+    assert es["executed"] == 4 and es["failed"] == 2
     assert doc["execution_status"] == normalize.STATUS_PARTIAL
     normalize.validate_host_result(doc)  # schema 校验（合同 AC 语义）
 
@@ -113,8 +117,8 @@ def test_local_full_chain_fixture_declared(tmp_path):
     # stdout 报表（render_stdout 只读事实源）
     assert "巡检报告" in r.stdout
     insp_id = extract_inspection_id(r.stdout)
-    assert "（OK=4 WARN=0 CRIT=0 UNKNOWN=6）" in r.stdout
-    assert "executed=4 failed=6" in r.stdout
+    assert "（OK=4 WARN=0 CRIT=0 UNKNOWN=2）" in r.stdout
+    assert "executed=4 failed=2" in r.stdout
     # 事实源：目录布局 out/<inspection_id>/hosts/<host>.json + 索引
     out = tmp_path / "out"
     host_json = out / insp_id / "hosts" / "localhost.json"
@@ -164,7 +168,7 @@ def test_html_report_consumes_fact_source_only(tmp_path):
     assert len(embedded) == 1
     assert embedded[0] == doc, "HTML 内嵌 JSON 与事实源不一致"
     # 宏观计数与事实源一致（OK/WARN/CRIT/UNKNOWN = 4/0/0/6）
-    assert "4 / 0 / 0 / 6" in text
+    assert "4 / 0 / 0 / 2" in text
 
 
 def test_excel_bundled_xlsxwriter_success(tmp_path):
@@ -210,7 +214,7 @@ def test_old_inspection_independently_rerendered(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     report = render_stdout.render_inspection_report("out", insp_id)
     assert f"inspection_id: {insp_id}" in report
-    assert "（OK=4 WARN=0 CRIT=0 UNKNOWN=6）" in report
+    assert "（OK=4 WARN=0 CRIT=0 UNKNOWN=2）" in report
     # HTML：render_html_from_files 从旧 JSON 文件独立重渲染
     rerendered_html = tmp_path / "rerendered.html"
     render_html.render_html_from_files([host_json], out_path=rerendered_html)
@@ -219,7 +223,7 @@ def test_old_inspection_independently_rerendered(tmp_path, monkeypatch):
     assert m, "重渲染 HTML 缺内嵌 JSON"
     doc = json.loads(host_json.read_text(encoding="utf-8"))
     assert json.loads(m.group(1)) == [doc]
-    assert "4 / 0 / 0 / 6" in text
+    assert "4 / 0 / 0 / 2" in text
     # Excel：bundled xlsxwriter 可用，旧事实源可独立重渲染。
     rerendered_xlsx = tmp_path / "rerendered.xlsx"
     render_xlsx.render_xlsx_file(host_json, out_path=rerendered_xlsx)
