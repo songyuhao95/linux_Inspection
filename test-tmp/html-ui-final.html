@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="inspect render_html（T-127）">
+<title>insp-20260814120000-node-fx01 — 巡检 HTML 报表</title>
+<style>
+/* =====================================================================
+   inspect 离线单文件 HTML 报表 v1 样式（T-127）
+   全内联，零外链（无 link/script src/fetch/字体/网络请求，RR §4）；
+   色板与徽标按 RR §5：OK #2E7D32 / WARN #F9A825 / CRIT #C62828 /
+   UNKNOWN #757575；execution_status 以描边徽标区分于业务状态填充徽标。
+   ===================================================================== */
+:root {
+  --status-ok: #2E7D32;
+  --status-warn: #F9A825;
+  --status-crit: #C62828;
+  --status-unknown: #757575;
+  --bg: #f4f5f7;
+  --card-bg: #ffffff;
+  --border: #d9dce1;
+  --text: #212529;
+  --text-dim: #6c757d;
+  --nav-bg: #1f2733;
+  --nav-text: #cfd6df;
+  --nav-panel: #2a3547;
+  --accent: #4f8cc9;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* ---------------- 布局：左导航 + 右滚动区（RR §4） ---------------- */
+.layout { display: flex; min-height: 100vh; }
+.nav {
+  flex: 0 0 280px;
+  width: 280px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+  background: var(--nav-bg);
+  color: var(--nav-text);
+  padding: 16px 14px 32px;
+}
+.content { flex: 1; min-width: 0; padding: 20px 24px 48px; }
+
+/* ---------------- 左导航各块 ---------------- */
+.nav-brand { font-size: 15px; font-weight: 700; margin: 0 0 4px; color: #ffffff; }
+.nav-sub { font-size: 12px; color: #93a0b0; margin: 0 0 14px; }
+.nav-block { margin: 0 0 18px; }
+.nav-title {
+  font-size: 12px; font-weight: 700; letter-spacing: .06em;
+  color: #8fa0b3; margin: 0 0 8px; padding-bottom: 4px;
+  border-bottom: 1px solid #37424f;
+}
+.multi-select {
+  margin: 8px 0; border: 1px solid #4a5767; border-radius: 6px;
+  background: transparent; color: var(--nav-text);
+}
+.multi-select > summary {
+  padding: 8px 10px; cursor: pointer; list-style: none; font-size: 13px;
+  user-select: none;
+}
+.multi-select > summary::-webkit-details-marker { display: none; }
+.multi-select > summary::before { content: "▸"; display: inline-block; width: 16px; color: #8fa0b3; }
+.multi-select[open] > summary::before { content: "▾"; }
+.selection-count { float: right; color: #8fa0b3; font-size: 11px; }
+.multi-menu { padding: 0 8px 8px; }
+.filter-search {
+  width: 100%; padding: 6px 8px; border: 1px solid #4a5767; border-radius: 4px;
+  background: #18202b; color: #ffffff; outline: none; font-size: 12px;
+}
+.filter-search:focus { border-color: var(--accent); }
+.filter-options { margin-top: 6px; max-height: 220px; overflow-y: auto; }
+.filter-option {
+  display: flex; align-items: center; gap: 6px; padding: 5px 4px;
+  border-radius: 4px; cursor: pointer; font-size: 12px; word-break: break-all;
+}
+.filter-option:hover { background: var(--nav-panel); }
+.filter-option input { accent-color: var(--accent); }
+.filter-option.hidden { display: none; }
+.filter-reset {
+  display: block; width: 100%; margin-top: 10px; padding: 6px 10px;
+  font-size: 12px; border-radius: 4px; border: 1px dashed #4a5767;
+  background: transparent; color: #93a0b0; cursor: pointer;
+}
+.filter-reset:hover { color: #ffffff; border-color: #8fa0b3; }
+
+/* ---------------- 右滚动区：Run 摘要 + 工具栏 ---------------- */
+.run-header {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 18px; margin-bottom: 12px;
+}
+.run-header h1 { font-size: 19px; margin: 0 0 6px; }
+.run-summary-title { font-size: 14px; margin: 0 0 6px; color: var(--text-dim); }
+.run-header .run-stream { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; }
+.run-conclusion { font-size: 13px; margin: 0; }
+.run-meta {
+  display: grid; grid-template-columns: minmax(150px, 220px) 1fr;
+  margin: 0; border-top: 1px solid #eceef1; padding-top: 8px;
+}
+.run-meta dt { color: var(--text-dim); font-size: 12px; padding: 3px 10px 3px 0; }
+.run-meta dd { margin: 0; font-size: 13px; padding: 3px 0; word-break: break-all; }
+.display-mode-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 14px; background: var(--card-bg);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.display-mode-bar label { font-weight: 700; }
+#group-by-select {
+  min-width: 150px; padding: 5px 8px; border: 1px solid var(--border);
+  border-radius: 5px; background: #ffffff; color: var(--text); font-size: 13px;
+}
+.toolbar {
+  display: flex; align-items: center; gap: 18px;
+  margin-bottom: 14px; padding: 10px 14px;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.print-toggle { font-size: 13px; color: var(--text-dim); cursor: pointer; user-select: none; }
+.print-toggle input { margin-right: 6px; vertical-align: -1px; }
+.filter-hint { font-size: 12px; color: var(--text-dim); }
+
+/* ---------------- 宏观卡片（每主机四状态计数 + 徽标 + 结论） ---------------- */
+.macro-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.macro-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px;
+}
+.macro-host { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.macro-counts { list-style: none; margin: 0 0 8px; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.count { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; color: #ffffff; }
+.count b { font-size: 13px; margin-left: 4px; }
+.count-ok      { background: #2E7D32; }
+.count-warn    { background: #F9A825; color: #1f2733; }
+.count-crit    { background: #C62828; }
+.count-unknown { background: #757575; }
+.macro-conclusion { font-size: 13px; margin: 0 0 6px; }
+.macro-meta { font-size: 12px; color: var(--text-dim); margin: 0; }
+
+/* ---------------- 主机详情：逐指标卡片（RR §4 字段全集） ---------------- */
+.group-view { display: none; }
+.group-view.active { display: block; }
+.report-group { margin-bottom: 28px; }
+.report-group.hidden { display: none; }
+.group-title { font-size: 17px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+.host-section { margin-bottom: 28px; }
+.host-title { font-size: 17px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.host-meta { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; word-break: break-all; }
+.host-error {
+  margin: 0 0 10px; padding: 10px 12px; border: 1px solid #C62828;
+  border-left: 4px solid #C62828; border-radius: 6px; background: #fff4f4;
+}
+.host-error strong { color: #C62828; }
+.host-error p { margin: 4px 0 0; color: var(--text); word-break: break-word; }
+
+.metric-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-left: 4px solid var(--status-unknown);
+  border-radius: 8px; padding: 12px 16px; margin-bottom: 10px;
+  cursor: pointer;
+}
+.metric-card.status-ok      { border-left-color: #2E7D32; }
+.metric-card.status-warn    { border-left-color: #F9A825; }
+.metric-card.status-crit    { border-left-color: #C62828; }
+.metric-card.status-unknown { border-left-color: #757575; }
+.metric-card.hidden { display: none; }
+.card-context { color: var(--text-dim); font-size: 12px; font-weight: 400; }
+.metric-card.expanded { border-color: var(--accent); }
+
+.card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+.card-title { font-size: 14px; margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.metric-id { font-family: Consolas, "Courier New", monospace; font-weight: 700; }
+.metric-name { color: var(--text-dim); font-weight: 400; }
+.card-values {
+  display: grid; grid-template-columns: auto auto auto;
+  gap: 2px 18px; margin: 8px 0 4px; font-size: 13px;
+}
+.card-values div { display: contents; }
+.card-values dt { color: var(--text-dim); font-size: 11px; }
+.card-values dd { margin: 0; font-family: Consolas, "Courier New", monospace; }
+.card-values dd.null-value { color: #adb5bd; }
+
+.card-fields { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+.card-fields th {
+  text-align: left; width: 150px; min-width: 150px;
+  color: var(--text-dim); font-weight: 500;
+  padding: 3px 8px 3px 0; vertical-align: top;
+}
+.card-fields td { padding: 3px 0; word-break: break-all; }
+.card-fields tr { border-top: 1px dashed #eceef1; }
+.card-fields tr:first-child { border-top: none; }
+.field-null { color: #adb5bd; }
+
+/* 徽标：业务状态（填充色）与执行状态（描边）区分（RR §5） */
+.chip {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; color: #ffffff; letter-spacing: .04em;
+}
+.chip-ok      { background: #2E7D32; }
+.chip-warn    { background: #F9A825; color: #1f2733; }
+.chip-crit    { background: #C62828; }
+.chip-unknown { background: #757575; }
+.exec-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  border: 2px solid; background: var(--card-bg);
+}
+.exec-success { border-color: #2E7D32; color: #2E7D32; }
+.exec-partial { border-color: #F9A825; background: #FFF8E1; color: #8a6d00; }
+.exec-error   { border-color: #C62828; background: #FDECEA; color: #C62828; }
+
+details.card-details { margin-top: 8px; border-top: 1px dashed #eceef1; padding-top: 6px; }
+details.card-details summary {
+  cursor: pointer; color: var(--accent); font-size: 13px;
+  outline: none; user-select: none;
+}
+details.card-details summary:hover { text-decoration: underline; }
+
+footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); }
+
+/* ---------------- 打印友好（RR §4）：默认宏观摘要，详情可展开 ---------------- */
+@media print {
+  .nav, .toolbar { display: none; }
+  body { background: #ffffff; font-size: 12px; }
+  .layout { display: block; }
+  .content { padding: 0; }
+  .macro-cards { display: block; }
+  .macro-card { break-inside: avoid; margin-bottom: 10px; }
+  .host-section { margin-bottom: 16px; }
+  .metric-card { break-inside: avoid; }
+  /* 默认只打印宏观摘要：主机详情与卡内证据折叠 */
+  .host-detail, .group-view:not(.active), .card-details { display: none; }
+  body.print-details .host-detail, body.print-details .group-view.active { display: block; }
+  body.print-details .card-details { display: block; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- ==================== 左导航（RR §4） ==================== -->
+  <nav class="nav" aria-label="报表导航">
+    <p class="nav-brand">巡检 HTML 报表</p>
+    <p class="nav-sub">离线单文件 · 只读展示 JSON 事实源</p>
+
+    <div class="nav-block">
+      <h3 class="nav-title">筛选条件（支持多选）</h3>
+      <details class="multi-select" data-filter-kind="host"><summary>主机列表<span class="selection-count">未选择</span></summary><div class="multi-menu"><input type="search" class="filter-search" data-search-kind="host" placeholder="搜索主机列表" aria-label="搜索主机列表"><div class="filter-options"><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="host" data-filter-value="node-fx01"><span>node-fx01</span></label><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="host" data-filter-value="node-fx02"><span>node-fx02</span></label><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="host" data-filter-value="node-fx03"><span>node-fx03</span></label></div></div></details>
+      <details class="multi-select" data-filter-kind="status"><summary>状态筛选<span class="selection-count">未选择</span></summary><div class="multi-menu"><input type="search" class="filter-search" data-search-kind="status" placeholder="搜索状态筛选" aria-label="搜索状态筛选"><div class="filter-options"><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="status" data-filter-value="OK"><span>OK</span></label><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="status" data-filter-value="WARN"><span>WARN</span></label><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="status" data-filter-value="CRIT"><span>CRIT</span></label><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="status" data-filter-value="UNKNOWN"><span>UNKNOWN</span></label></div></div></details>
+      <details class="multi-select" data-filter-kind="middleware"><summary>中间件<span class="selection-count">未选择</span></summary><div class="multi-menu"><input type="search" class="filter-search" data-search-kind="middleware" placeholder="搜索中间件" aria-label="搜索中间件"><div class="filter-options"><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="middleware" data-filter-value="elasticsearch"><span>elasticsearch</span></label><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="middleware" data-filter-value="redis"><span>redis</span></label><label class="filter-option"><input type="checkbox" class="filter-check" data-filter-kind="middleware" data-filter-value="mysql"><span>mysql</span></label></div></div></details>
+      <button type="button" class="filter-reset" id="filter-reset">清除筛选</button>
+    </div>
+  </nav>
+
+  <!-- ==================== 右滚动区 ==================== -->
+  <main class="content">
+    <!-- Run 摘要置于正文最上方，便于打开报表即看到全局结论 -->
+    <header class="run-header" aria-label="Run 摘要"><h1>巡检 HTML 报表 — insp-20260814120000-node-fx01</h1><h2 class="run-summary-title">Run 摘要</h2><p class="run-stream">整体结论：主机 3（2 台 SUCCESS，1 台 PARTIAL）；CRIT 指标 1 项；WARN 指标 1 项；UNKNOWN 指标 2 项（需人工确认）；技术失败 1 项（见各指标卡错误详情）。</p><dl class="run-meta"><dt>run_id</dt><dd>run-20260814-001</dd><dt>inspection_id</dt><dd>insp-20260814120000-node-fx01</dd><dt>主机数</dt><dd>3</dd><dt>指标总数</dt><dd>12</dd><dt>OK / WARN / CRIT / UNKNOWN</dt><dd>8 / 1 / 1 / 2</dd><dt>技术失败（failed）</dt><dd>1</dd><dt>执行状态分布</dt><dd>2 SUCCESS · 1 PARTIAL</dd><dt>采集时间</dt><dd>2026-08-14T12:00:00+08:00</dd><dt>生成时间</dt><dd>2026-08-18T20:56:26+08:00</dd></dl></header>
+
+    <section class="display-mode-bar" aria-label="正文显示方式">
+      <label for="group-by-select">正文显示：</label>
+      <select id="group-by-select">
+        <option value="host">按主机分组</option>
+        <option value="status">按状态分组</option>
+        <option value="middleware">按中间件分组</option>
+      </select>
+      <span class="filter-hint">筛选条件对当前分组视图生效。</span>
+    </section>
+
+    <div class="toolbar">
+      <label class="print-toggle">
+        <input type="checkbox" id="print-details-toggle"> 打印时包含主机详情
+      </label>
+      <span class="filter-hint">左侧筛选支持搜索和多选；点击指标卡片展开证据与来源锚点。</span>
+    </div>
+
+    <!-- 宏观卡片：每主机四状态计数 + execution_status 徽标 + 整体结论 -->
+    <section class="macro-cards" aria-label="宏观摘要卡片">
+      <section class="macro-card" data-host="node-fx01"><h3 class="macro-host">node-fx01 <span class="exec-badge exec-success">SUCCESS</span></h3><ul class="macro-counts"><li class="count count-ok">OK<b>2</b></li><li class="count count-warn">WARN<b>1</b></li><li class="count count-crit">CRIT<b>1</b></li><li class="count count-unknown">UNKNOWN<b>0</b></li></ul><p class="macro-conclusion">整体结论：存在 CRIT 告警 1 项，请尽快处理。</p><p class="macro-meta">执行状态：SUCCESS · 指标总数 4 · 已执行 4 · 技术失败 0</p></section><section class="macro-card" data-host="node-fx02"><h3 class="macro-host">node-fx02 <span class="exec-badge exec-partial">PARTIAL</span></h3><ul class="macro-counts"><li class="count count-ok">OK<b>2</b></li><li class="count count-warn">WARN<b>0</b></li><li class="count count-crit">CRIT<b>0</b></li><li class="count count-unknown">UNKNOWN<b>2</b></li></ul><p class="macro-conclusion">整体结论：执行状态 PARTIAL，存在技术失败 1 项（错误详情见指标卡片）；存在 UNKNOWN 2 项，需人工确认。</p><p class="macro-meta">执行状态：PARTIAL · 指标总数 4 · 已执行 3 · 技术失败 1</p></section><section class="macro-card" data-host="node-fx03"><h3 class="macro-host">node-fx03 <span class="exec-badge exec-success">SUCCESS</span></h3><ul class="macro-counts"><li class="count count-ok">OK<b>4</b></li><li class="count count-warn">WARN<b>0</b></li><li class="count count-crit">CRIT<b>0</b></li><li class="count count-unknown">UNKNOWN<b>0</b></li></ul><p class="macro-conclusion">整体结论：全部指标正常。</p><p class="macro-meta">执行状态：SUCCESS · 指标总数 4 · 已执行 4 · 技术失败 0</p></section>
+    </section>
+
+    <!-- 三种分组视图在渲染期静态生成，JS 仅切换显隐 -->
+    <section class="host-detail" aria-label="指标详情">
+      <div class="group-view active" id="group-view-host" data-group-mode="host"><section class="report-group host-section" data-host="node-fx01" id="host-node-fx01"><h2 class="host-title">node-fx01 <span class="exec-badge exec-success">SUCCESS</span></h2><p class="host-meta">IP：&lt;IP&gt; · inventory_source：local · product_profiles：elasticsearch · collected_at：2026-08-14T12:00:00+08:00 · duration_sec：12.34 · 技术失败：0</p><div class="metric-card status-ok" data-status="OK" data-host="node-fx01" data-metric-id="local.cpu.utilization" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.utilization</span><span class="metric-name">CPU 使用率</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>12.5</dd></div><div><dt>normalized_value</dt><dd>12.5</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.cpu.utilization.ok</td></tr><tr><th scope="row">阈值 value</th><td>长期&lt;70% 且波动&lt;80%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>top -bn1 | head -20</td></tr><tr><th scope="row">证据 output_summary</th><td>Cpu(s): 12.5% us, 5.2% sy, 82.3% id</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.utilization.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R3</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx01" data-metric-id="local.swap.used_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.swap.used_percent</span><span class="metric-name">Swap 使用率</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0</dd></div><div><dt>normalized_value</dt><dd>0.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.swap.used_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>used=0（或未配置 swap）→ OK</td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行；swap=0 为部署基线（ES/部署规范）</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m Swap 行</td></tr><tr><th scope="row">证据 output_summary</th><td>used=0MB total=8191MB → 0%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.swap.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>9 份巡检手册 P0 内存行</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-warn" data-status="WARN" data-host="node-fx01" data-metric-id="local.filesystem.used_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.filesystem.used_percent</span><span class="metric-name">磁盘使用率</span><span class="chip chip-warn">WARN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>78</dd></div><div><dt>normalized_value</dt><dd>78.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.filesystem.used_percent.warn</td></tr><tr><th scope="row">阈值 value</th><td>75–85%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R9/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>df -hT /opt/elasticsearch/data /opt/elasticsearch/logs</td></tr><tr><th scope="row">证据 output_summary</th><td>/dev/mapper/vg-data 78% 已用</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.filesystem.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R9</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-crit" data-status="CRIT" data-host="node-fx01" data-metric-id="local.memory.available_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.memory.available_percent</span><span class="metric-name">内存可用率</span><span class="chip chip-crit">CRIT</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>6.8</dd></div><div><dt>normalized_value</dt><dd>6.8</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.memory.available_percent.crit</td></tr><tr><th scope="row">阈值 value</th><td>&lt;10%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m</td></tr><tr><th scope="row">证据 output_summary</th><td>Mem: available 548MB / total 8064MB → 6.8%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.memory.available_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R4</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div></section><section class="report-group host-section" data-host="node-fx02" id="host-node-fx02"><h2 class="host-title">node-fx02 <span class="exec-badge exec-partial">PARTIAL</span></h2><p class="host-meta">IP：&lt;IP&gt; · inventory_source：local · product_profiles：redis · collected_at：2026-08-14T12:00:00+08:00 · duration_sec：15.02 · 技术失败：1</p><div class="metric-card status-unknown" data-status="UNKNOWN" data-host="node-fx02" data-metric-id="local.cpu.load_1m" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.load_1m</span><span class="metric-name">1 分钟负载</span><span class="chip chip-unknown">UNKNOWN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>3.20</dd></div><div><dt>normalized_value</dt><dd>3.2</dd></div><div><dt>unit</dt><dd>load</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>unresolved-document-conflict</td></tr><tr><th scope="row">阈值 rule_id</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 value</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行（见 docs/reviews/docx-source-conflicts.md C5）</td></tr><tr><th scope="row">阈值 notes</th><td>load_1m 持续&gt;核数的判据在 9 份手册间不一致，默认 UNKNOWN</td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>cat /proc/loadavg; nproc</td></tr><tr><th scope="row">证据 output_summary</th><td>3.20 2.10 1.80 1/412 80321 (nproc=8)</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.load_1m.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES/Kafka/Mysql/Nacos/Rabbitmq/Rocketmq/Tomcat 巡检手册</td></tr><tr><th scope="row">来源 notes</th><td>文档冲突 C5 unresolved：默认 UNKNOWN，外部配置可覆盖</td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx02" data-metric-id="local.memory.available_percent" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.memory.available_percent</span><span class="metric-name">内存可用率</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>62</dd></div><div><dt>normalized_value</dt><dd>62.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.memory.available_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>&gt;=20%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Redis运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹e5cf1a4d</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m</td></tr><tr><th scope="row">证据 output_summary</th><td>Mem: available 5000MB / total 8064MB → 62%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.memory.available_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Redis 巡检手册 v1.0 表T5R4</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx02" data-metric-id="local.swap.used_percent" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.swap.used_percent</span><span class="metric-name">Swap 使用率</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0</dd></div><div><dt>normalized_value</dt><dd>0.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.swap.used_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>used=0（或未配置 swap）→ OK</td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行；swap=0 为部署基线</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m Swap 行</td></tr><tr><th scope="row">证据 output_summary</th><td>used=0MB total=4095MB → 0%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.swap.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:04+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>9 份巡检手册 P0 内存行</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-unknown" data-status="UNKNOWN" data-host="node-fx02" data-metric-id="local.logs.key_evidence" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.logs.key_evidence</span><span class="metric-name">关键日志证据</span><span class="chip chip-unknown">UNKNOWN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>normalized_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>unit</dt><dd>count</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 rule_id</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 value</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 source_anchor</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>tail -300 /opt/redis/logs/redis.log | egrep -i &#x27;ERROR|OutOfMemory&#x27;</td></tr><tr><th scope="row">证据 output_summary</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.logs.key_evidence.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:05+08:00</td></tr><tr><th scope="row">错误 code</th><td>PERMISSION_DENIED</td></tr><tr><th scope="row">错误 message</th><td>cannot read /opt/redis/logs/redis.log (permission denied)</td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Redis 巡检手册 v1.0 表T5R11</td></tr><tr><th scope="row">来源 notes</th><td>权限不足，指标 UNKNOWN，继续其余指标与主机</td></tr></table></details></div></section><section class="report-group host-section" data-host="node-fx03" id="host-node-fx03"><h2 class="host-title">node-fx03 <span class="exec-badge exec-success">SUCCESS</span></h2><p class="host-meta">IP：&lt;IP&gt; · inventory_source：local · product_profiles：mysql · collected_at：2026-08-14T12:00:00+08:00 · duration_sec：11.87 · 技术失败：0</p><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.process.present" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.process.present</span><span class="metric-name">进程存在性</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>1</dd></div><div><dt>normalized_value</dt><dd>1.0</dd></div><div><dt>unit</dt><dd>count</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.process.present.ok</td></tr><tr><th scope="row">阈值 value</th><td>匹配进程行数 &gt;= 1</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R1/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>pgrep -fa &#x27;mysqld&#x27; || ps -ef | grep &#x27;[m]ysqld&#x27;</td></tr><tr><th scope="row">证据 output_summary</th><td>1 个匹配进程：mysqld --datadir=/opt/mysql/data</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.process.present.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td>inventory:group_vars/all/p0_thresholds.yml (未使用)</td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R1</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.service.active" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.service.active</span><span class="metric-name">服务活跃状态</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>active</dd></div><div><dt>normalized_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>unit</dt><dd>state</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.service.active.ok</td></tr><tr><th scope="row">阈值 value</th><td>ActiveState=active</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R2/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>systemctl is-active mysqld; systemctl show -p ActiveState,SubState mysqld</td></tr><tr><th scope="row">证据 output_summary</th><td>active; ActiveState=active SubState=running</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.service.active.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R2</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.port.listening" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.port.listening</span><span class="metric-name">端口监听</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>3306</dd></div><div><dt>normalized_value</dt><dd>3306.0</dd></div><div><dt>unit</dt><dd>port</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.port.listening.ok</td></tr><tr><th scope="row">阈值 value</th><td>监听且进程匹配</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>ss -tlnp | grep 3306</td></tr><tr><th scope="row">证据 output_summary</th><td>LISTEN 0 128 0.0.0.0:3306 users:((&quot;mysqld&quot;))</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.port.listening.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R3</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.cpu.load_1m" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.load_1m</span><span class="metric-name">1 分钟负载</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0.12</dd></div><div><dt>normalized_value</dt><dd>0.12</dd></div><div><dt>unit</dt><dd>load</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.cpu.load_1m.ok</td></tr><tr><th scope="row">阈值 value</th><td>&lt;= 核数</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R7/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>cat /proc/loadavg; nproc</td></tr><tr><th scope="row">证据 output_summary</th><td>load average: 0.12, 0.10, 0.08 (nproc=8); 含特殊字符样例 a &lt; b &amp; c</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.load_1m.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R7</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div></section></div><div class="group-view" id="group-view-status" data-group-mode="status"><section class="report-group status-group" data-group-value="OK"><h2 class="group-title">状态：<span class="chip chip-ok">OK</span></h2><div class="metric-card status-ok" data-status="OK" data-host="node-fx01" data-metric-id="local.cpu.utilization" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.utilization</span><span class="metric-name">CPU 使用率</span><span class="card-context">主机：node-fx01</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>12.5</dd></div><div><dt>normalized_value</dt><dd>12.5</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.cpu.utilization.ok</td></tr><tr><th scope="row">阈值 value</th><td>长期&lt;70% 且波动&lt;80%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>top -bn1 | head -20</td></tr><tr><th scope="row">证据 output_summary</th><td>Cpu(s): 12.5% us, 5.2% sy, 82.3% id</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.utilization.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R3</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx01" data-metric-id="local.swap.used_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.swap.used_percent</span><span class="metric-name">Swap 使用率</span><span class="card-context">主机：node-fx01</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0</dd></div><div><dt>normalized_value</dt><dd>0.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.swap.used_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>used=0（或未配置 swap）→ OK</td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行；swap=0 为部署基线（ES/部署规范）</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m Swap 行</td></tr><tr><th scope="row">证据 output_summary</th><td>used=0MB total=8191MB → 0%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.swap.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>9 份巡检手册 P0 内存行</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx02" data-metric-id="local.memory.available_percent" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.memory.available_percent</span><span class="metric-name">内存可用率</span><span class="card-context">主机：node-fx02</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>62</dd></div><div><dt>normalized_value</dt><dd>62.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.memory.available_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>&gt;=20%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Redis运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹e5cf1a4d</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m</td></tr><tr><th scope="row">证据 output_summary</th><td>Mem: available 5000MB / total 8064MB → 62%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.memory.available_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Redis 巡检手册 v1.0 表T5R4</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx02" data-metric-id="local.swap.used_percent" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.swap.used_percent</span><span class="metric-name">Swap 使用率</span><span class="card-context">主机：node-fx02</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0</dd></div><div><dt>normalized_value</dt><dd>0.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.swap.used_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>used=0（或未配置 swap）→ OK</td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行；swap=0 为部署基线</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m Swap 行</td></tr><tr><th scope="row">证据 output_summary</th><td>used=0MB total=4095MB → 0%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.swap.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:04+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>9 份巡检手册 P0 内存行</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.process.present" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.process.present</span><span class="metric-name">进程存在性</span><span class="card-context">主机：node-fx03</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>1</dd></div><div><dt>normalized_value</dt><dd>1.0</dd></div><div><dt>unit</dt><dd>count</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.process.present.ok</td></tr><tr><th scope="row">阈值 value</th><td>匹配进程行数 &gt;= 1</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R1/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>pgrep -fa &#x27;mysqld&#x27; || ps -ef | grep &#x27;[m]ysqld&#x27;</td></tr><tr><th scope="row">证据 output_summary</th><td>1 个匹配进程：mysqld --datadir=/opt/mysql/data</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.process.present.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td>inventory:group_vars/all/p0_thresholds.yml (未使用)</td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R1</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.service.active" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.service.active</span><span class="metric-name">服务活跃状态</span><span class="card-context">主机：node-fx03</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>active</dd></div><div><dt>normalized_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>unit</dt><dd>state</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.service.active.ok</td></tr><tr><th scope="row">阈值 value</th><td>ActiveState=active</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R2/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>systemctl is-active mysqld; systemctl show -p ActiveState,SubState mysqld</td></tr><tr><th scope="row">证据 output_summary</th><td>active; ActiveState=active SubState=running</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.service.active.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R2</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.port.listening" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.port.listening</span><span class="metric-name">端口监听</span><span class="card-context">主机：node-fx03</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>3306</dd></div><div><dt>normalized_value</dt><dd>3306.0</dd></div><div><dt>unit</dt><dd>port</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.port.listening.ok</td></tr><tr><th scope="row">阈值 value</th><td>监听且进程匹配</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>ss -tlnp | grep 3306</td></tr><tr><th scope="row">证据 output_summary</th><td>LISTEN 0 128 0.0.0.0:3306 users:((&quot;mysqld&quot;))</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.port.listening.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R3</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.cpu.load_1m" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.load_1m</span><span class="metric-name">1 分钟负载</span><span class="card-context">主机：node-fx03</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0.12</dd></div><div><dt>normalized_value</dt><dd>0.12</dd></div><div><dt>unit</dt><dd>load</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.cpu.load_1m.ok</td></tr><tr><th scope="row">阈值 value</th><td>&lt;= 核数</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R7/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>cat /proc/loadavg; nproc</td></tr><tr><th scope="row">证据 output_summary</th><td>load average: 0.12, 0.10, 0.08 (nproc=8); 含特殊字符样例 a &lt; b &amp; c</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.load_1m.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R7</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div></section><section class="report-group status-group" data-group-value="WARN"><h2 class="group-title">状态：<span class="chip chip-warn">WARN</span></h2><div class="metric-card status-warn" data-status="WARN" data-host="node-fx01" data-metric-id="local.filesystem.used_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.filesystem.used_percent</span><span class="metric-name">磁盘使用率</span><span class="card-context">主机：node-fx01</span><span class="chip chip-warn">WARN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>78</dd></div><div><dt>normalized_value</dt><dd>78.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.filesystem.used_percent.warn</td></tr><tr><th scope="row">阈值 value</th><td>75–85%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R9/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>df -hT /opt/elasticsearch/data /opt/elasticsearch/logs</td></tr><tr><th scope="row">证据 output_summary</th><td>/dev/mapper/vg-data 78% 已用</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.filesystem.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R9</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div></section><section class="report-group status-group" data-group-value="CRIT"><h2 class="group-title">状态：<span class="chip chip-crit">CRIT</span></h2><div class="metric-card status-crit" data-status="CRIT" data-host="node-fx01" data-metric-id="local.memory.available_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.memory.available_percent</span><span class="metric-name">内存可用率</span><span class="card-context">主机：node-fx01</span><span class="chip chip-crit">CRIT</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>6.8</dd></div><div><dt>normalized_value</dt><dd>6.8</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.memory.available_percent.crit</td></tr><tr><th scope="row">阈值 value</th><td>&lt;10%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m</td></tr><tr><th scope="row">证据 output_summary</th><td>Mem: available 548MB / total 8064MB → 6.8%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.memory.available_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R4</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div></section><section class="report-group status-group" data-group-value="UNKNOWN"><h2 class="group-title">状态：<span class="chip chip-unknown">UNKNOWN</span></h2><div class="metric-card status-unknown" data-status="UNKNOWN" data-host="node-fx02" data-metric-id="local.cpu.load_1m" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.load_1m</span><span class="metric-name">1 分钟负载</span><span class="card-context">主机：node-fx02</span><span class="chip chip-unknown">UNKNOWN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>3.20</dd></div><div><dt>normalized_value</dt><dd>3.2</dd></div><div><dt>unit</dt><dd>load</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>unresolved-document-conflict</td></tr><tr><th scope="row">阈值 rule_id</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 value</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行（见 docs/reviews/docx-source-conflicts.md C5）</td></tr><tr><th scope="row">阈值 notes</th><td>load_1m 持续&gt;核数的判据在 9 份手册间不一致，默认 UNKNOWN</td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>cat /proc/loadavg; nproc</td></tr><tr><th scope="row">证据 output_summary</th><td>3.20 2.10 1.80 1/412 80321 (nproc=8)</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.load_1m.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES/Kafka/Mysql/Nacos/Rabbitmq/Rocketmq/Tomcat 巡检手册</td></tr><tr><th scope="row">来源 notes</th><td>文档冲突 C5 unresolved：默认 UNKNOWN，外部配置可覆盖</td></tr></table></details></div><div class="metric-card status-unknown" data-status="UNKNOWN" data-host="node-fx02" data-metric-id="local.logs.key_evidence" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.logs.key_evidence</span><span class="metric-name">关键日志证据</span><span class="card-context">主机：node-fx02</span><span class="chip chip-unknown">UNKNOWN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>normalized_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>unit</dt><dd>count</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 rule_id</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 value</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 source_anchor</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>tail -300 /opt/redis/logs/redis.log | egrep -i &#x27;ERROR|OutOfMemory&#x27;</td></tr><tr><th scope="row">证据 output_summary</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.logs.key_evidence.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:05+08:00</td></tr><tr><th scope="row">错误 code</th><td>PERMISSION_DENIED</td></tr><tr><th scope="row">错误 message</th><td>cannot read /opt/redis/logs/redis.log (permission denied)</td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Redis 巡检手册 v1.0 表T5R11</td></tr><tr><th scope="row">来源 notes</th><td>权限不足，指标 UNKNOWN，继续其余指标与主机</td></tr></table></details></div></section></div><div class="group-view" id="group-view-middleware" data-group-mode="middleware"><section class="report-group middleware-group" data-group-value="elasticsearch"><h2 class="group-title">中间件：elasticsearch</h2><div class="metric-card status-ok" data-status="OK" data-host="node-fx01" data-metric-id="local.cpu.utilization" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.utilization</span><span class="metric-name">CPU 使用率</span><span class="card-context">主机：node-fx01</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>12.5</dd></div><div><dt>normalized_value</dt><dd>12.5</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.cpu.utilization.ok</td></tr><tr><th scope="row">阈值 value</th><td>长期&lt;70% 且波动&lt;80%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>top -bn1 | head -20</td></tr><tr><th scope="row">证据 output_summary</th><td>Cpu(s): 12.5% us, 5.2% sy, 82.3% id</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.utilization.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R3</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx01" data-metric-id="local.swap.used_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.swap.used_percent</span><span class="metric-name">Swap 使用率</span><span class="card-context">主机：node-fx01</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0</dd></div><div><dt>normalized_value</dt><dd>0.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.swap.used_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>used=0（或未配置 swap）→ OK</td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行；swap=0 为部署基线（ES/部署规范）</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m Swap 行</td></tr><tr><th scope="row">证据 output_summary</th><td>used=0MB total=8191MB → 0%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.swap.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>9 份巡检手册 P0 内存行</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-warn" data-status="WARN" data-host="node-fx01" data-metric-id="local.filesystem.used_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.filesystem.used_percent</span><span class="metric-name">磁盘使用率</span><span class="card-context">主机：node-fx01</span><span class="chip chip-warn">WARN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>78</dd></div><div><dt>normalized_value</dt><dd>78.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.filesystem.used_percent.warn</td></tr><tr><th scope="row">阈值 value</th><td>75–85%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R9/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>df -hT /opt/elasticsearch/data /opt/elasticsearch/logs</td></tr><tr><th scope="row">证据 output_summary</th><td>/dev/mapper/vg-data 78% 已用</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.filesystem.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R9</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-crit" data-status="CRIT" data-host="node-fx01" data-metric-id="local.memory.available_percent" data-middleware="elasticsearch"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.memory.available_percent</span><span class="metric-name">内存可用率</span><span class="card-context">主机：node-fx01</span><span class="chip chip-crit">CRIT</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>6.8</dd></div><div><dt>normalized_value</dt><dd>6.8</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.memory.available_percent.crit</td></tr><tr><th scope="row">阈值 value</th><td>&lt;10%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹bb8ff97e</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m</td></tr><tr><th scope="row">证据 output_summary</th><td>Mem: available 548MB / total 8064MB → 6.8%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.memory.available_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES 巡检手册 v1.0 表T5R4</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div></section><section class="report-group middleware-group" data-group-value="redis"><h2 class="group-title">中间件：redis</h2><div class="metric-card status-unknown" data-status="UNKNOWN" data-host="node-fx02" data-metric-id="local.cpu.load_1m" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.load_1m</span><span class="metric-name">1 分钟负载</span><span class="card-context">主机：node-fx02</span><span class="chip chip-unknown">UNKNOWN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>3.20</dd></div><div><dt>normalized_value</dt><dd>3.2</dd></div><div><dt>unit</dt><dd>load</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>unresolved-document-conflict</td></tr><tr><th scope="row">阈值 rule_id</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 value</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行（见 docs/reviews/docx-source-conflicts.md C5）</td></tr><tr><th scope="row">阈值 notes</th><td>load_1m 持续&gt;核数的判据在 9 份手册间不一致，默认 UNKNOWN</td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>cat /proc/loadavg; nproc</td></tr><tr><th scope="row">证据 output_summary</th><td>3.20 2.10 1.80 1/412 80321 (nproc=8)</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.load_1m.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>ES/Kafka/Mysql/Nacos/Rabbitmq/Rocketmq/Tomcat 巡检手册</td></tr><tr><th scope="row">来源 notes</th><td>文档冲突 C5 unresolved：默认 UNKNOWN，外部配置可覆盖</td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx02" data-metric-id="local.memory.available_percent" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.memory.available_percent</span><span class="metric-name">内存可用率</span><span class="card-context">主机：node-fx02</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>62</dd></div><div><dt>normalized_value</dt><dd>62.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.memory.available_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>&gt;=20%</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Redis运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹e5cf1a4d</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m</td></tr><tr><th scope="row">证据 output_summary</th><td>Mem: available 5000MB / total 8064MB → 62%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.memory.available_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Redis 巡检手册 v1.0 表T5R4</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx02" data-metric-id="local.swap.used_percent" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.swap.used_percent</span><span class="metric-name">Swap 使用率</span><span class="card-context">主机：node-fx02</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0</dd></div><div><dt>normalized_value</dt><dd>0.0</dd></div><div><dt>unit</dt><dd>%</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.swap.used_percent.ok</td></tr><tr><th scope="row">阈值 value</th><td>used=0（或未配置 swap）→ OK</td></tr><tr><th scope="row">阈值 source_anchor</th><td>9 份巡检手册 P0 内存行；swap=0 为部署基线</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>free -m Swap 行</td></tr><tr><th scope="row">证据 output_summary</th><td>used=0MB total=4095MB → 0%</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.swap.used_percent.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:04+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>9 份巡检手册 P0 内存行</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-unknown" data-status="UNKNOWN" data-host="node-fx02" data-metric-id="local.logs.key_evidence" data-middleware="redis"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.logs.key_evidence</span><span class="metric-name">关键日志证据</span><span class="card-context">主机：node-fx02</span><span class="chip chip-unknown">UNKNOWN</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>normalized_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>unit</dt><dd>count</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 rule_id</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 value</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 source_anchor</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>tail -300 /opt/redis/logs/redis.log | egrep -i &#x27;ERROR|OutOfMemory&#x27;</td></tr><tr><th scope="row">证据 output_summary</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.logs.key_evidence.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:05+08:00</td></tr><tr><th scope="row">错误 code</th><td>PERMISSION_DENIED</td></tr><tr><th scope="row">错误 message</th><td>cannot read /opt/redis/logs/redis.log (permission denied)</td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Redis 巡检手册 v1.0 表T5R11</td></tr><tr><th scope="row">来源 notes</th><td>权限不足，指标 UNKNOWN，继续其余指标与主机</td></tr></table></details></div></section><section class="report-group middleware-group" data-group-value="mysql"><h2 class="group-title">中间件：mysql</h2><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.process.present" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.process.present</span><span class="metric-name">进程存在性</span><span class="card-context">主机：node-fx03</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>1</dd></div><div><dt>normalized_value</dt><dd>1.0</dd></div><div><dt>unit</dt><dd>count</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.process.present.ok</td></tr><tr><th scope="row">阈值 value</th><td>匹配进程行数 &gt;= 1</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R1/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>pgrep -fa &#x27;mysqld&#x27; || ps -ef | grep &#x27;[m]ysqld&#x27;</td></tr><tr><th scope="row">证据 output_summary</th><td>1 个匹配进程：mysqld --datadir=/opt/mysql/data</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.process.present.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td>inventory:group_vars/all/p0_thresholds.yml (未使用)</td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R1</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.service.active" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.service.active</span><span class="metric-name">服务活跃状态</span><span class="card-context">主机：node-fx03</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>active</dd></div><div><dt>normalized_value</dt><dd><span class="field-null">—</span></dd></div><div><dt>unit</dt><dd>state</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.service.active.ok</td></tr><tr><th scope="row">阈值 value</th><td>ActiveState=active</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R2/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>systemctl is-active mysqld; systemctl show -p ActiveState,SubState mysqld</td></tr><tr><th scope="row">证据 output_summary</th><td>active; ActiveState=active SubState=running</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.service.active.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:02+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R2</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.port.listening" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.port.listening</span><span class="metric-name">端口监听</span><span class="card-context">主机：node-fx03</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>3306</dd></div><div><dt>normalized_value</dt><dd>3306.0</dd></div><div><dt>unit</dt><dd>port</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.port.listening.ok</td></tr><tr><th scope="row">阈值 value</th><td>监听且进程匹配</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>ss -tlnp | grep 3306</td></tr><tr><th scope="row">证据 output_summary</th><td>LISTEN 0 128 0.0.0.0:3306 users:((&quot;mysqld&quot;))</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.port.listening.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R3</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div><div class="metric-card status-ok" data-status="OK" data-host="node-fx03" data-metric-id="local.cpu.load_1m" data-middleware="mysql"><div class="card-head"><h4 class="card-title"><span class="metric-id">local.cpu.load_1m</span><span class="metric-name">1 分钟负载</span><span class="card-context">主机：node-fx03</span><span class="chip chip-ok">OK</span></h4></div><dl class="card-values"><div><dt>raw_value</dt><dd>0.12</dd></div><div><dt>normalized_value</dt><dd>0.12</dd></div><div><dt>unit</dt><dd>load</dd></div></dl><table class="card-fields"><tr><th scope="row">阈值 layer</th><td>document-baseline</td></tr><tr><th scope="row">阈值 rule_id</th><td>linux-common-p0-v1.cpu.load_1m.ok</td></tr><tr><th scope="row">阈值 value</th><td>&lt;= 核数</td></tr><tr><th scope="row">阈值 source_anchor</th><td>巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R7/指纹67ae309b</td></tr><tr><th scope="row">阈值 notes</th><td><span class="field-null">—</span></td></tr></table><details class="card-details"><summary>证据与来源锚点</summary><table class="card-fields"><tr><th scope="row">证据 command</th><td>cat /proc/loadavg; nproc</td></tr><tr><th scope="row">证据 output_summary</th><td>load average: 0.12, 0.10, 0.08 (nproc=8); 含特殊字符样例 a &lt; b &amp; c</td></tr><tr><th scope="row">证据 raw_ref</th><td>raw/local.cpu.load_1m.out</td></tr><tr><th scope="row">证据 sampled_at</th><td>2026-08-14T12:00:03+08:00</td></tr><tr><th scope="row">错误 code</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">错误 message</th><td><span class="field-null">—</span></td></tr><tr><th scope="row">来源 config_sources</th><td></td></tr><tr><th scope="row">来源 doc_sources</th><td>Mysql 巡检手册 v1.0 表T5R7</td></tr><tr><th scope="row">来源 notes</th><td><span class="field-null">—</span></td></tr></table></details></div></section></div>
+    </section>
+
+    <footer class="site-footer">生成时间：2026-08-18T20:56:26+08:00</footer>
+  </main>
+</div>
+
+<!-- 内嵌 JSON 事实源（只读展示数据，展示层不做二次计算；RR §4 / TD §8） -->
+<script type="application/json" id="inspection-data">[
+ {
+  "schema": "host-result-v1",
+  "schema_version": 1,
+  "run_id": "run-20260814-001",
+  "inspection_id": "insp-20260814120000-node-fx01",
+  "host": {
+   "name": "node-fx01",
+   "ip": "\u003cIP>",
+   "inventory_source": "local",
+   "product_profiles": [
+    "elasticsearch"
+   ]
+  },
+  "collected_at": "2026-08-14T12:00:00+08:00",
+  "duration_sec": 12.34,
+  "execution_status": "SUCCESS",
+  "execution_summary": {
+   "total_metrics": 4,
+   "ok": 2,
+   "warn": 1,
+   "crit": 1,
+   "unknown": 0,
+   "executed": 4,
+   "failed": 0
+  },
+  "metrics": [
+   {
+    "metric_id": "local.cpu.utilization",
+    "name": "CPU 使用率",
+    "scope": "local-common-p0-v1",
+    "status": "OK",
+    "raw_value": "12.5",
+    "normalized_value": 12.5,
+    "unit": "%",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.cpu.utilization.ok",
+     "value": "长期\u003c70% 且波动\u003c80%",
+     "source_anchor": "巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹bb8ff97e",
+     "notes": null
+    },
+    "evidence": {
+     "command": "top -bn1 | head -20",
+     "output_summary": "Cpu(s): 12.5% us, 5.2% sy, 82.3% id",
+     "raw_ref": "raw/local.cpu.utilization.out",
+     "sampled_at": "2026-08-14T12:00:02+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "ES 巡检手册 v1.0 表T5R3"
+     ],
+     "notes": null
+    }
+   },
+   {
+    "metric_id": "local.swap.used_percent",
+    "name": "Swap 使用率",
+    "scope": "local-common-p0-v1",
+    "status": "OK",
+    "raw_value": "0",
+    "normalized_value": 0.0,
+    "unit": "%",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.swap.used_percent.ok",
+     "value": "used=0（或未配置 swap）→ OK",
+     "source_anchor": "9 份巡检手册 P0 内存行；swap=0 为部署基线（ES/部署规范）",
+     "notes": null
+    },
+    "evidence": {
+     "command": "free -m Swap 行",
+     "output_summary": "used=0MB total=8191MB → 0%",
+     "raw_ref": "raw/local.swap.used_percent.out",
+     "sampled_at": "2026-08-14T12:00:02+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "9 份巡检手册 P0 内存行"
+     ],
+     "notes": null
+    }
+   },
+   {
+    "metric_id": "local.filesystem.used_percent",
+    "name": "磁盘使用率",
+    "scope": "local-common-p0-v1",
+    "status": "WARN",
+    "raw_value": "78",
+    "normalized_value": 78.0,
+    "unit": "%",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.filesystem.used_percent.warn",
+     "value": "75–85%",
+     "source_anchor": "巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R9/指纹bb8ff97e",
+     "notes": null
+    },
+    "evidence": {
+     "command": "df -hT /opt/elasticsearch/data /opt/elasticsearch/logs",
+     "output_summary": "/dev/mapper/vg-data 78% 已用",
+     "raw_ref": "raw/local.filesystem.used_percent.out",
+     "sampled_at": "2026-08-14T12:00:03+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "ES 巡检手册 v1.0 表T5R9"
+     ],
+     "notes": null
+    }
+   },
+   {
+    "metric_id": "local.memory.available_percent",
+    "name": "内存可用率",
+    "scope": "local-common-p0-v1",
+    "status": "CRIT",
+    "raw_value": "6.8",
+    "normalized_value": 6.8,
+    "unit": "%",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.memory.available_percent.crit",
+     "value": "\u003c10%",
+     "source_anchor": "巡检手册/安徽农金Elasticsearch运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹bb8ff97e",
+     "notes": null
+    },
+    "evidence": {
+     "command": "free -m",
+     "output_summary": "Mem: available 548MB / total 8064MB → 6.8%",
+     "raw_ref": "raw/local.memory.available_percent.out",
+     "sampled_at": "2026-08-14T12:00:03+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "ES 巡检手册 v1.0 表T5R4"
+     ],
+     "notes": null
+    }
+   }
+  ],
+  "meta": {
+   "control_endpoint": "Linux/WSL Python3",
+   "gather_facts": false,
+   "serial": 1,
+   "become_scope": "minimal",
+   "generator": "inspect.sh",
+   "generator_version": "0.1.0-draft"
+  }
+ },
+ {
+  "schema": "host-result-v1",
+  "schema_version": 1,
+  "run_id": "run-20260814-001",
+  "inspection_id": "insp-20260814120000-node-fx01",
+  "host": {
+   "name": "node-fx02",
+   "ip": "\u003cIP>",
+   "inventory_source": "local",
+   "product_profiles": [
+    "redis"
+   ]
+  },
+  "collected_at": "2026-08-14T12:00:00+08:00",
+  "duration_sec": 15.02,
+  "execution_status": "PARTIAL",
+  "execution_summary": {
+   "total_metrics": 4,
+   "ok": 2,
+   "warn": 0,
+   "crit": 0,
+   "unknown": 2,
+   "executed": 3,
+   "failed": 1
+  },
+  "metrics": [
+   {
+    "metric_id": "local.cpu.load_1m",
+    "name": "1 分钟负载",
+    "scope": "local-common-p0-v1",
+    "status": "UNKNOWN",
+    "raw_value": "3.20",
+    "normalized_value": 3.2,
+    "unit": "load",
+    "threshold": {
+     "layer": "unresolved-document-conflict",
+     "rule_id": null,
+     "value": null,
+     "source_anchor": "9 份巡检手册 P0 内存行（见 docs/reviews/docx-source-conflicts.md C5）",
+     "notes": "load_1m 持续>核数的判据在 9 份手册间不一致，默认 UNKNOWN"
+    },
+    "evidence": {
+     "command": "cat /proc/loadavg; nproc",
+     "output_summary": "3.20 2.10 1.80 1/412 80321 (nproc=8)",
+     "raw_ref": "raw/local.cpu.load_1m.out",
+     "sampled_at": "2026-08-14T12:00:03+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "ES/Kafka/Mysql/Nacos/Rabbitmq/Rocketmq/Tomcat 巡检手册"
+     ],
+     "notes": "文档冲突 C5 unresolved：默认 UNKNOWN，外部配置可覆盖"
+    }
+   },
+   {
+    "metric_id": "local.memory.available_percent",
+    "name": "内存可用率",
+    "scope": "local-common-p0-v1",
+    "status": "OK",
+    "raw_value": "62",
+    "normalized_value": 62.0,
+    "unit": "%",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.memory.available_percent.ok",
+     "value": ">=20%",
+     "source_anchor": "巡检手册/安徽农金Redis运维巡检手册v1.0.docx §三(二)P0/表T5R4/指纹e5cf1a4d",
+     "notes": null
+    },
+    "evidence": {
+     "command": "free -m",
+     "output_summary": "Mem: available 5000MB / total 8064MB → 62%",
+     "raw_ref": "raw/local.memory.available_percent.out",
+     "sampled_at": "2026-08-14T12:00:03+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "Redis 巡检手册 v1.0 表T5R4"
+     ],
+     "notes": null
+    }
+   },
+   {
+    "metric_id": "local.swap.used_percent",
+    "name": "Swap 使用率",
+    "scope": "local-common-p0-v1",
+    "status": "OK",
+    "raw_value": "0",
+    "normalized_value": 0.0,
+    "unit": "%",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.swap.used_percent.ok",
+     "value": "used=0（或未配置 swap）→ OK",
+     "source_anchor": "9 份巡检手册 P0 内存行；swap=0 为部署基线",
+     "notes": null
+    },
+    "evidence": {
+     "command": "free -m Swap 行",
+     "output_summary": "used=0MB total=4095MB → 0%",
+     "raw_ref": "raw/local.swap.used_percent.out",
+     "sampled_at": "2026-08-14T12:00:04+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "9 份巡检手册 P0 内存行"
+     ],
+     "notes": null
+    }
+   },
+   {
+    "metric_id": "local.logs.key_evidence",
+    "name": "关键日志证据",
+    "scope": "local-common-p0-v1",
+    "status": "UNKNOWN",
+    "raw_value": null,
+    "normalized_value": null,
+    "unit": "count",
+    "threshold": {
+     "layer": null,
+     "rule_id": null,
+     "value": null,
+     "source_anchor": null,
+     "notes": null
+    },
+    "evidence": {
+     "command": "tail -300 /opt/redis/logs/redis.log | egrep -i 'ERROR|OutOfMemory'",
+     "output_summary": null,
+     "raw_ref": "raw/local.logs.key_evidence.out",
+     "sampled_at": "2026-08-14T12:00:05+08:00"
+    },
+    "error": {
+     "code": "PERMISSION_DENIED",
+     "message": "cannot read /opt/redis/logs/redis.log (permission denied)",
+     "metric_status": "UNKNOWN"
+    },
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "Redis 巡检手册 v1.0 表T5R11"
+     ],
+     "notes": "权限不足，指标 UNKNOWN，继续其余指标与主机"
+    }
+   }
+  ],
+  "meta": {
+   "control_endpoint": "Linux/WSL Python3",
+   "gather_facts": false,
+   "serial": 1,
+   "become_scope": "minimal",
+   "generator": "inspect.sh",
+   "generator_version": "0.1.0-draft"
+  }
+ },
+ {
+  "schema": "host-result-v1",
+  "schema_version": 1,
+  "run_id": "run-20260814-001",
+  "inspection_id": "insp-20260814120000-node-fx01",
+  "host": {
+   "name": "node-fx03",
+   "ip": "\u003cIP>",
+   "inventory_source": "local",
+   "product_profiles": [
+    "mysql"
+   ]
+  },
+  "collected_at": "2026-08-14T12:00:00+08:00",
+  "duration_sec": 11.87,
+  "execution_status": "SUCCESS",
+  "execution_summary": {
+   "total_metrics": 4,
+   "ok": 4,
+   "warn": 0,
+   "crit": 0,
+   "unknown": 0,
+   "executed": 4,
+   "failed": 0
+  },
+  "metrics": [
+   {
+    "metric_id": "local.process.present",
+    "name": "进程存在性",
+    "scope": "local-common-p0-v1",
+    "status": "OK",
+    "raw_value": "1",
+    "normalized_value": 1.0,
+    "unit": "count",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.process.present.ok",
+     "value": "匹配进程行数 >= 1",
+     "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R1/指纹67ae309b",
+     "notes": null
+    },
+    "evidence": {
+     "command": "pgrep -fa 'mysqld' || ps -ef | grep '[m]ysqld'",
+     "output_summary": "1 个匹配进程：mysqld --datadir=/opt/mysql/data",
+     "raw_ref": "raw/local.process.present.out",
+     "sampled_at": "2026-08-14T12:00:02+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [
+      "inventory:group_vars/all/p0_thresholds.yml (未使用)"
+     ],
+     "doc_sources": [
+      "Mysql 巡检手册 v1.0 表T5R1"
+     ],
+     "notes": null
+    }
+   },
+   {
+    "metric_id": "local.service.active",
+    "name": "服务活跃状态",
+    "scope": "local-common-p0-v1",
+    "status": "OK",
+    "raw_value": "active",
+    "normalized_value": null,
+    "unit": "state",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.service.active.ok",
+     "value": "ActiveState=active",
+     "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R2/指纹67ae309b",
+     "notes": null
+    },
+    "evidence": {
+     "command": "systemctl is-active mysqld; systemctl show -p ActiveState,SubState mysqld",
+     "output_summary": "active; ActiveState=active SubState=running",
+     "raw_ref": "raw/local.service.active.out",
+     "sampled_at": "2026-08-14T12:00:02+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "Mysql 巡检手册 v1.0 表T5R2"
+     ],
+     "notes": null
+    }
+   },
+   {
+    "metric_id": "local.port.listening",
+    "name": "端口监听",
+    "scope": "local-common-p0-v1",
+    "status": "OK",
+    "raw_value": "3306",
+    "normalized_value": 3306.0,
+    "unit": "port",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.port.listening.ok",
+     "value": "监听且进程匹配",
+     "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R3/指纹67ae309b",
+     "notes": null
+    },
+    "evidence": {
+     "command": "ss -tlnp | grep 3306",
+     "output_summary": "LISTEN 0 128 0.0.0.0:3306 users:((\"mysqld\"))",
+     "raw_ref": "raw/local.port.listening.out",
+     "sampled_at": "2026-08-14T12:00:03+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "Mysql 巡检手册 v1.0 表T5R3"
+     ],
+     "notes": null
+    }
+   },
+   {
+    "metric_id": "local.cpu.load_1m",
+    "name": "1 分钟负载",
+    "scope": "local-common-p0-v1",
+    "status": "OK",
+    "raw_value": "0.12",
+    "normalized_value": 0.12,
+    "unit": "load",
+    "threshold": {
+     "layer": "document-baseline",
+     "rule_id": "linux-common-p0-v1.cpu.load_1m.ok",
+     "value": "\u003c= 核数",
+     "source_anchor": "巡检手册/安徽农金Mysql运维巡检手册v1.0.docx §三(二)P0/表T5R7/指纹67ae309b",
+     "notes": null
+    },
+    "evidence": {
+     "command": "cat /proc/loadavg; nproc",
+     "output_summary": "load average: 0.12, 0.10, 0.08 (nproc=8); 含特殊字符样例 a \u003c b & c",
+     "raw_ref": "raw/local.cpu.load_1m.out",
+     "sampled_at": "2026-08-14T12:00:03+08:00"
+    },
+    "error": null,
+    "provenance": {
+     "config_sources": [],
+     "doc_sources": [
+      "Mysql 巡检手册 v1.0 表T5R7"
+     ],
+     "notes": null
+    }
+   }
+  ],
+  "meta": {
+   "control_endpoint": "Linux/WSL Python3",
+   "gather_facts": false,
+   "serial": 1,
+   "become_scope": "minimal",
+   "generator": "inspect.sh",
+   "generator_version": "0.1.0-draft"
+  }
+ }
+]</script>
+<script>
+(function () {
+  "use strict";
+  /* 仅做筛选显隐、搜索和分组视图切换；业务计数由 Python 渲染期写入。 */
+  var filters = { status: {}, host: {}, middleware: {} };
+
+  function selected(set) {
+    return Object.keys(set).length > 0;
+  }
+
+  function matches(set, value) {
+    if (!selected(set)) { return true; }
+    return set[value] === true;
+  }
+
+  function middlewareMatches(set, value) {
+    var values = (value || "").split("|");
+    var i;
+    if (!selected(set)) { return true; }
+    for (i = 0; i < values.length; i += 1) {
+      if (set[values[i]] === true) { return true; }
+    }
+    return false;
+  }
+
+  function applyFilters() {
+    var activeView = document.querySelector(".group-view.active");
+    var cards, errors, groups, i, card, error, visible, groupCards, j, anyVisible;
+    if (!activeView) { return; }
+    cards = activeView.querySelectorAll(".metric-card");
+    for (i = 0; i < cards.length; i += 1) {
+      card = cards[i];
+      visible = matches(filters.status, card.getAttribute("data-status")) &&
+                matches(filters.host, card.getAttribute("data-host")) &&
+                middlewareMatches(filters.middleware, card.getAttribute("data-middleware"));
+      if (visible) { card.classList.remove("hidden"); }
+      else { card.classList.add("hidden"); }
+    }
+    errors = activeView.querySelectorAll(".host-error");
+    for (i = 0; i < errors.length; i += 1) {
+      error = errors[i];
+      visible = matches(filters.host, error.getAttribute("data-host")) &&
+                matches(filters.status, error.getAttribute("data-status")) &&
+                middlewareMatches(filters.middleware, error.getAttribute("data-middleware"));
+      if (visible) { error.classList.remove("hidden"); }
+      else { error.classList.add("hidden"); }
+    }
+    groups = activeView.querySelectorAll(".report-group");
+    for (i = 0; i < groups.length; i += 1) {
+      groupCards = groups[i].querySelectorAll(".metric-card");
+      errors = groups[i].querySelectorAll(".host-error");
+      anyVisible = false;
+      for (j = 0; j < groupCards.length; j += 1) {
+        if (!groupCards[j].classList.contains("hidden")) { anyVisible = true; break; }
+      }
+      if (!anyVisible) {
+        for (j = 0; j < errors.length; j += 1) {
+          if (!errors[j].classList.contains("hidden")) { anyVisible = true; break; }
+        }
+      }
+      if (anyVisible) { groups[i].classList.remove("hidden"); }
+      else { groups[i].classList.add("hidden"); }
+    }
+  }
+
+  function updateSelectionCounts() {
+    var containers = document.querySelectorAll(".multi-select");
+    var i, kind, count, summaryCount;
+    for (i = 0; i < containers.length; i += 1) {
+      kind = containers[i].getAttribute("data-filter-kind");
+      count = Object.keys(filters[kind] || {}).length;
+      summaryCount = containers[i].querySelector(".selection-count");
+      if (summaryCount) { summaryCount.textContent = count ? ("已选 " + count) : "未选择"; }
+    }
+  }
+
+  function bindChecks() {
+    var checks = document.querySelectorAll(".filter-check");
+    var i;
+    for (i = 0; i < checks.length; i += 1) {
+      checks[i].addEventListener("change", function () {
+        var kind = this.getAttribute("data-filter-kind");
+        var value = this.getAttribute("data-filter-value");
+        if (!kind || !value) { return; }
+        if (this.checked) { filters[kind][value] = true; }
+        else { delete filters[kind][value]; }
+        updateSelectionCounts();
+        applyFilters();
+      });
+    }
+  }
+
+  function bindSearches() {
+    var searches = document.querySelectorAll(".filter-search");
+    var i;
+    for (i = 0; i < searches.length; i += 1) {
+      searches[i].addEventListener("input", function () {
+        var kind = this.getAttribute("data-search-kind");
+        var query = this.value.toLowerCase();
+        var options = document.querySelectorAll('.filter-option');
+        var j, option, optionKind;
+        for (j = 0; j < options.length; j += 1) {
+          option = options[j];
+          optionKind = option.querySelector("input").getAttribute("data-filter-kind");
+          if (optionKind !== kind) { continue; }
+          if (option.textContent.toLowerCase().indexOf(query) >= 0) {
+            option.classList.remove("hidden");
+          } else { option.classList.add("hidden"); }
+        }
+      });
+    }
+  }
+
+  var resetBtn = document.getElementById("filter-reset");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", function () {
+      filters = { status: {}, host: {}, middleware: {} };
+      var checks = document.querySelectorAll(".filter-check");
+      var searches = document.querySelectorAll(".filter-search");
+      var options = document.querySelectorAll(".filter-option");
+      var i;
+      for (i = 0; i < checks.length; i += 1) { checks[i].checked = false; }
+      for (i = 0; i < searches.length; i += 1) { searches[i].value = ""; }
+      for (i = 0; i < options.length; i += 1) { options[i].classList.remove("hidden"); }
+      updateSelectionCounts();
+      applyFilters();
+    });
+  }
+
+  var modeSelect = document.getElementById("group-by-select");
+  if (modeSelect) {
+    modeSelect.addEventListener("change", function () {
+      var views = document.querySelectorAll(".group-view");
+      var i, view;
+      for (i = 0; i < views.length; i += 1) {
+        view = views[i];
+        if (view.getAttribute("data-group-mode") === modeSelect.value) {
+          view.classList.add("active");
+        } else { view.classList.remove("active"); }
+      }
+      applyFilters();
+    });
+  }
+
+  /* 点击指标卡片展开/收起证据与来源锚点。 */
+  function bindCardToggle() {
+    var cards = document.querySelectorAll(".metric-card");
+    var i;
+    for (i = 0; i < cards.length; i += 1) {
+      (function (card) {
+        card.addEventListener("click", function (ev) {
+          if (ev.target.closest("details")) { return; }
+          var details = card.querySelector(".card-details");
+          if (details) {
+            if (details.hasAttribute("open")) { details.removeAttribute("open"); }
+            else { details.setAttribute("open", "open"); }
+          }
+          card.classList.toggle("expanded");
+        });
+      })(cards[i]);
+    }
+  }
+  bindChecks();
+  bindSearches();
+  bindCardToggle();
+  updateSelectionCounts();
+  applyFilters();
+
+  /* 打印友好：默认只打印宏观摘要；勾选后打印当前分组详情。 */
+  var printToggle = document.getElementById("print-details-toggle");
+  if (printToggle) {
+    printToggle.addEventListener("change", function () {
+      if (printToggle.checked) { document.body.classList.add("print-details"); }
+      else { document.body.classList.remove("print-details"); }
+    });
+  }
+})();
+</script>
+</body>
+</html>

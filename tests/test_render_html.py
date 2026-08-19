@@ -318,6 +318,47 @@ class TestLayout:
         assert "来源 doc_sources" not in body
         assert "PERMISSION_DENIED" not in body
         assert "测量对象：" in body
+        assert "host host" not in body
+        assert "threshold_rule threshold_rule" not in body
+        assert "command command" not in body
+
+    def test_short_fields_are_compact_and_long_fields_remain_rows(self, tmp_path):
+        """短字段改为上标签下值，threshold_rule/command 保持长行展示。"""
+        body = body_text(render_str(fixture_docs(), tmp_path))
+        assert 'class="card-short-fields"' in body
+        assert 'class="short-field-label">host</span>' in body
+        assert 'class="short-field-label">normalized_value</span>' in body
+        assert '<table class="card-fields"><tbody>' in body
+        assert '<th scope="row">threshold_rule</th>' in body
+        assert '<th scope="row">command</th>' in body
+
+    def test_inventory_ips_override_redacted_fact_source_ip(self, tmp_path):
+        """HTML 与 Excel 一样，使用 inventory 的展示 IP 覆盖事实源 <IP>。"""
+        docs = fixture_docs()
+        out = tmp_path / "with-ip.html"
+        rh.render_html(
+            docs,
+            out_path=out,
+            host_ips={
+                "node-fx01": "192.0.2.101",
+                "node-fx02": "192.0.2.102",
+                "node-fx03": "192.0.2.103",
+            },
+        )
+        body = body_text(out.read_text(encoding="utf-8"))
+        assert "192.0.2.101" in body
+        assert "192.0.2.102" in body
+        assert "192.0.2.103" in body
+        assert 'short-field-label">ip</span><span class="short-field-value">&lt;IP&gt;' not in body
+
+    def test_metric_cards_use_three_column_grid(self, tmp_path):
+        """指标卡片使用三列响应式网格，并保持错误提示跨整行。"""
+        s = render_str(fixture_docs(), tmp_path)
+        assert 'class="metric-grid"' in s
+        template = TEMPLATE.read_text(encoding="utf-8")
+        assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in template
+        assert ".metric-grid > .host-error { grid-column: 1 / -1; }" in template
+        assert "@media (max-width: 760px)" in template
 
     def test_cards_carry_filter_attributes(self, tmp_path):
         s = render_str(fixture_docs(), tmp_path)

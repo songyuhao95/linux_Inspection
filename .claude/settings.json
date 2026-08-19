@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "C:/Users/SYH/.assembly-development/scripts/hooks/hook-pretool.mjs"
+            ]
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "general-purpose",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "C:/Users/SYH/.assembly-development/scripts/hooks/hook-subagent-stop.mjs"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

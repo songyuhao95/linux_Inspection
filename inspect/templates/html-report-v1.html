@@ -153,6 +153,13 @@ body {
 .group-title { font-size: 17px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
 .host-section { margin-bottom: 28px; }
 .host-title { font-size: 17px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+.metric-grid > .host-error { grid-column: 1 / -1; }
 .host-meta { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; word-break: break-all; }
 .host-error {
   margin: 0 0 10px; padding: 10px 12px; border: 1px solid #C62828;
@@ -164,7 +171,8 @@ body {
 .metric-card {
   background: var(--card-bg); border: 1px solid var(--border);
   border-left: 4px solid var(--status-unknown);
-  border-radius: 8px; padding: 12px 16px; margin-bottom: 10px;
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 0;
+  min-width: 0;
   cursor: pointer;
 }
 .metric-card.status-ok      { border-left-color: #2E7D32; }
@@ -187,13 +195,29 @@ body {
 .card-values dd { margin: 0; font-family: Consolas, "Courier New", monospace; }
 .card-values dd.null-value { color: #adb5bd; }
 
-.card-fields { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+.card-short-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 10px;
+  margin-top: 10px;
+}
+.short-field { min-width: 0; }
+.short-field-label {
+  display: block; color: var(--text-dim); font-size: 11px;
+  line-height: 1.2; margin-bottom: 3px;
+}
+.short-field-value {
+  display: block; font-size: 12px; line-height: 1.35;
+  font-family: Consolas, "Courier New", monospace;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.card-fields { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
 .card-fields th {
-  text-align: left; width: 150px; min-width: 150px;
+  text-align: left; width: 120px; min-width: 120px;
   color: var(--text-dim); font-weight: 500;
   padding: 3px 8px 3px 0; vertical-align: top;
 }
-.card-fields td { padding: 3px 0; word-break: break-all; }
+.card-fields td { padding: 3px 0; word-break: break-word; overflow-wrap: anywhere; }
 .card-fields tr { border-top: 1px dashed #eceef1; }
 .card-fields tr:first-child { border-top: none; }
 .field-null { color: #adb5bd; }
@@ -219,12 +243,21 @@ body {
 footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); }
 
 /* ---------------- 打印友好（RR §4）：默认宏观摘要，详情可展开 ---------------- */
+@media (max-width: 1200px) {
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .metric-grid { grid-template-columns: 1fr; }
+  .card-short-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media print {
   .nav, .toolbar { display: none; }
   body { background: #ffffff; font-size: 12px; }
   .layout { display: block; }
   .content { padding: 0; }
   .host-section { break-inside: avoid; margin-bottom: 16px; }
+  .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .metric-card { break-inside: avoid; }
   .host-detail, .group-view:not(.active) { display: none; }
   body.print-details .host-detail, body.print-details .group-view.active { display: block; }

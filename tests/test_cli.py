@@ -300,14 +300,14 @@ def test_host_ips_comes_from_resolved_host_selection():
     }
 
 
-def test_run_inspection_passes_inventory_ips_to_xlsx_renderer(monkeypatch, tmp_path):
+def test_run_inspection_passes_inventory_ips_to_report_renderers(monkeypatch, tmp_path):
     selection = cli.inventory_mod.HostSelection(
         kind="inventory",
         inventory_file=tmp_path / "inventory.ini",
         hosts=[cli.inventory_mod.HostEntry("node-01", "192.0.2.10")],
     )
     doc = {"metrics": [{"status": "OK"}]}
-    captured = {}
+    captured = {"xlsx": {}, "html": {}}
 
     monkeypatch.setattr(cli.config_mod, "load_inspect_config", lambda: {"out_dir": tmp_path / "out"})
     monkeypatch.setattr(cli.config_mod, "build_resolved_thresholds", lambda: {})
@@ -337,15 +337,25 @@ def test_run_inspection_passes_inventory_ips_to_xlsx_renderer(monkeypatch, tmp_p
     monkeypatch.setattr(cli.fact_source_mod, "read_host_result", lambda *_args: doc)
     monkeypatch.setattr(cli.stdout_mod, "render_inspection_report", lambda *_args, **_kwargs: "summary")
 
-    def fake_render(docs, *, out_path, host_ips):
-        captured.update(docs=docs, out_path=out_path, host_ips=host_ips)
+    def fake_xlsx(docs, *, out_path, host_ips):
+        captured["xlsx"].update(docs=docs, out_path=out_path, host_ips=host_ips)
 
-    monkeypatch.setattr(cli.xlsx_mod, "render_xlsx", fake_render)
+    def fake_html(docs, *, out_path, host_ips):
+        captured["html"].update(docs=docs, out_path=out_path, host_ips=host_ips)
 
-    ns = Namespace(excel=str(tmp_path / "report.xlsx"), html=None, fail_on=False)
+    monkeypatch.setattr(cli.xlsx_mod, "render_xlsx", fake_xlsx)
+    monkeypatch.setattr(cli.html_mod, "render_html", fake_html)
+
+    ns = Namespace(
+        excel=str(tmp_path / "report.xlsx"),
+        html=str(tmp_path / "report.html"),
+        fail_on=False,
+    )
     assert cli.run_inspection(ns, {"kind": "inventory", "inventory": "inventory.ini"}) == cli.EXIT_OK
-    assert captured["host_ips"] == {"node-01": "192.0.2.10"}
-    assert captured["out_path"] == tmp_path / "report.xlsx"
+    assert captured["xlsx"]["host_ips"] == {"node-01": "192.0.2.10"}
+    assert captured["xlsx"]["out_path"] == tmp_path / "report.xlsx"
+    assert captured["html"]["host_ips"] == {"node-01": "192.0.2.10"}
+    assert captured["html"]["out_path"] == tmp_path / "report.html"
 
 
 # ---------------------------------------------------------------- 退出码映射（单元）

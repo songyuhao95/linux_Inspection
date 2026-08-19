@@ -348,7 +348,11 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     if ns.html is not None:
         html_path = _report_output_path(ns.html, inspection_id, ".html")
         try:
-            html_mod.render_html(facts_docs, out_path=html_path)
+            html_mod.render_html(
+                facts_docs,
+                out_path=html_path,
+                host_ips=_host_ips(host_selection),
+            )
         except html_mod.RenderHtmlError as exc:
             print(f"inspect.sh: 执行失败: {exc}", file=sys.stderr)
             execution_error = True

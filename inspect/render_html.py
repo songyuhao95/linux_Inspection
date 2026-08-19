@@ -66,6 +66,8 @@ _METRIC_FIELDS: Sequence[tuple] = (
     ("threshold_rule", "threshold_rule"),
     ("command", "command"),
 )
+_SHORT_METRIC_FIELDS: Sequence[tuple] = _METRIC_FIELDS[:8]
+_LONG_METRIC_FIELDS: Sequence[tuple] = _METRIC_FIELDS[8:]
 
 
 class RenderHtmlError(Exception):
@@ -181,22 +183,31 @@ def _chip(status: str) -> str:
 
 
 def _field_rows(obj: Any, fields: Sequence[tuple]) -> str:
-    """指标卡片字段行（label + key，值统一 HTML 转义）。"""
+    """长字段表格行；字段名只展示一次，避免出现 ``host host``。"""
     obj = obj if isinstance(obj, Mapping) else {}
     rows: List[str] = []
     for label, key in fields:
         value = obj.get(key)
-        if value is None:
-            rows.append(
-                '<tr><th scope="row">' + esc(label) + " " + esc(key)
-                + '</th><td><span class="field-null">—</span></td></tr>'
-            )
-        else:
-            rows.append(
-                '<tr><th scope="row">' + esc(label) + " " + esc(key)
-                + "</th><td>" + esc(_fmt(value)) + "</td></tr>"
-            )
+        rendered_value = _value_or_dash(value)
+        rows.append(
+            '<tr><th scope="row">' + esc(label)
+            + '</th><td>' + rendered_value + '</td></tr>'
+        )
     return "".join(rows)
+
+
+def _short_field_blocks(obj: Any, fields: Sequence[tuple]) -> str:
+    """短字段块：字段名在上、字段值在下，适合卡片紧凑横向展示。"""
+    obj = obj if isinstance(obj, Mapping) else {}
+    blocks: List[str] = []
+    for label, key in fields:
+        blocks.append(
+            '<div class="short-field">'
+            '<span class="short-field-label">' + esc(label) + '</span>'
+            '<span class="short-field-value">' + _value_or_dash(obj.get(key)) + '</span>'
+            '</div>'
+        )
+    return "".join(blocks)
 
 
 def _as_strings(value: Any) -> List[str]:
@@ -298,7 +309,12 @@ def _metric_card(
         '<span class="metric-id">' + esc(metric_id) + "</span>"
         '<span class="metric-name">' + esc(name) + "</span>"
         + context + _chip(status) + "</h4></div>",
-        '<table class="card-fields">' + _field_rows(local_fields, _METRIC_FIELDS) + "</table>",
+        '<div class="card-short-fields">'
+        + _short_field_blocks(local_fields, _SHORT_METRIC_FIELDS)
+        + "</div>",
+        '<table class="card-fields"><tbody>'
+        + _field_rows(local_fields, _LONG_METRIC_FIELDS)
+        + "</tbody></table>",
         "</div>",
     ])
 
@@ -375,11 +391,28 @@ def _host_error_block(doc: Mapping[str, Any], *, show_host: bool = False) -> str
     )
 
 
-def _host_section(doc: Mapping[str, Any]) -> str:
+def _display_host_ip(doc: Mapping[str, Any], host_ips: Optional[Mapping[str, str]] = None) -> str:
+    """Resolve the report-only IP from inventory, falling back to fact-source IP."""
+    host = doc.get("host") or {}
+    host_name = str(host.get("name", ""))
+    mapped = host_ips.get(host_name) if host_ips else None
+    if mapped not in (None, ""):
+        return str(mapped)
+    return str(host.get("ip") or "")
+
+
+def _metric_grid(cards: Sequence[str]) -> str:
+    """将指标卡片放入响应式网格，桌面端默认每行三张。"""
+    if not cards:
+        return ""
+    return '<div class="metric-grid">' + "".join(cards) + "</div>"
+
+
+def _host_section(doc: Mapping[str, Any], host_ips: Optional[Mapping[str, str]] = None) -> str:
     """按主机分组的单一大卡片：摘要与 Excel 字段指标统一展示。"""
     host = doc.get("host") or {}
     host_name = host.get("name", "")
-    host_ip = host.get("ip", "")
+    host_ip = _display_host_ip(doc, host_ips)
     cards = [
         _metric_card(m, host_name, host_ip, _middleware_values(doc, m))
         for m in doc.get("metrics") or []
@@ -390,7 +423,7 @@ def _host_section(doc: Mapping[str, Any]) -> str:
         + '" id="host-' + esc(host_name) + '">',
         _host_summary(doc),
         error_block,
-        "".join(cards),
+        _metric_grid(cards),
         "</section>",
     ])
 
@@ -524,7 +557,10 @@ def _middleware_nav(docs: Sequence[Mapping[str, Any]]) -> str:
 
 
 
-def _status_details(docs: Sequence[Mapping[str, Any]]) -> str:
+def _status_details(
+    docs: Sequence[Mapping[str, Any]],
+    host_ips: Optional[Mapping[str, str]] = None,
+) -> str:
     parts: List[str] = []
     for status in STATUSES:
         cards: List[str] = []
@@ -538,18 +574,21 @@ def _status_details(docs: Sequence[Mapping[str, Any]]) -> str:
                 metric_status = metric.get("status") if metric.get("status") in STATUSES else "UNKNOWN"
                 if metric_status == status:
                     cards.append(_metric_card(
-                        metric, host_name, (doc.get("host") or {}).get("ip", ""), _middleware_values(doc, metric), show_host=True
+                        metric, host_name, _display_host_ip(doc, host_ips), _middleware_values(doc, metric), show_host=True
                     ))
         if cards:
             parts.append(
                 '<section class="report-group status-group" data-group-value="' + esc(status) + '">'
                 '<h2 class="group-title">状态：' + _chip(status) + '</h2>'
-                + "".join(cards) + "</section>"
+                + _metric_grid(cards) + "</section>"
             )
     return "".join(parts)
 
 
-def _middleware_details(docs: Sequence[Mapping[str, Any]]) -> str:
+def _middleware_details(
+    docs: Sequence[Mapping[str, Any]],
+    host_ips: Optional[Mapping[str, str]] = None,
+) -> str:
     parts: List[str] = []
     for middleware in _middleware_dimensions(docs):
         cards: List[str] = []
@@ -561,27 +600,30 @@ def _middleware_details(docs: Sequence[Mapping[str, Any]]) -> str:
             for metric in doc.get("metrics") or []:
                 values = _middleware_values(doc, metric)
                 if middleware in values:
-                    cards.append(_metric_card(metric, host_name, (doc.get("host") or {}).get("ip", ""), values, show_host=True))
+                    cards.append(_metric_card(metric, host_name, _display_host_ip(doc, host_ips), values, show_host=True))
         if cards:
             parts.append(
                 '<section class="report-group middleware-group" data-group-value="' + esc(middleware) + '">'
                 '<h2 class="group-title">中间件：' + esc(middleware) + "</h2>"
-                + "".join(cards) + "</section>"
+                + _metric_grid(cards) + "</section>"
             )
     return "".join(parts)
 
 
-def _grouped_details(docs: Sequence[Mapping[str, Any]]) -> str:
+def _grouped_details(
+    docs: Sequence[Mapping[str, Any]],
+    host_ips: Optional[Mapping[str, str]] = None,
+) -> str:
     """预渲染三种分组视图，浏览器端只切换显隐。"""
     return (
         '<div class="group-view active" id="group-view-host" data-group-mode="host">'
-        + "".join(_host_section(doc) for doc in docs)
+        + "".join(_host_section(doc, host_ips) for doc in docs)
         + "</div>"
         '<div class="group-view" id="group-view-status" data-group-mode="status">'
-        + _status_details(docs)
+        + _status_details(docs, host_ips)
         + "</div>"
         '<div class="group-view" id="group-view-middleware" data-group-mode="middleware">'
-        + _middleware_details(docs)
+        + _middleware_details(docs, host_ips)
         + "</div>"
     )
 
@@ -590,6 +632,7 @@ def render_html(
     *,
     out_path: Optional[Union[str, Path]] = None,
     template: Optional[Union[str, Path]] = None,
+    host_ips: Optional[Mapping[str, str]] = None,
 ) -> Path:
     """渲染入口：host-result-v1 文档列表 → 离线单文件 HTML。
 
@@ -597,7 +640,9 @@ def render_html(
       - docs：只读消费的 host-result-v1 文档列表（同一 inspection_id）；
       - out_path：输出文件路径；缺省 `<inspection_id>.html`（当前目录，
         TD §3 布局 `<inspection-id>.html`）；提供时覆盖默认文件名；
-      - template：模板文件路径；缺省 `inspect/templates/html-report-v1.html`。
+      - template：模板文件路径；缺省 `inspect/templates/html-report-v1.html`；
+      - host_ips：可选的主机名 → inventory `ansible_host` 映射，仅用于报表显示，
+        不写回事实源；缺省时沿用 JSON 中的脱敏 IP。
 
     返回实际写入的 Path。失败 → RenderHtmlError（exit_code=10）。
     本函数不修改 docs（多次渲染可重生成，TD §11）。
@@ -640,7 +685,7 @@ def render_html(
         "HOST_NAV": _host_nav(docs),
         "STATUS_FILTERS": _status_filters(),
         "MIDDLEWARE_NAV": _middleware_nav(docs),
-        "GROUPED_DETAILS": _grouped_details(docs),
+        "GROUPED_DETAILS": _grouped_details(docs, host_ips),
         "DATA_JSON": _embed_json(docs),
         "GENERATED_AT": esc(generated_at),
     }
@@ -671,6 +716,7 @@ def render_html_from_files(
     *,
     out_path: Optional[Union[str, Path]] = None,
     template: Optional[Union[str, Path]] = None,
+    host_ips: Optional[Mapping[str, str]] = None,
 ) -> Path:
     """按事实源文件渲染：每个文件为单个 host-result-v1 文档
     （HR §5 布局 `<out>/<inspection_id>/hosts/<host>.json`）。
@@ -693,7 +739,7 @@ def render_html_from_files(
         if not isinstance(doc, Mapping):
             raise RenderHtmlError("事实源不是 host-result-v1 文档: %s" % path)
         docs.append(dict(doc))
-    return render_html(docs, out_path=out_path, template=template)
+    return render_html(docs, out_path=out_path, template=template, host_ips=host_ips)
 
 
 __all__ = [

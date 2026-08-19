@@ -49,8 +49,8 @@ bash inspect.sh --local --excel reports/local.xlsx --html reports/local.html
 `host`、`ip`、`metric_id`、`name`、`raw_value`、`normalized_value`、`unit`、
 `status`、`threshold_rule`、`command`；HTML 不再展开证据来源锚点或 provenance 详情，
 按主机分组时主机状态摘要直接合并到主机大卡片中。事实源 JSON 仍按脱敏契约保存 IP 为
-`<IP>`；Excel 的 `Local.ip` 仅在渲染时使用 inventory 的 `ansible_host` 填充，便于运维识别
-主机，不会写回 JSON、事件或 HTML，也不会携带认证变量。
+`<IP>`；Excel 的 `Local.ip` 与 HTML 指标卡片的 `ip` 均仅在渲染时使用 inventory 的
+`ansible_host` 填充，便于运维识别主机，不会写回 JSON、事件，也不会携带认证变量。
 
 ## 监控模块扩展
 
