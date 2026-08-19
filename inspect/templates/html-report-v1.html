@@ -80,9 +80,9 @@ body {
   background: #18202b; color: #ffffff; outline: none; font-size: 12px;
 }
 .filter-search:focus { border-color: var(--accent); }
-.filter-options { margin-top: 6px; max-height: 220px; overflow-y: auto; }
+.filter-options { margin-top: 6px; max-height: 280px; overflow-y: auto; }
 .filter-option {
-  display: flex; align-items: center; gap: 6px; padding: 5px 4px;
+  display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 5px 4px;
   border-radius: 4px; cursor: pointer; font-size: 12px; word-break: break-all;
 }
 .filter-option:hover { background: var(--nav-panel); }
@@ -154,12 +154,13 @@ body {
 .host-section { margin-bottom: 28px; }
 .host-title { font-size: 17px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
 .metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  align-items: start;
+  display: block;
 }
-.metric-grid > .host-error { grid-column: 1 / -1; }
+.metric-grid > .metric-card,
+.metric-grid > .host-error {
+  width: 100%;
+}
+.metric-grid > * + * { margin-top: 10px; }
 .host-meta { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; word-break: break-all; }
 .host-error {
   margin: 0 0 10px; padding: 10px 12px; border: 1px solid #C62828;
@@ -243,11 +244,7 @@ body {
 footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); }
 
 /* ---------------- 打印友好（RR §4）：默认宏观摘要，详情可展开 ---------------- */
-@media (max-width: 1200px) {
-  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 @media (max-width: 760px) {
-  .metric-grid { grid-template-columns: 1fr; }
   .card-short-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -257,7 +254,7 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
   .layout { display: block; }
   .content { padding: 0; }
   .host-section { break-inside: avoid; margin-bottom: 16px; }
-  .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .metric-grid { display: block; }
   .metric-card { break-inside: avoid; }
   .host-detail, .group-view:not(.active) { display: none; }
   body.print-details .host-detail, body.print-details .group-view.active { display: block; }
@@ -276,6 +273,7 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
       $HOST_NAV
       $STATUS_FILTERS
       $MIDDLEWARE_NAV
+      $METRIC_NAV
       <button type="button" class="filter-reset" id="filter-reset">清除筛选</button>
     </div>
   </nav>
@@ -291,6 +289,7 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
         <option value="host">按主机分组</option>
         <option value="status">按状态分组</option>
         <option value="middleware">按中间件分组</option>
+        <option value="metric">按监控指标分组</option>
       </select>
       <span class="filter-hint">筛选条件对当前分组视图生效。</span>
     </section>
@@ -302,7 +301,7 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
       <span class="filter-hint">左侧筛选支持搜索和多选；指标卡片字段与 Excel 报表保持一致。</span>
     </div>
 
-    <!-- 三种分组视图在渲染期静态生成，JS 仅切换显隐 -->
+    <!-- 四种分组视图在渲染期静态生成，JS 仅切换显隐 -->
     <section class="host-detail" aria-label="指标详情">
       $GROUPED_DETAILS
     </section>
@@ -317,7 +316,7 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
 (function () {
   "use strict";
   /* 仅做筛选显隐、搜索和分组视图切换；业务计数由 Python 渲染期写入。 */
-  var filters = { status: {}, host: {}, middleware: {} };
+  var filters = { status: {}, host: {}, middleware: {}, metric: {} };
 
   function selected(set) {
     return Object.keys(set).length > 0;
@@ -356,7 +355,8 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
       error = errors[i];
       visible = matches(filters.host, error.getAttribute("data-host")) &&
                 matches(filters.status, error.getAttribute("data-status")) &&
-                middlewareMatches(filters.middleware, error.getAttribute("data-middleware"));
+                middlewareMatches(filters.middleware, error.getAttribute("data-middleware")) &&
+                matches(filters.metric, error.getAttribute("data-metric-id"));
       if (visible) { error.classList.remove("hidden"); }
       else { error.classList.add("hidden"); }
     }
@@ -429,7 +429,7 @@ footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); 
   var resetBtn = document.getElementById("filter-reset");
   if (resetBtn) {
     resetBtn.addEventListener("click", function () {
-      filters = { status: {}, host: {}, middleware: {} };
+      filters = { status: {}, host: {}, middleware: {}, metric: {} };
       var checks = document.querySelectorAll(".filter-check");
       var searches = document.querySelectorAll(".filter-search");
       var options = document.querySelectorAll(".filter-option");

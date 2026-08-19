@@ -366,7 +366,7 @@ def _host_summary(doc: Mapping[str, Any]) -> str:
 
 
 def _host_error_block(doc: Mapping[str, Any], *, show_host: bool = False) -> str:
-    """渲染无业务指标主机的技术失败提示，供三种分组视图复用。"""
+    """渲染无业务指标主机的技术失败提示，供各分组视图复用。"""
     execution_status = doc.get("execution_status", "UNKNOWN")
     if execution_status == "SUCCESS" or doc.get("metrics"):
         return ""
@@ -385,7 +385,8 @@ def _host_error_block(doc: Mapping[str, Any], *, show_host: bool = False) -> str
     middleware = "Linux 基础"
     return (
         '<div class="host-error" data-host="' + esc(host_name)
-        + '" data-status="UNKNOWN" data-middleware="' + esc(middleware) + '">'
+        + '" data-status="UNKNOWN" data-middleware="' + esc(middleware)
+        + '" data-metric-id="">'
         '<strong>' + esc(label + context) + '</strong><p>' + esc(error_message) + '</p>'
         '</div>'
     )
@@ -402,7 +403,7 @@ def _display_host_ip(doc: Mapping[str, Any], host_ips: Optional[Mapping[str, str
 
 
 def _metric_grid(cards: Sequence[str]) -> str:
-    """将指标卡片放入响应式网格，桌面端默认每行三张。"""
+    """将指标卡片按纵向单列展示，每张卡片占满正文宽度。"""
     if not cards:
         return ""
     return '<div class="metric-grid">' + "".join(cards) + "</div>"
@@ -483,6 +484,22 @@ def _middleware_dimensions(docs: Sequence[Mapping[str, Any]]) -> List[str]:
     return result
 
 
+def _metric_dimensions(docs: Sequence[Mapping[str, Any]]) -> List[tuple]:
+    """监控指标维度：按 metric_id 去重，选项同时显示指标名称。"""
+    result: List[tuple] = []
+    seen = set()
+    for doc in docs:
+        for metric in doc.get("metrics") or []:
+            metric_id = str(metric.get("metric_id") or "").strip()
+            if not metric_id or metric_id in seen:
+                continue
+            seen.add(metric_id)
+            name = str(metric.get("name") or "").strip()
+            label = metric_id + (" · " + name if name else "")
+            result.append((metric_id, label))
+    return result
+
+
 def _run_summary_nav(docs, totals, inspection_id, run_id, collected_at, generated_at) -> str:
     """正文顶部 Run 摘要块（保留旧函数名以兼容调用方）。"""
     exec_dist = totals["exec_dist"]
@@ -555,6 +572,9 @@ def _middleware_nav(docs: Sequence[Mapping[str, Any]]) -> str:
     return _multi_select_filter("middleware", "中间件", [(value, value) for value in values])
 
 
+def _metric_nav(docs: Sequence[Mapping[str, Any]]) -> str:
+    """左导航监控指标多选筛选器。"""
+    return _multi_select_filter("metric", "监控指标", _metric_dimensions(docs))
 
 
 def _status_details(
@@ -580,6 +600,32 @@ def _status_details(
             parts.append(
                 '<section class="report-group status-group" data-group-value="' + esc(status) + '">'
                 '<h2 class="group-title">状态：' + _chip(status) + '</h2>'
+                + _metric_grid(cards) + "</section>"
+            )
+    return "".join(parts)
+
+
+def _metric_details(
+    docs: Sequence[Mapping[str, Any]],
+    host_ips: Optional[Mapping[str, str]] = None,
+) -> str:
+    """按监控指标分组，每组展示该 metric_id 的所有主机结果。"""
+    parts: List[str] = []
+    dimensions = _metric_dimensions(docs)
+    for metric_id, label in dimensions:
+        cards: List[str] = []
+        for doc in docs:
+            host_name = str((doc.get("host") or {}).get("name", ""))
+            for metric in doc.get("metrics") or []:
+                if str(metric.get("metric_id") or "") == metric_id:
+                    cards.append(_metric_card(
+                        metric, host_name, _display_host_ip(doc, host_ips),
+                        _middleware_values(doc, metric), show_host=True
+                    ))
+        if cards:
+            parts.append(
+                '<section class="report-group metric-group" data-group-value="' + esc(metric_id) + '">'
+                '<h2 class="group-title">监控指标：' + esc(label) + "</h2>"
                 + _metric_grid(cards) + "</section>"
             )
     return "".join(parts)
@@ -614,7 +660,7 @@ def _grouped_details(
     docs: Sequence[Mapping[str, Any]],
     host_ips: Optional[Mapping[str, str]] = None,
 ) -> str:
-    """预渲染三种分组视图，浏览器端只切换显隐。"""
+    """预渲染四种分组视图，浏览器端只切换显隐。"""
     return (
         '<div class="group-view active" id="group-view-host" data-group-mode="host">'
         + "".join(_host_section(doc, host_ips) for doc in docs)
@@ -624,6 +670,9 @@ def _grouped_details(
         + "</div>"
         '<div class="group-view" id="group-view-middleware" data-group-mode="middleware">'
         + _middleware_details(docs, host_ips)
+        + "</div>"
+        '<div class="group-view" id="group-view-metric" data-group-mode="metric">'
+        + _metric_details(docs, host_ips)
         + "</div>"
     )
 
@@ -685,6 +734,7 @@ def render_html(
         "HOST_NAV": _host_nav(docs),
         "STATUS_FILTERS": _status_filters(),
         "MIDDLEWARE_NAV": _middleware_nav(docs),
+        "METRIC_NAV": _metric_nav(docs),
         "GROUPED_DETAILS": _grouped_details(docs, host_ips),
         "DATA_JSON": _embed_json(docs),
         "GENERATED_AT": esc(generated_at),

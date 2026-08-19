@@ -10,12 +10,12 @@
   - 不可信文本 HTML 转义：evidence/error.message/provenance 中的
     `<script>` 注入在正文呈 `&lt;script&gt;`（合同 mitigation"不可信文本
     HTML 转义"，测试断言 `<script>` 注入被转义）；
-  - 布局：左导航（主机/状态/中间件多选筛选）+ 右滚动区（Run 摘要置顶）
+  - 布局：左导航（主机/状态/中间件/监控指标多选筛选）+ 右滚动区（Run 摘要置顶）
     （宏观卡片 → 主机详情逐指标卡片 raw/normalized/unit/status/
     threshold/evidence/error/provenance）（REQ-R-06）；
   - 四状态色板/徽标：#2E7D32/#F9A825/#C62828/#757575；execution_status
     描边徽标区分于业务状态填充徽标（REQ-R-07）；
-  - 交互：状态/主机/中间件多选、搜索和三种分组视图接线（data-* 属性 + addEventListener）；
+  - 交互：状态/主机/中间件/监控指标多选、搜索和四种分组视图接线（data-* 属性 + addEventListener）；
     展示层零业务计算（JS 无 reduce/parseInt/Number）——宏观计数为
     渲染期静态文本（REQ-R-06 + mitigation"展示层不二次计算"）；
   - 打印友好：@media print 默认只打印宏观摘要，print-details 开关
@@ -270,7 +270,7 @@ class TestEscaping:
 class TestLayout:
     def test_nav_sections_present(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
-        for section in ("Run 摘要", "主机列表", "状态筛选", "中间件"):
+        for section in ("Run 摘要", "主机列表", "状态筛选", "中间件", "监控指标"):
             assert section in body, "报表缺少: %s" % section
         assert body.index('<header class="run-header"') > body.index('<main class="content">')
         main = body[body.index('<main class="content">'):]
@@ -351,26 +351,26 @@ class TestLayout:
         assert "192.0.2.103" in body
         assert 'short-field-label">ip</span><span class="short-field-value">&lt;IP&gt;' not in body
 
-    def test_metric_cards_use_three_column_grid(self, tmp_path):
-        """指标卡片使用三列响应式网格，并保持错误提示跨整行。"""
+    def test_metric_cards_use_single_full_width_column(self, tmp_path):
+        """指标卡片纵向单列展示，每张卡片占据正文全部宽度。"""
         s = render_str(fixture_docs(), tmp_path)
         assert 'class="metric-grid"' in s
         template = TEMPLATE.read_text(encoding="utf-8")
-        assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in template
-        assert ".metric-grid > .host-error { grid-column: 1 / -1; }" in template
-        assert "@media (max-width: 760px)" in template
+        assert ".metric-grid {\n  display: block;\n}" in template
+        assert ".metric-grid > .metric-card,\n.metric-grid > .host-error" in template
+        assert "width: 100%;" in template
 
     def test_cards_carry_filter_attributes(self, tmp_path):
         s = render_str(fixture_docs(), tmp_path)
         # 仅指标卡开标签（导航按钮/宏观卡/主机区也带 data-*，需限定作用域）
         openings = re.findall(r'<div class="metric-card[^"]*"[^>]*>', s)
-        assert len(openings) == 36  # 三种静态分组视图 × 3 主机 × 4 指标
+        assert len(openings) == 48  # 四种静态分组视图 × 3 主机 × 4 指标
         statuses = re.findall(r'data-status="(OK|WARN|CRIT|UNKNOWN)"', "".join(openings))
-        assert len(statuses) == 36
+        assert len(statuses) == 48
         hosts = re.findall(r'data-host="node-fx0[1-3]"', "".join(openings))
-        assert len(hosts) == 36
+        assert len(hosts) == 48
         metrics = re.findall(r'data-metric-id="local\.[^"]+"', "".join(openings))
-        assert len(metrics) == 36
+        assert len(metrics) == 48
         middleware = re.findall(r'data-middleware="([^"]+)"', "".join(openings))
         assert set(middleware) >= {"elasticsearch", "redis", "mysql"}
         for st in ("OK", "WARN", "CRIT", "UNKNOWN"):
@@ -441,8 +441,8 @@ class TestPaletteAndBadges:
 class TestFilterInteraction:
     def test_multi_select_filters(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
-        assert body.count('class="multi-select"') == 3
-        for kind in ("host", "status", "middleware"):
+        assert body.count('class="multi-select"') == 4
+        for kind in ("host", "status", "middleware", "metric"):
             assert 'data-filter-kind="' + kind + '"' in body
             assert 'class="filter-search" data-search-kind="' + kind + '"' in body
             assert 'class="filter-check"' in body
@@ -450,10 +450,18 @@ class TestFilterInteraction:
             assert 'data-filter-kind="host" data-filter-value="' + host + '"' in body
         for middleware in ("elasticsearch", "redis", "mysql"):
             assert 'data-filter-kind="middleware" data-filter-value="' + middleware + '"' in body
+        for metric_id in ("local.cpu.utilization", "local.cpu.load_1m", "local.memory.available_percent"):
+            assert 'data-filter-kind="metric" data-filter-value="' + metric_id + '"' in body
+        template = TEMPLATE.read_text(encoding="utf-8")
+        assert ".filter-options { margin-top: 6px; max-height: 280px; overflow-y: auto; }" in template
+        assert "min-height: 28px" in template
 
     def test_group_modes_present(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))
-        for value, label in (("host", "按主机分组"), ("status", "按状态分组"), ("middleware", "按中间件分组")):
+        for value, label in (
+            ("host", "按主机分组"), ("status", "按状态分组"),
+            ("middleware", "按中间件分组"), ("metric", "按监控指标分组"),
+        ):
             assert 'option value="' + value + '"' in body
             assert label in body
             assert 'data-group-mode="' + value + '"' in body
@@ -462,6 +470,7 @@ class TestFilterInteraction:
         js = inline_js(render_str(fixture_docs(), tmp_path))
         for needle in (
             "addEventListener", "data-filter-kind", "data-filter-value", "data-middleware",
+            "data-metric-id", "filters.metric",
             "classList", "applyFilters", "filter-reset", "filter-search", "group-by-select",
             "group-view", "host-error", "searches[i].value = \"\"", "options[i].classList.remove",
             "hidden",
@@ -515,6 +524,7 @@ class TestFilterInteraction:
         assert 'data-group-mode="host"' in body
         assert 'data-group-mode="status"' in body
         assert 'data-group-mode="middleware"' in body
+        assert 'data-group-mode="metric"' in body
 
 
 # --------------------------------------------------------------------------
@@ -627,7 +637,7 @@ class TestMacroCards:
         assert 'count-unknown">UNKNOWN<b>2</b>' in body
         openings = re.findall(r'<div class="metric-card[^"]*"[^>]*>', body)
         unknown_cards = [o for o in openings if 'data-status="UNKNOWN"' in o]
-        assert len(unknown_cards) == 6  # 三种视图各包含 2 个 UNKNOWN 指标卡
+        assert len(unknown_cards) == 8  # 四种视图各包含 2 个 UNKNOWN 指标卡
 
     def test_run_conclusion(self, tmp_path):
         body = body_text(render_str(fixture_docs(), tmp_path))

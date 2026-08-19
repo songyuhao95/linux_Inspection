@@ -82,7 +82,7 @@
 | REQ-R-03 | Excel 三 Sheet：Overview / Local / Errors-Evidence；Local 含 host/ip/metric_id/name/raw_value/normalized_value/unit/status/threshold_rule/command，UNKNOWN 不混入 OK 计数 | RR §3 | 生成文件 Sheet 名与单元格断言（zipfile/openpyxl 只读校验） | `python -m pytest tests/test_render_xlsx.py -q` | T-106 |
 | REQ-R-04 | Excel 文件名 `<inspection-id>.xlsx`；`--excel PATH` 可覆盖 | RR §3.2；CC §2 | 文件名断言 | 同上（test_filename） | T-106 |
 | REQ-R-05 | HTML 离线单文件：CSS/JS 全内联、数据以 JSON 内嵌、无外部依赖可离线打开 | RR §4 | 无 `<link`/`<script src`/fetch 外链文本断言 + 内嵌 JSON 与事实源一致断言 | `python -m pytest tests/test_render_html.py -q` | T-107 |
-| REQ-R-06 | HTML 布局：左导航（run 摘要/主机列表/状态筛选/中间件筛选）、右滚动区（主机摘要并入主机大卡片，指标卡片与 Excel Local 字段一致，不展开 evidence/source/provenance）、打印友好 | RR §4 | 模板结构与占位符断言 | 同上（test_layout） | T-107 |
+| REQ-R-06 | HTML 布局：左导航（run 摘要/主机列表/状态筛选/中间件/监控指标筛选，选项超过 10 个时滚动）、右滚动区（主机摘要并入主机大卡片，指标卡片单列全宽且与 Excel Local 字段一致，不展开 evidence/source/provenance）、支持主机/状态/中间件/监控指标四种分组、打印友好 | RR §4 | 模板结构与占位符断言 | 同上（test_layout） | T-107 |
 | REQ-R-07 | 四状态颜色与徽标：OK #2E7D32 / WARN #F9A825 / CRIT #C62828 / UNKNOWN #757575；execution_status 以徽标区分 | RR §5 | 颜色值断言（stdout 可选/HTML 必含） | 同上（test_palette） | T-105/T-107 |
 | REQ-R-08 | 一致性：三类报表由同一份 JSON 渲染，同一 inspection 状态计数一致 | RR §6.1 | 同一 fixture JSON 渲染三类报表并比对计数 | `python -m pytest tests/test_e2e.py -q` | T-108 |
 

@@ -51,6 +51,8 @@ bash inspect.sh --local --excel reports/local.xlsx --html reports/local.html
 按主机分组时主机状态摘要直接合并到主机大卡片中。事实源 JSON 仍按脱敏契约保存 IP 为
 `<IP>`；Excel 的 `Local.ip` 与 HTML 指标卡片的 `ip` 均仅在渲染时使用 inventory 的
 `ansible_host` 填充，便于运维识别主机，不会写回 JSON、事件，也不会携带认证变量。
+HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态、中间件、监控指标四类多选筛选，
+每类选项超过 10 个时在选项框内滚动；正文支持按主机、状态、中间件、监控指标分组。
 
 ## 监控模块扩展
 
