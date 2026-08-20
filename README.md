@@ -159,8 +159,10 @@ bash inspect.sh -H inspection --keepalived
 快照和系统参数。路径优先从运行中的 JVM `-Des.path.*` 与配置文件发现，`inspect.conf` 的
 `elasticsearch_*` 只作兜底；白名单和未运行主机语义与 Nginx/Keepalived 一致。API 认证可使用私有
 `inspect.conf` 的 `elasticsearch_api_user`、`elasticsearch_api_password` 和
-`elasticsearch_cacert`，也可使用目标主机 curl netrc 文件。远程 API 指标使用 Ansible shell 任务环境
-传给 curl，本地模式使用进程环境；规范化事实源和报表会脱敏，GitHub 模板只保留 `CHANGE_ME` 占位符。
+`elasticsearch_cacert`，也可使用目标主机 curl netrc 文件。远程 API 指标使用 Ansible
+script 任务（控制端临时脚本 + 任务环境）传给 curl，兼容目标主机只有 Python 3.7 的情况；
+本地模式使用进程环境。私密值只注入 Ansible 控制进程环境，不写入 playbook、JSON 或报表，
+GitHub 模板只保留 `CHANGE_ME` 占位符。
 Excel 输出独立的 `elasticsearch`
 Sheet，HTML 筛选/分组按 `local.elasticsearch.*` 自动适配。
 

@@ -33,7 +33,7 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -231,9 +231,15 @@ class CommandSpec:
     # registry boundary.
     trusted_generated_shell: bool = False
     # Some generated middleware commands need private environment values.  The
-    # shell module supports task environment injection; raw does not.
+    # raw module cannot receive task environment values. Elasticsearch uses
+    # the script action because ansible-core 2.18's shell module requires
+    # Python >=3.8 on the target host.
     module: str = "ansible.builtin.raw"
     task_environment: Dict[str, str] = field(default_factory=dict)
+    # Controller-side script used by the Ansible script action. The script
+    # contains only the generated command and references task environment
+    # variables for private values; credentials are never embedded in it.
+    script_path: Optional[str] = None
 
 
 # 每指标：命令模板（TD §5.2 数据源列逐字转写，{…} 为 profile 占位）、
@@ -834,7 +840,7 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
 
 
 def _elasticsearch_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
-    """Return private ES API credentials for shell-task environment only."""
+    """Return private ES API credentials for the generated task environment."""
     users = _elasticsearch_candidates(profile, "elasticsearch_api_user")
     passwords = _elasticsearch_candidates(profile, "elasticsearch_api_password")
     if not users or not passwords:
@@ -1341,7 +1347,9 @@ def _allowed_binaries(metric_id: str) -> List[str]:
     return parse_binaries(entry["command"])
 
 
-def validate_command_specs(specs: Sequence[CommandSpec]) -> None:
+def validate_command_specs(
+    specs: Sequence[CommandSpec], *, require_script_path: bool = True
+) -> None:
     """allow-list 校验（AE §4.1 / RK-R3-03）：拒绝未登记命令/越权参数。
 
     拒绝条件（任一即 CommandNotAllowedError，退出码 10）：
@@ -1368,20 +1376,35 @@ def validate_command_specs(specs: Sequence[CommandSpec]) -> None:
                 f"allow-list 拒绝：become 与注册表声明不一致（最小化 become）: "
                 f"{spec.metric_id}={spec.become!r}"
             )
-        if spec.module not in {"ansible.builtin.raw", "ansible.builtin.shell"}:
+        if spec.module not in {
+            "ansible.builtin.raw",
+            "ansible.builtin.shell",
+            "ansible.builtin.script",
+        }:
             raise CommandNotAllowedError(
                 f"allow-list 拒绝：不支持的 Ansible 任务模块: {spec.module!r}"
             )
-        if spec.task_environment and spec.module != "ansible.builtin.shell":
+        if spec.task_environment and spec.module not in {
+            "ansible.builtin.shell",
+            "ansible.builtin.script",
+        }:
             raise CommandNotAllowedError(
-                "allow-list 拒绝：任务环境变量只能交给 shell 模块，"
+                "allow-list 拒绝：任务环境变量只能交给 shell/script 模块，"
                 f"避免 raw 将其当作命令参数: {spec.metric_id}"
             )
-        if spec.module == "ansible.builtin.shell" and not (
+        if spec.module in {"ansible.builtin.shell", "ansible.builtin.script"} and not (
             spec.metric_id.startswith("local.elasticsearch.") and spec.task_environment
         ):
             raise CommandNotAllowedError(
-                f"allow-list 拒绝：shell 模块仅允许 Elasticsearch 私有认证任务: {spec.metric_id}"
+                f"allow-list 拒绝：shell/script 模块仅允许 Elasticsearch 私有认证任务: {spec.metric_id}"
+            )
+        if (
+            require_script_path
+            and spec.module == "ansible.builtin.script"
+            and not spec.script_path
+        ):
+            raise CommandNotAllowedError(
+                f"allow-list 拒绝：script 任务缺少控制端脚本路径: {spec.metric_id}"
             )
         if spec.command is None:
             if spec.error_code != ERROR_UNSUPPORTED_PROFILE:
@@ -1451,7 +1474,8 @@ def generate_playbook(
 
     契约（AE §1-§7 文本断言）：
       - play 级：hosts: all、gather_facts: false、serial: 1、ignore_unreachable: true；
-      - 每任务：ansible.builtin.raw + `timeout N /bin/bash -lc '…'`
+      - 每任务：ansible.builtin.raw 或内部生成的 script +
+        `timeout N /bin/bash -lc '…'`
         （N=15 探测 / 10 指标 / 15 日志，AE §7 超时注入）；
       - become：仅注册表声明需要特权的单条命令 become: true（AE §5
         最小化 become），其余 false；
@@ -1462,7 +1486,7 @@ def generate_playbook(
     lines = [
         "---",
         "# inspect 采集 playbook（T-103 ansible_runner 生成；ansible-execution v1）",
-        "# 契约：gather_facts:false / serial:1 / raw + /bin/bash -lc / 最小化 become /",
+        "# 契约：gather_facts:false / serial:1 / raw|script + /bin/bash -lc / 最小化 become /",
         "#       只读命令 allow-list / 每命令超时注入（probe 15s、指标 10s、日志 15s、",
         "#       单主机 300s）/ 无重试（AE §1-§7；超时与连接失败不自动重试）",
         '- name: "inspect collection"',
@@ -1486,9 +1510,14 @@ def generate_playbook(
         lines.append(
             f'    - name: "metric: {spec.metric_id}（{spec.timeout_sec}s）"'
         )
-        lines.append(
-            f"      {spec.module}: '{_yaml_single_quote(raw_cmd)}'"
-        )
+        if spec.module == "ansible.builtin.script":
+            lines.append(
+                f"      {spec.module}: '{_yaml_single_quote(str(spec.script_path))}'"
+            )
+        else:
+            lines.append(
+                f"      {spec.module}: '{_yaml_single_quote(raw_cmd)}'"
+            )
         lines.append(f"      become: {str(spec.become).lower()}")
         if spec.module == "ansible.builtin.shell":
             lines.append("      args:")
@@ -1496,7 +1525,22 @@ def generate_playbook(
         if spec.task_environment:
             lines.append("      environment:")
             for key, value in sorted(spec.task_environment.items()):
-                lines.append(f"        {key}: '{_yaml_single_quote(value)}'")
+                # Keep private ES credentials out of the generated playbook.
+                # The real runner supplies them only to the controller
+                # process environment; Ansible's env lookup renders them into
+                # the remote script task at execution time.
+                if (
+                    spec.module == "ansible.builtin.script"
+                    and key in {"INSPECT_ES_API_USER", "INSPECT_ES_API_PASSWORD"}
+                ):
+                    value_text = (
+                        '{{ lookup("env", "' + key + '") }}'
+                    )
+                else:
+                    value_text = value
+                lines.append(
+                    f"        {key}: '{_yaml_single_quote(value_text)}'"
+                )
         lines.append(f"      register: inspect_metric_{idx}")
         lines.append("      ignore_errors: true")
     lines.append("")
@@ -1570,28 +1614,80 @@ def prepare_run(
     nginx_whitelist：Nginx 白名单 IP（白名单内未运行 → CRIT「未运行」；
     白名单外未运行 → 跳过该主机 Nginx 指标）。
     """
-    validate_command_specs(specs)
+    # Validate all command and generated-shell constraints before writing any
+    # runtime file.  The controller-side script path is assigned below, then
+    # the final spec list is validated again before the playbook is emitted.
+    validate_command_specs(specs, require_script_path=False)
     runtime_dir = Path(runtime_dir) if runtime_dir is not None else _default_runtime_dir()
     runtime_dir.mkdir(parents=True, exist_ok=True)
     playbook_path = runtime_dir / f"playbook-{uuid.uuid4().hex[:8]}.yml"
-    text = generate_playbook(specs)
+    prepared_specs: List[CommandSpec] = list(specs)
+    script_paths: List[Path] = []
     try:
-        playbook_path.write_text(text, encoding="utf-8")
+        for idx, spec in enumerate(prepared_specs):
+            if not (
+                spec.module == "ansible.builtin.shell"
+                and spec.metric_id.startswith("local.elasticsearch.")
+                and spec.task_environment
+            ):
+                continue
+            if spec.command is None:
+                raise CommandConfigError(
+                    f"指标 {spec.metric_id} 的 script 任务缺少命令"
+                )
+            script_path = runtime_dir / f"metric-{idx}-{uuid.uuid4().hex[:8]}.sh"
+            raw_cmd = (
+                f"timeout {spec.timeout_sec} /bin/bash -lc "
+                f"'{_sh_escape(spec.command)}'"
+            )
+            script_text = (
+                "#!/bin/bash\n"
+                "# inspect generated controller-side script; no credentials are embedded.\n"
+                f"{raw_cmd}\n"
+            )
+            script_path.write_text(script_text, encoding="utf-8", newline="\n")
+            script_path.chmod(0o700)
+            script_paths.append(script_path)
+            prepared_specs[idx] = replace(
+                spec,
+                module="ansible.builtin.script",
+                script_path=str(script_path.resolve()),
+            )
+        validate_command_specs(prepared_specs)
+        text = generate_playbook(prepared_specs)
+        playbook_path.write_text(text, encoding="utf-8", newline="\n")
+        playbook_path.chmod(0o600)
     except OSError as exc:
+        for path in [playbook_path, *script_paths]:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
         raise CommandConfigError(
-            f"playbook 写入失败: {playbook_path}（{exc}）"
+            f"运行期 playbook/script 写入失败（{type(exc).__name__}）"
         ) from exc
+    except CommandConfigError:
+        for path in [playbook_path, *script_paths]:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+        raise
     plan = RunPlan(
         playbook_path=playbook_path,
         inventory_file=Path(selection.inventory_file),
         hosts=list(selection.hosts),
         limit=selection.limit,
-        metric_specs=list(specs),
+        metric_specs=prepared_specs,
         probe_command=probe_mod.build_probe_command(),
         cleanup_paths=(
-            (playbook_path, Path(selection.inventory_file))
+            (playbook_path, *script_paths, Path(selection.inventory_file))
             if getattr(selection, "kind", None) in {"local", "hosts"}
-            else (playbook_path,)
+            else (playbook_path, *script_paths)
         ),
         selection_kind=str(getattr(selection, "kind", "unknown")),
         nginx_whitelist=tuple(nginx_whitelist or ()),
@@ -2279,6 +2375,14 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
         env["ANSIBLE_RETRY_FILES_ENABLED"] = "False"
         env["ANSIBLE_HOST_KEY_CHECKING"] = ANSIBLE_HOST_KEY_CHECKING
         env["ANSIBLE_SSH_COMMON_ARGS"] = ANSIBLE_SSH_COMMON_ARGS
+        # The generated script task resolves these values through Ansible's
+        # controller-side env lookup.  This keeps the private API credentials
+        # out of the playbook, argv, callback, and fact source while still
+        # allowing raw-compatible execution on target hosts with Python 3.7.
+        for spec in plan.metric_specs:
+            for key, value in getattr(spec, "task_environment", {}).items():
+                if key in {"INSPECT_ES_API_USER", "INSPECT_ES_API_PASSWORD"}:
+                    env[key] = value
         for secret_name in ("ANSIBLE_PASSWORD", "ANSIBLE_NET_PASSWORD", "SSHPASS"):
             env.pop(secret_name, None)
 

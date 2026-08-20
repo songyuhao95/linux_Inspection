@@ -13,8 +13,10 @@
 API 使用 `elasticsearch_endpoint`，默认示例为 `https://127.0.0.1:9200`。证书候选路径由
 `elasticsearch_cacert` 配置，实际请求优先使用 `curl --cacert`；没有可读 CA 时才回退
 到兼容自签名证书的 `-k`。HTTP API 账号密码由私有 `inspect.conf` 的
-`elasticsearch_api_user` 和 `elasticsearch_api_password` 提供，远程 API 指标使用 Ansible shell
-任务环境传给 curl，本地模式使用进程环境，curl 使用 `-u "$INSPECT_ES_API_USER:$INSPECT_ES_API_PASSWORD"`；
+`elasticsearch_api_user` 和 `elasticsearch_api_password` 提供，远程 API 指标使用 Ansible script
+任务（控制端临时脚本 + 任务环境）传给 curl；采用 script 而不是 shell 是为了兼容受控端
+Python 3.7。控制端通过 Ansible env lookup 把私密值临时注入任务环境，playbook 和脚本本身不保存
+明文密码。本地模式使用进程环境，curl 使用 `-u "$INSPECT_ES_API_USER:$INSPECT_ES_API_PASSWORD"`；
 规范化事实源和报表会对 command 脱敏，不保留明文密码。GitHub 中跟踪的 `inspect.conf` 只能保留 `CHANGE_ME` 占位符，
 真实密码不得提交；也可以继续使用目标机 `elasticsearch_auth_file` netrc 作为认证兜底。
 未授权 401/403、连接失败、配置/日志/证书不可读均为 UNKNOWN，绝不会默认通过。

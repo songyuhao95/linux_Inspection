@@ -75,8 +75,10 @@ bash inspect.sh -H inspection --elasticsearch
 CRIT。API 使用目标机 `elasticsearch_auth_file` 指向的 curl netrc 文件，不把密码写入
 项目配置。若现场使用 Elasticsearch HTTP Basic 认证，可在权限为 700 的私有
 `inspect.conf` 中配置 `elasticsearch_api_user` 和 `elasticsearch_api_password`，并在
-`elasticsearch_cacert` 配置 CA 路径；远程 API 指标通过 Ansible shell 任务环境调用
-`curl --cacert <CA> -u <user>:<password>`，本地模式通过进程环境调用，规范化事实源和报表会脱敏。
+`elasticsearch_cacert` 配置 CA 路径；远程 API 指标通过 Ansible script 任务调用
+`curl --cacert <CA> -u <user>:<password>`。script 任务不要求受控端安装 Python 3.8+，
+适配 Kylin 常见的 Python 3.7；账号密码只在控制端 Ansible 子进程环境中临时注入，不写入
+运行期 playbook。 本地模式通过进程环境调用，规范化事实源和报表会脱敏。
 GitHub 模板中的密码必须保持 `CHANGE_ME`。401/403、连接失败、路径不可读均为 UNKNOWN，不默认通过。Excel 结果写入
 独立 `elasticsearch` Sheet，HTML 自动纳入中间件/指标筛选与分组。详细指标和阈值见
 `docs/specs/elasticsearch-middleware.md`。
