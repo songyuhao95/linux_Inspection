@@ -379,7 +379,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
     },
     # ---- Keepalived 中间件（keepalived-p0-v1） ----
     "local.keepalived.process.present": {
-        "command": "pgrep -fa '[k]eepalived'",
+        "command": "pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]'",
         "profile_keys": (),
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Keepalived本节点服务」行",
@@ -763,7 +763,7 @@ def _keepalived_discovery_prefix(profile: Dict[str, Any], *, include_log: bool =
     confs_loop = confs or ":"
     logs_loop = logs or ":"
     parts = [
-        "process_line=$(pgrep -fa '[k]eepalived' | head -n 1)",
+        "process_line=$(pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]' | head -n 1)",
         "keepalived_bin=$(printf '%s\\n' \"$process_line\" | sed -nE 's/^[0-9]+[[:space:]]+([^[:space:]]+).*/\\1/p')",
         "keepalived_conf=$(printf '%s\\n' \"$process_line\" | sed -nE 's/.*[[:space:]]-f[[:space:]]*=?[[:space:]]*([^[:space:]]+).*/\\1/p')",
         "if test -n \"$keepalived_bin\" && ! test -x \"$keepalived_bin\"; then keepalived_bin=''; fi",

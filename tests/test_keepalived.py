@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from inspect import ansible_runner as ar
@@ -56,6 +57,20 @@ def test_keepalived_module_registered_and_catalogued():
     assert module.metric_ids == KEEPALIVED_IDS
     assert middleware_module_ids() == ("nginx", "keepalived")
     assert tuple(m["metric_id"] for m in metrics.KEEPALIVED_METRICS) == KEEPALIVED_IDS
+
+
+def test_keepalived_process_pattern_does_not_match_cli_flag():
+    specs = ar.build_metric_command_specs(
+        module_ids=("keepalived",), profile=cfg.load_inspect_conf()
+    )
+    pattern = re.search(r"pgrep -fa '([^']+)'", specs[0].command).group(1)
+    assert "keepalived[[:space:]]" in pattern
+    python_pattern = r"(^|[\s/])keepalived\s"
+    assert re.search(python_pattern, "bash inspect.sh --keepalived --html out/report.html") is None
+    assert re.search(
+        python_pattern,
+        "3812 /usr/sbin/keepalived -f /etc/keepalived/keepalived.conf",
+    )
 
 
 def test_keepalived_thresholds_resolve():

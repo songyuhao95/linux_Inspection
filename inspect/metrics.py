@@ -444,7 +444,7 @@ KEEPALIVED_METRICS = [
     {
         "metric_id": "local.keepalived.process.present",
         "name": "Keepalived 进程存在性",
-        "command": "pgrep -fa '[k]eepalived'",
+        "command": "pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]'",
         "timeout_sec": 10,
         "parser": "parse_process_present",
         "unit": "布尔（present/absent）+ 匹配行数",

@@ -11,7 +11,7 @@ Keepalived P0/P1 检查项实现。模块文件为 `inspect/modules/keepalived.p
 
 | metric_id | 名称 | 取值与判定 | 文档来源 |
 | --- | --- | --- | --- |
-| `local.keepalived.process.present` | Keepalived 进程存在性 | `pgrep -fa '[k]eepalived'`；白名单主机未运行为 CRIT，非白名单主机跳过模块 | P0「Keepalived本节点服务」 |
+| `local.keepalived.process.present` | Keepalived 进程存在性 | `pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]'`；白名单主机未运行为 CRIT，非白名单主机跳过模块 | P0「Keepalived本节点服务」 |
 | `local.keepalived.version` | Keepalived 版本 | 从运行进程命令行解析实际二进制执行 `-v`，与 `keepalived_version` 精确比较 | 部署规范版本要求 |
 | `local.keepalived.vip.bound` | VIP 绑定状态 | 从实际配置解析 `state` 和 `virtual_ipaddress`，再用 `ip -brief addr` 检查 VIP | P0「VIP绑定状态」 |
 | `local.keepalived.vip.access` | VIP 访问 | 从实际配置读取 VIP，用 `curl -I http://VIP:keepalived_port/` 检查 HTTP | P0「VIP访问」 |
@@ -22,7 +22,7 @@ Keepalived P0/P1 检查项实现。模块文件为 `inspect/modules/keepalived.p
 
 ## 进程发现、路径发现与跳过规则
 
-1. 先用 `pgrep -fa '[k]eepalived'` 发现运行实例；从进程命令行提取二进制路径和 `-f`
+1. 先用 `pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]'` 发现运行实例；从进程命令行提取二进制路径和 `-f`
    指定的配置路径。
 2. 路径未从进程/配置识别时，依次使用 `inspect.conf` 的 `keepalived_bin`、
    `keepalived_conf`、`keepalived_log`、`keepalived_vip`、`keepalived_port` 候选值兜底。
