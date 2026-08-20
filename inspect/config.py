@@ -50,12 +50,18 @@ DOC_BASELINE_VERSION = "linux-common-p0-v1"
 # Nginx 中间件文档基线版本（安徽农金Nginx、Keepalived运维巡检手册v1.0）
 NGINX_BASELINE_VERSION = "nginx-p0-v1"
 
+# Keepalived 中间件文档基线版本（同一份 Nginx/Keepalived 巡检手册）
+KEEPALIVED_BASELINE_VERSION = "keepalived-p0-v1"
+
 # 包内数据/模式文件（相对本模块定位，随包分发）
 BASELINE_FILE = (
     Path(__file__).resolve().parent / "data" / "thresholds" / "linux-common-p0-v1.yaml"
 )
 NGINX_BASELINE_FILE = (
     Path(__file__).resolve().parent / "data" / "thresholds" / "nginx-p0-v1.yaml"
+)
+KEEPALIVED_BASELINE_FILE = (
+    Path(__file__).resolve().parent / "data" / "thresholds" / "keepalived-p0-v1.yaml"
 )
 OVERRIDE_SCHEMA_FILE = (
     Path(__file__).resolve().parent / "schema" / "threshold-override-v1.schema.json"
@@ -817,6 +823,7 @@ def build_resolved_thresholds(
         baseline = {}
         baseline.update(load_document_baseline())
         baseline.update(load_nginx_baseline())
+        baseline.update(load_keepalived_baseline())
 
     if override is None:
         override_doc: Dict[str, Any] = {}
@@ -909,6 +916,14 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "nginx_version": [],
     "nginx_baseline": [],
     "nginx_whitelist": [],
+    "keepalived_bin": [],
+    "keepalived_conf": [],
+    "keepalived_log": [],
+    "keepalived_vip": [],
+    "keepalived_port": [],
+    "keepalived_version": [],
+    "keepalived_baseline": [],
+    "keepalived_whitelist": [],
 }
 
 _CONF_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -999,6 +1014,34 @@ def load_inspect_conf(path: Optional[Union[str, Path]] = None) -> Dict[str, List
     return result
 
 
+def load_keepalived_baseline(
+    path: Optional[Union[str, Path]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """加载 Keepalived 文档基线阈值 keepalived-p0-v1.yaml。"""
+    if path is None:
+        path = KEEPALIVED_BASELINE_FILE
+    data = _read_yaml_file(path)
+    if not isinstance(data, dict):
+        raise ConfigError(f"Keepalived 文档基线顶层应为映射: {path}")
+    if data.get("schema") != "threshold-baseline-v1":
+        raise ConfigError(
+            f"Keepalived 文档基线 schema 不匹配（期望 threshold-baseline-v1）: {path}"
+        )
+    if data.get("version") != KEEPALIVED_BASELINE_VERSION:
+        raise ConfigError(
+            f"Keepalived 文档基线 version 不匹配（期望 {KEEPALIVED_BASELINE_VERSION}）: {path}"
+        )
+    metrics = data.get("metrics")
+    if not isinstance(metrics, dict) or not metrics:
+        raise ConfigError(f"Keepalived 文档基线 metrics 必须为非空映射: {path}")
+    return {
+        metric_id: _validate_baseline_metric(
+            metric_id, spec, path, version=KEEPALIVED_BASELINE_VERSION
+        )
+        for metric_id, spec in metrics.items()
+    }
+
+
 def load_nginx_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """从 inspect.conf 读取 Nginx 候选路径、端口、基线和白名单。
 
@@ -1018,6 +1061,21 @@ def load_nginx_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]
     }
 
 
+def load_keepalived_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+    """从 inspect.conf 读取 Keepalived 路径、VIP、端口、基线和白名单。"""
+    data = load_inspect_conf(path)
+    return {
+        "keepalived_bin": list(data.get("keepalived_bin", [])),
+        "keepalived_conf": list(data.get("keepalived_conf", [])),
+        "keepalived_log": list(data.get("keepalived_log", [])),
+        "keepalived_vip": list(data.get("keepalived_vip", [])),
+        "keepalived_port": list(data.get("keepalived_port", [])),
+        "keepalived_version": list(data.get("keepalived_version", [])),
+        "keepalived_baseline": list(data.get("keepalived_baseline", [])),
+        "whitelist": list(data.get("keepalived_whitelist", [])),
+    }
+
+
 __all__ = [
     "ConfigError",
     "DOC_BASELINE_VERSION",
@@ -1026,13 +1084,16 @@ __all__ = [
     "LAYER_EXTERNAL_CONFIG",
     "LAYER_UNRESOLVED",
     "NGINX_BASELINE_VERSION",
+    "KEEPALIVED_BASELINE_VERSION",
     "DEFAULT_RUNTIME_CONFIG_NAME",
     "build_resolved_thresholds",
     "load_document_baseline",
     "load_inspect_conf",
     "load_inspect_config",
     "load_nginx_baseline",
+    "load_keepalived_baseline",
     "load_nginx_config",
+    "load_keepalived_config",
     "load_override",
     "validate_override_document",
 ]

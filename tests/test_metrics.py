@@ -34,6 +34,14 @@ EXPECTED_IDS = [
     "local.nginx.access_log.status_codes",
     "local.nginx.config.baseline",
     "local.nginx.security.baseline",
+    "local.keepalived.process.present",
+    "local.keepalived.version",
+    "local.keepalived.vip.bound",
+    "local.keepalived.vip.access",
+    "local.keepalived.config.baseline",
+    "local.keepalived.healthcheck.script",
+    "local.keepalived.error_log.key_evidence",
+    "local.keepalived.capability.stability",
 ]
 
 # MR §5 超时列：指标命令 10s、日志类 15s（TD §5.2）
@@ -41,14 +49,16 @@ LOG_IDS = {
     "local.logs.key_evidence",
     "local.nginx.error_log.key_evidence",
     "local.nginx.access_log.status_codes",
+    "local.keepalived.error_log.key_evidence",
+    "local.keepalived.capability.stability",
 }
 TIMEOUT_10S = set(EXPECTED_IDS) - LOG_IDS
 
 
-def test_registry_has_exactly_19_metrics():
+def test_registry_has_exactly_27_metrics():
     """注册表共 19 条（10 个共同 P0 + 9 个 Nginx 中间件）。"""
-    assert reg.count_metrics() == 19
-    assert len(reg.METRICS) == 19
+    assert reg.count_metrics() == 27
+    assert len(reg.METRICS) == 27
 
 
 def test_metric_ids_are_exact_expected_set():
@@ -129,14 +139,19 @@ def test_parser_names_unique():
     # local.process.present 与 local.nginx.process.present 复用；
     # parse_logs_key_evidence 只被 local.logs.key_evidence 使用
     # （nginx 关键日志用带 ls 标记剥离的 parse_nginx_error_log）。
-    assert parsers.count("parse_process_present") == 2
+    assert parsers.count("parse_process_present") == 3
     assert parsers.count("parse_logs_key_evidence") == 1
 
 
 def test_threshold_rule_ids_reference_version():
     """阈值规则 ID 引用文档基线版本标识（linux-common-p0-v1 / nginx-p0-v1）。"""
     for m in reg.METRICS:
-        prefix = reg.NGINX_RULE_PREFIX if m["metric_id"].startswith("local.nginx.") else reg.VERSION
+        if m["metric_id"].startswith("local.nginx."):
+            prefix = reg.NGINX_RULE_PREFIX
+        elif m["metric_id"].startswith("local.keepalived."):
+            prefix = reg.KEEPALIVED_RULE_PREFIX
+        else:
+            prefix = reg.VERSION
         for rid in m["threshold_rule_ids"]:
             assert rid.startswith(prefix + ":"), f"{m['metric_id']} 规则 ID 前缀错误"
 

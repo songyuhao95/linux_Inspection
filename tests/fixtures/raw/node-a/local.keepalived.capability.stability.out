@@ -1,0 +1,6 @@
+# fixture: required capabilities and stable log
+/usr/sbin/keepalived cap_net_admin,cap_net_raw,cap_net_broadcast=ep
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BROADCAST
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BROADCAST
+INSPECT_KEEPALIVED_LOG=/opt/keepalived/logs/keepalived.log
+Entering MASTER STATE

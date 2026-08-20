@@ -1,0 +1,3 @@
+# fixture: one normal state transition
+INSPECT_KEEPALIVED_LOG=/opt/keepalived/logs/keepalived.log
+Entering MASTER STATE

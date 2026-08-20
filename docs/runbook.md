@@ -9,7 +9,7 @@
 
 ```bash
 bash inspect.sh --help          # 选项表（cli-contract §2）
-bash inspect.sh --list-metrics  # 只读列出 10 个 P0 指标，不采集
+bash inspect.sh --list-metrics  # 只读列出当前已注册指标，不采集
 bash inspect.sh --info local.cpu.load_1m   # 单指标定义，不采集
 ```
 
@@ -42,13 +42,30 @@ Nginx 进程发现只匹配真实 `nginx: master process`/`nginx: worker process
 inspect.conf。版本基线使用 `nginx_version`；程序只从正在运行的 master 进程对应二进制
 执行 `nginx -v`，版本不在允许值内为 CRIT。详见 `docs/specs/nginx-middleware.md`。
 
+### 2.1 Keepalived 中间件（--keepalived / inspect.conf）
 
-### 2.1 --local 本机自巡检
+默认巡检也包含 Keepalived；只巡检 Keepalived 时：
+
+```bash
+bash inspect.sh --local --keepalived
+bash inspect.sh -H inspection --keepalived
+```
+
+模块先从运行中的 `keepalived` 进程解析实际二进制和 `-f` 配置路径，再用根目录
+`inspect.conf` 中的 `keepalived_bin`、`keepalived_conf`、`keepalived_log`、
+`keepalived_vip`、`keepalived_port` 候选兜底。进程未运行且不在
+`keepalived_whitelist` 的主机会跳过 Keepalived；白名单主机未运行则 CRIT。VIP 绑定、
+VIP HTTP 访问、配置基线、脚本静态权限、关键日志、能力与漂移稳定性分别输出指标；
+路径无法发现时输出 UNKNOWN。详细判定和复现命令见
+`docs/specs/keepalived-middleware.md`。
+
+
+### 2.2 --local 本机自巡检
 
 控制端兼受控端即可跑通全链路；本机命令缺失 → 对应指标 UNKNOWN，链路不断。
 未设置 `INSPECT_FIXTURE_DIR` 时因真实执行未启用（§1）返回 10。
 
-### 2.2 fixture 调试模式（实现/调试专用，非用户 CLI）
+### 2.3 fixture 调试模式（实现/调试专用，非用户 CLI）
 
 环境变量 `INSPECT_FIXTURE_DIR` 指向预录输出目录时，ansible_runner 从夹具
 读取 probe 与指标原始输出（模拟受控端应答），**不产生任何连接、不执行

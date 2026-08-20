@@ -377,6 +377,55 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「安全配置基线」行",
     },
+    # ---- Keepalived 中间件（keepalived-p0-v1） ----
+    "local.keepalived.process.present": {
+        "command": "pgrep -fa '[k]eepalived'",
+        "profile_keys": (),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Keepalived本节点服务」行",
+    },
+    "local.keepalived.version": {
+        "command": "{keepalived_bin} -v 2>&1",
+        "profile_keys": ("keepalived_bin",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 环境信息「Keepalived版本」行",
+    },
+    "local.keepalived.vip.bound": {
+        "command": "ip -brief addr; grep -E 'state|virtual_ipaddress|interface' {keepalived_conf}",
+        "profile_keys": ("keepalived_conf",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「VIP绑定状态」行",
+    },
+    "local.keepalived.vip.access": {
+        "command": "curl -sS -I --connect-timeout 3 http://{keepalived_vip}:{keepalived_port}/",
+        "profile_keys": ("keepalived_vip", "keepalived_port"),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「VIP访问」行",
+    },
+    "local.keepalived.config.baseline": {
+        "command": "ls -1 {keepalived_conf} 2>/dev/null; grep -E 'state|interface|virtual_router_id|priority|advert_int|virtual_ipaddress|script|track_script' {keepalived_conf}",
+        "profile_keys": ("keepalived_conf",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Keepalived配置基线」行",
+    },
+    "local.keepalived.healthcheck.script": {
+        "command": "grep -E 'script|track_script' {keepalived_conf}; test -r {keepalived_conf}",
+        "profile_keys": ("keepalived_conf",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「健康检查脚本」行",
+    },
+    "local.keepalived.error_log.key_evidence": {
+        "command": "tail -n 1000 {keepalived_log} | grep -Ei 'Entering MASTER|Entering BACKUP|Entering FAULT|script.*failed|VRRP'",
+        "profile_keys": ("keepalived_log",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「关键日志」行",
+    },
+    "local.keepalived.capability.stability": {
+        "command": "getcap {keepalived_bin}; systemctl show keepalived-opt -p AmbientCapabilities -p CapabilityBoundingSet; tail -n 50 {keepalived_log}",
+        "profile_keys": ("keepalived_bin", "keepalived_log"),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「Keepalived能力与漂移稳定性」行",
+    },
 }
 
 # 日志类指标（超时 15s，AE §7 / TD §5.2 超时列）
@@ -384,6 +433,8 @@ _LOG_METRIC_IDS = {
     "local.logs.key_evidence",
     "local.nginx.error_log.key_evidence",
     "local.nginx.access_log.status_codes",
+    "local.keepalived.error_log.key_evidence",
+    "local.keepalived.capability.stability",
 }
 
 
@@ -445,6 +496,24 @@ def _validate_profile_value(key: str, value: Any) -> str:
                 f"profile {key} 路径非法（需绝对路径，仅限安全字符）: {value!r}"
             )
         return value
+    if key == "keepalived_bin":
+        if not isinstance(value, str) or not _SAFE_WORD.fullmatch(value) or not value:
+            raise CommandConfigError(f"profile keepalived_bin 非法: {value!r}")
+        return value
+    if key in ("keepalived_conf", "keepalived_log"):
+        if not isinstance(value, str) or not _SAFE_PATH.fullmatch(value):
+            raise CommandConfigError(
+                f"profile {key} 路径非法（需绝对路径，仅限安全字符）: {value!r}"
+            )
+        return value
+    if key == "keepalived_port":
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+            raise CommandConfigError(f"profile keepalived_port 必须为 1..65535 整数: {value!r}")
+        return str(value)
+    if key == "keepalived_vip":
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9A-Fa-f:.%]+(?:/[0-9]+)?", value):
+            raise CommandConfigError(f"profile keepalived_vip 非法: {value!r}")
+        return value
     # process_pattern / log_keywords
     if isinstance(value, list):
         parts = []
@@ -499,6 +568,15 @@ _NGINX_UNSAFE_GENERATED_TOKENS = re.compile(
     r"wget|python|perl|ruby|php|eval|exec|source|chmod|chown|mount|umount)\b"
 )
 
+_KEEPALIVED_GENERATED_ALLOWED_BINARIES = (
+    "pgrep", "ps", "sed", "head", "tail", "grep", "egrep", "ls", "ip",
+    "curl", "awk", "getcap", "systemctl", "test",
+)
+_KEEPALIVED_UNSAFE_GENERATED_TOKENS = re.compile(
+    r"\b(?:rm|rmdir|mkfs|dd|shutdown|reboot|poweroff|sudo|ssh|scp|nc|ncat|"
+    r"wget|python|perl|ruby|php|eval|exec|source|chmod|chown|mount|umount)\b"
+)
+
 
 def _nginx_candidates(profile: Dict[str, Any], key: str) -> List[str]:
     """Validate inspect.conf candidates without treating them as auth data."""
@@ -541,6 +619,43 @@ def _is_runtime_nginx_profile(profile: Dict[str, Any]) -> bool:
     keys = (
         "nginx_bin", "nginx_conf", "nginx_error_log", "nginx_access_log",
         "nginx_port", "nginx_version",
+    )
+    return any(key in profile for key in keys) and all(
+        key not in profile or isinstance(profile.get(key), list) for key in keys
+    )
+
+
+def _keepalived_candidates(profile: Dict[str, Any], key: str) -> List[str]:
+    """Validate Keepalived inspect.conf candidates."""
+    raw = profile.get(key) or []
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        raise CommandConfigError(f"inspect.conf {key} 必须为候选值列表: {raw!r}")
+    result: List[str] = []
+    for item in raw:
+        if key == "keepalived_port":
+            if not isinstance(item, str) or not re.fullmatch(r"[0-9]+", item):
+                raise CommandConfigError(f"inspect.conf keepalived_port 必须为数字: {item!r}")
+            _validate_profile_value(key, int(item))
+            result.append(item)
+        elif key in {"keepalived_bin", "keepalived_conf", "keepalived_log"}:
+            result.append(_validate_profile_value(key, item))
+        elif key == "keepalived_vip":
+            result.append(_validate_profile_value(key, item))
+        else:
+            raise CommandConfigError(f"不支持的 Keepalived 候选参数: {key}")
+    return result
+
+
+def _keepalived_shell_words(values: Sequence[str]) -> str:
+    return " ".join(values)
+
+
+def _is_runtime_keepalived_profile(profile: Dict[str, Any]) -> bool:
+    keys = (
+        "keepalived_bin", "keepalived_conf", "keepalived_log", "keepalived_vip",
+        "keepalived_port", "keepalived_version",
     )
     return any(key in profile for key in keys) and all(
         key not in profile or isinstance(profile.get(key), list) for key in keys
@@ -639,6 +754,86 @@ def _build_nginx_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
     raise CommandConfigError(f"未注册的 Nginx 动态指标命令: {metric_id}")
 
 
+def _keepalived_discovery_prefix(profile: Dict[str, Any], *, include_log: bool = False) -> str:
+    """Discover Keepalived's running binary/config before using fallbacks."""
+    bins = _keepalived_shell_words(_keepalived_candidates(profile, "keepalived_bin"))
+    confs = _keepalived_shell_words(_keepalived_candidates(profile, "keepalived_conf"))
+    logs = _keepalived_shell_words(_keepalived_candidates(profile, "keepalived_log"))
+    bins_loop = bins or ":"
+    confs_loop = confs or ":"
+    logs_loop = logs or ":"
+    parts = [
+        "process_line=$(pgrep -fa '[k]eepalived' | head -n 1)",
+        "keepalived_bin=$(printf '%s\\n' \"$process_line\" | sed -nE 's/^[0-9]+[[:space:]]+([^[:space:]]+).*/\\1/p')",
+        "keepalived_conf=$(printf '%s\\n' \"$process_line\" | sed -nE 's/.*[[:space:]]-f[[:space:]]*=?[[:space:]]*([^[:space:]]+).*/\\1/p')",
+        "if test -n \"$keepalived_bin\" && ! test -x \"$keepalived_bin\"; then keepalived_bin=''; fi",
+        f"if test -z \"$keepalived_bin\"; then for p in {bins_loop}; do if test -x \"$p\"; then keepalived_bin=\"$p\"; break; fi; done; fi",
+        "if test -n \"$keepalived_conf\" && ! test -f \"$keepalived_conf\"; then keepalived_conf=''; fi",
+        f"if test -z \"$keepalived_conf\"; then for p in {confs_loop}; do if test -f \"$p\"; then keepalived_conf=\"$p\"; break; fi; done; fi",
+    ]
+    if include_log:
+        parts += [
+            f"keepalived_log=''; for p in {logs_loop}; do if test -f \"$p\"; then keepalived_log=\"$p\"; break; fi; done",
+        ]
+    return "; ".join(parts)
+
+
+def _keepalived_config_prefix(profile: Dict[str, Any]) -> str:
+    """Emit normalized config markers consumed by Keepalived parsers."""
+    return (
+        _keepalived_discovery_prefix(profile)
+        + "; if test -z \"$keepalived_conf\"; then printf '%s\\n' INSPECT_KEEPALIVED_CONFIG_NOT_FOUND; else "
+        + "printf 'INSPECT_KEEPALIVED_CONF=%s\\n' \"$keepalived_conf\"; "
+        + "state=$(sed -nE 's/^[[:space:]]*state[[:space:]]+([A-Za-z]+).*/\\1/p' \"$keepalived_conf\" | head -n 1); printf 'CONFIG_STATE=%s\\n' \"$state\"; "
+        + "awk '/virtual_ipaddress[[:space:]]*\\{/{inside=1;next} inside && /\\}/{inside=0;next} inside {gsub(/[;,]/,\"\",$1); if ($1 ~ /^[0-9A-Fa-f:.]+(\\/[0-9]+)?$/) print \"CONFIG_VIP=\" $1}' \"$keepalived_conf\"; fi"
+    )
+
+
+def _build_keepalived_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
+    """Build a Keepalived command with process-first path discovery."""
+    if metric_id == "local.keepalived.version":
+        return (
+            _keepalived_discovery_prefix(profile)
+            + "; if test -z \"$process_line\" || test -z \"$keepalived_bin\"; then printf '%s\\n' INSPECT_KEEPALIVED_RUNNING_NOT_FOUND; else \"$keepalived_bin\" -v 2>&1; fi"
+        )
+    if metric_id == "local.keepalived.vip.bound":
+        return _keepalived_config_prefix(profile) + "; if test -n \"$keepalived_conf\"; then ip -brief addr; fi"
+    if metric_id == "local.keepalived.vip.access":
+        vips = _keepalived_shell_words(_keepalived_candidates(profile, "keepalived_vip"))
+        ports = _keepalived_shell_words(_keepalived_candidates(profile, "keepalived_port"))
+        vip_extract = (
+            "; keepalived_vips=''; if test -n \"$keepalived_conf\"; then "
+            "keepalived_vips=$(sed -n '/virtual_ipaddress[[:space:]]*{/,/}/p' \"$keepalived_conf\" | "
+            "grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+(/[0-9]+)?' | head -n 1); fi; "
+        )
+        return (
+            _keepalived_discovery_prefix(profile)
+            + vip_extract
+            + f"if test -z \"$keepalived_vips\"; then keepalived_vips='{vips}'; fi; keepalived_port='{ports}'; if test -z \"$keepalived_vips\" || test -z \"$keepalived_port\"; then printf '%s\\n' INSPECT_KEEPALIVED_VIP_NOT_FOUND; else for vip in $keepalived_vips; do vip=${{vip%%/*}}; for port in $keepalived_port; do printf 'CONFIG_ACCESS=%s:%s\\n' \"$vip\" \"$port\"; curl -sS -I --connect-timeout 3 \"http://$vip:$port/\" | head -n 1; done; done; fi"
+        )
+    if metric_id == "local.keepalived.config.baseline":
+        return (
+            _keepalived_discovery_prefix(profile)
+            + "; if test -z \"$keepalived_conf\"; then printf '%s\\n' INSPECT_KEEPALIVED_CONFIG_NOT_FOUND; else printf '%s\\n' \"$keepalived_conf\"; grep -E 'state|interface|virtual_router_id|priority|advert_int|virtual_ipaddress|script|track_script' \"$keepalived_conf\"; fi"
+        )
+    if metric_id == "local.keepalived.healthcheck.script":
+        return (
+            _keepalived_discovery_prefix(profile)
+            + "; if test -z \"$keepalived_conf\"; then printf '%s\\n' INSPECT_KEEPALIVED_CONFIG_NOT_FOUND; else script_path=$(awk '/^[[:space:]]*script[[:space:]]+/{if ($1==\"script\") {gsub(/[\";]/,\"\",$2); print $2; exit}}' \"$keepalived_conf\"); if test -z \"$script_path\"; then printf '%s\\n' INSPECT_KEEPALIVED_SCRIPT_NOT_FOUND; else printf 'CONFIG_SCRIPT=%s\\n' \"$script_path\"; ls -ld \"$script_path\" 2>/dev/null; if test -f \"$script_path\" && test -x \"$script_path\"; then printf '%s\\n' SCRIPT_EXECUTABLE=true; else printf '%s\\n' SCRIPT_EXECUTABLE=false; fi; fi; fi"
+        )
+    if metric_id == "local.keepalived.error_log.key_evidence":
+        return (
+            _keepalived_discovery_prefix(profile, include_log=True)
+            + "; if test -z \"$keepalived_log\"; then printf '%s\\n' INSPECT_KEEPALIVED_LOG_NOT_FOUND; else printf 'INSPECT_KEEPALIVED_LOG=%s\\n' \"$keepalived_log\"; tail -n 1000 \"$keepalived_log\" | grep -Ei 'Entering MASTER|Entering BACKUP|Entering FAULT|script.*failed|VRRP'; fi"
+        )
+    if metric_id == "local.keepalived.capability.stability":
+        return (
+            _keepalived_discovery_prefix(profile, include_log=True)
+            + "; if test -z \"$keepalived_bin\" || test -z \"$keepalived_log\"; then printf '%s\\n' INSPECT_KEEPALIVED_CAPABILITY_NOT_FOUND; else getcap \"$keepalived_bin\" 2>/dev/null; systemctl show keepalived-opt -p AmbientCapabilities -p CapabilityBoundingSet 2>/dev/null; printf 'INSPECT_KEEPALIVED_LOG=%s\\n' \"$keepalived_log\"; tail -n 50 \"$keepalived_log\"; fi"
+        )
+    raise CommandConfigError(f"未注册的 Keepalived 动态指标命令: {metric_id}")
+
+
 def build_metric_command_specs(
     metrics: Optional[Sequence[Dict[str, Any]]] = None,
     profile: Optional[Dict[str, Any]] = None,
@@ -708,6 +903,25 @@ def build_metric_command_specs(
                     required_commands=required,
                     source_anchor=entry["anchor"],
                     allowed_binaries=_NGINX_GENERATED_ALLOWED_BINARIES,
+                    trusted_generated_shell=True,
+                )
+            )
+            continue
+        if (
+            metric_id.startswith("local.keepalived.")
+            and metric_id != KEEPALIVED_PROCESS_METRIC
+            and _is_runtime_keepalived_profile(profile)
+        ):
+            command = _build_keepalived_metric_command(metric_id, profile)
+            specs.append(
+                CommandSpec(
+                    metric_id=metric_id,
+                    command=command,
+                    timeout_sec=timeout_sec,
+                    become=bool(entry["become"]),
+                    required_commands=required,
+                    source_anchor=entry["anchor"],
+                    allowed_binaries=_KEEPALIVED_GENERATED_ALLOWED_BINARIES,
                     trusted_generated_shell=True,
                 )
             )
@@ -873,13 +1087,21 @@ def validate_command_specs(specs: Sequence[CommandSpec]) -> None:
                 )
             continue
         if spec.trusted_generated_shell:
-            if not spec.metric_id.startswith("local.nginx."):
+            if not (
+                spec.metric_id.startswith("local.nginx.")
+                or spec.metric_id.startswith("local.keepalived.")
+            ):
                 raise CommandNotAllowedError(
-                    f"allow-list 拒绝：只有 Nginx 动态命令可使用内部 shell 变量: {spec.metric_id}"
+                    f"allow-list 拒绝：只有已注册中间件动态命令可使用内部 shell 变量: {spec.metric_id}"
                 )
-            if "`" in spec.command or _NGINX_UNSAFE_GENERATED_TOKENS.search(spec.command):
+            unsafe_tokens = (
+                _NGINX_UNSAFE_GENERATED_TOKENS
+                if spec.metric_id.startswith("local.nginx.")
+                else _KEEPALIVED_UNSAFE_GENERATED_TOKENS
+            )
+            if "`" in spec.command or unsafe_tokens.search(spec.command):
                 raise CommandNotAllowedError(
-                    f"allow-list 拒绝：Nginx 动态命令含危险执行词: {spec.metric_id}"
+                    f"allow-list 拒绝：中间件动态命令含危险执行词: {spec.metric_id}"
                 )
             # The command is generated entirely from fixed code plus values
             # validated by _nginx_candidates; do not run the ordinary `$` /
@@ -1012,6 +1234,7 @@ class RunPlan:
     cleanup_paths: Tuple[Path, ...] = field(default_factory=tuple)
     selection_kind: str = "unknown"
     nginx_whitelist: Tuple[str, ...] = ()
+    keepalived_whitelist: Tuple[str, ...] = ()
 
 
 def _default_runtime_dir() -> Path:
@@ -1023,6 +1246,7 @@ def prepare_run(
     specs: Sequence[CommandSpec],
     runtime_dir: Optional[Path] = None,
     nginx_whitelist: Optional[Sequence[str]] = None,
+    keepalived_whitelist: Optional[Sequence[str]] = None,
 ) -> RunPlan:
     """allow-list 校验 → 生成 playbook 与 argv → RunPlan（不执行不连接）。
 
@@ -1056,6 +1280,7 @@ def prepare_run(
         ),
         selection_kind=str(getattr(selection, "kind", "unknown")),
         nginx_whitelist=tuple(nginx_whitelist or ()),
+        keepalived_whitelist=tuple(keepalived_whitelist or ()),
     )
     plan.argv = build_playbook_argv(
         plan.playbook_path, plan.inventory_file, plan.limit
@@ -1267,6 +1492,8 @@ def host_deadline_exceeded(start_mono: float, now_mono: float) -> bool:
 
 NGINX_METRIC_PREFIX = "local.nginx."
 NGINX_PROCESS_METRIC = "local.nginx.process.present"
+KEEPALIVED_METRIC_PREFIX = "local.keepalived."
+KEEPALIVED_PROCESS_METRIC = "local.keepalived.process.present"
 
 
 def _nginx_process_present(metric_result: Dict[str, Any]) -> bool:
@@ -1306,6 +1533,43 @@ def select_nginx_metrics(
     other = [m for m in results if not m["metric_id"].startswith(NGINX_METRIC_PREFIX)]
     whitelist = set(nginx_whitelist or [])
     if str(host_ip) in whitelist:
+        return other + [process]
+    return other
+
+
+def _keepalived_process_present(metric_result: Dict[str, Any]) -> bool:
+    """进程发现结果是否命中 Keepalived。"""
+    return (
+        metric_result.get("error") is None
+        and metric_result.get("rc") == 0
+        and bool((metric_result.get("stdout") or "").strip())
+    )
+
+
+def select_keepalived_metrics(
+    metric_results: Sequence[Dict[str, Any]],
+    *,
+    host_ip: str,
+    keepalived_whitelist: Optional[Sequence[str]] = None,
+) -> List[Dict[str, Any]]:
+    """按 Keepalived 进程发现结果跳过非 HA 主机或保留白名单 CRIT。"""
+    results = list(metric_results)
+    keepalived = [
+        m for m in results if m["metric_id"].startswith(KEEPALIVED_METRIC_PREFIX)
+    ]
+    if not keepalived:
+        return results
+    process = next(
+        (m for m in keepalived if m["metric_id"] == KEEPALIVED_PROCESS_METRIC), None
+    )
+    if process is None or process.get("error") is not None:
+        return results
+    if _keepalived_process_present(process):
+        return results
+    other = [
+        m for m in results if not m["metric_id"].startswith(KEEPALIVED_METRIC_PREFIX)
+    ]
+    if str(host_ip) in set(keepalived_whitelist or ()):
         return other + [process]
     return other
 
@@ -1405,6 +1669,11 @@ def _execute_fixture(plan: RunPlan, fixture_dir: Path) -> Dict[str, Any]:
             metric_results,
             host_ip=str(host.ip),
             nginx_whitelist=plan.nginx_whitelist,
+        )
+        metric_results = select_keepalived_metrics(
+            metric_results,
+            host_ip=str(host.ip),
+            keepalived_whitelist=plan.keepalived_whitelist,
         )
         host_results.append(
             build_host_result(
@@ -1865,6 +2134,11 @@ def _parse_callback_results(
             host_ip=str(state["host"].ip),
             nginx_whitelist=plan.nginx_whitelist,
         )
+        metrics = select_keepalived_metrics(
+            metrics,
+            host_ip=str(state["host"].ip),
+            keepalived_whitelist=plan.keepalived_whitelist,
+        )
         results.append(
             build_host_result(
                 state["host"],
@@ -1910,10 +2184,15 @@ def run(
     fixture_dir: Optional[Path] = None,
     runtime_dir: Optional[Path] = None,
     nginx_whitelist: Optional[Sequence[str]] = None,
+    keepalived_whitelist: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """prepare_run + execute_plan 便捷入口（cli 编排挂接点）。"""
     plan = prepare_run(
-        selection, specs, runtime_dir=runtime_dir, nginx_whitelist=nginx_whitelist
+        selection,
+        specs,
+        runtime_dir=runtime_dir,
+        nginx_whitelist=nginx_whitelist,
+        keepalived_whitelist=keepalived_whitelist,
     )
     return execute_plan(plan, fixture_dir=fixture_dir)
 
@@ -1945,6 +2224,8 @@ __all__ = [
     "METRIC_TIMEOUT_SEC",
     "NGINX_METRIC_PREFIX",
     "NGINX_PROCESS_METRIC",
+    "KEEPALIVED_METRIC_PREFIX",
+    "KEEPALIVED_PROCESS_METRIC",
     "PROBE_TIMEOUT_SEC",
     "RunPlan",
     "STATUS_ERROR",
@@ -1963,5 +2244,6 @@ __all__ = [
     "run",
     "run_status_for_hosts",
     "select_nginx_metrics",
+    "select_keepalived_metrics",
     "validate_command_specs",
 ]

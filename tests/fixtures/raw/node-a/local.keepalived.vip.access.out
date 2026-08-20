@@ -1,0 +1,3 @@
+# fixture: VIP endpoint returns an explainable HTTP status
+CONFIG_ACCESS=192.0.2.253:8010
+HTTP/1.1 200 OK

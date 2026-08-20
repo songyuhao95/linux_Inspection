@@ -1,0 +1,72 @@
+# Keepalived 文档基线阈值（keepalived-p0-v1）。
+# 来源：《安徽农金Nginx、Keepalived运维巡检手册v1.0.docx》P0/P1 指标表。
+# 进程、配置、VIP、脚本和日志均按目标主机运行实例自动发现；inspect.conf 只作兜底。
+schema: threshold-baseline-v1
+version: keepalived-p0-v1
+scope: keepalived-p0-v1
+source_doc: "安徽农金Nginx、Keepalived运维巡检手册v1.0.docx（P0/P1 指标表）"
+metrics:
+  local.keepalived.process.present:
+    name: Keepalived 进程存在性
+    source_anchor: "P0 Keepalived本节点服务：主进程和 VRRP 子进程存在；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "pgrep -fa '[k]eepalived' 至少发现一条真实 Keepalived 进程；命令行中出现路径但没有进程不算运行", rule_id: "keepalived-p0-v1.keepalived.process.present.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "未发现 Keepalived 主进程/VRRP 子进程；仅对 keepalived_whitelist 白名单内主机给出 CRIT，白名单外主机跳过该中间件", rule_id: "keepalived-p0-v1.keepalived.process.present.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无权限或 pgrep 不可用" }
+  local.keepalived.version:
+    name: Keepalived 版本
+    source_anchor: "环境信息 Keepalived版本：以运行中 keepalived -v 输出为准；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "从运行中 Keepalived 进程取得对应二进制并执行 -v；版本命中 inspect.conf keepalived_version 候选值", rule_id: "keepalived-p0-v1.keepalived.version.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "实际 Keepalived 版本不等于 inspect.conf keepalived_version 中任一允许版本", rule_id: "keepalived-p0-v1.keepalived.version.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无法发现二进制、-v 无版本输出或未配置版本基线" }
+  local.keepalived.vip.bound:
+    name: VIP 绑定状态
+    source_anchor: "P0 VIP绑定状态：ip -brief addr；ip addr show dev interface；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "从运行配置读取 state 和 virtual_ipaddress；MASTER 持有 VIP，BACKUP 不持有 VIP", rule_id: "keepalived-p0-v1.keepalived.vip.bound.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "MASTER 未绑定配置中的 VIP，或 BACKUP 绑定了配置中的 VIP；单主机巡检不能证明另一节点是否同时持有 VIP", rule_id: "keepalived-p0-v1.keepalived.vip.bound.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置/VIP/角色无法发现，或 ip 命令不可用" }
+  local.keepalived.vip.access:
+    name: VIP 访问
+    source_anchor: "P0 VIP访问：curl -sS -I --connect-timeout 3 http://VIP:8010/；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "访问配置中的 VIP 和 keepalived_port，HTTP 返回 200/3xx/401/403 等可解释状态且不是 5xx", rule_id: "keepalived-p0-v1.keepalived.vip.access.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "VIP 连接失败、超时、拒绝连接或 HTTP 返回 5xx", rule_id: "keepalived-p0-v1.keepalived.vip.access.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "VIP/端口无法从运行配置或 inspect.conf 得到，或 curl 不可用" }
+  local.keepalived.config.baseline:
+    name: Keepalived 配置基线
+    source_anchor: "P0 Keepalived配置基线：state/interface/virtual_router_id/priority/advert_int/virtual_ipaddress/script/track_script；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "运行配置同时包含 state、interface、virtual_router_id、priority、advert_int、virtual_ipaddress、script、track_script 关键项", rule_id: "keepalived-p0-v1.keepalived.config.baseline.ok", reason: null, note: null }
+      WARN: { rule: "运行配置缺少任一关键项，或存在配置漂移；报告列出实际命中的指令供运维复核", rule_id: "keepalived-p0-v1.keepalived.config.baseline.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "运行配置不可发现、不可读或 grep 不可用" }
+  local.keepalived.healthcheck.script:
+    name: 健康检查脚本
+    source_anchor: "P0 健康检查脚本：ls -l 脚本；echo $?；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "从 vrrp_script/track_script 解析出的脚本存在且可执行；巡检仅静态检查，不执行现场脚本", rule_id: "keepalived-p0-v1.keepalived.healthcheck.script.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "配置引用的健康检查脚本不存在或不可执行", rule_id: "keepalived-p0-v1.keepalived.healthcheck.script.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置/脚本引用无法发现或无法读取" }
+  local.keepalived.error_log.key_evidence:
+    name: Keepalived 关键日志
+    source_anchor: "P0 关键日志：tail keepalived.log；egrep MASTER/BACKUP/FAULT/script failed/VRRP；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "日志末尾 1000 行无 FAULT、健康检查脚本失败，且 MASTER/BACKUP 切换不频繁", rule_id: "keepalived-p0-v1.keepalived.error_log.key_evidence.ok", reason: null, note: null }
+      WARN: { rule: "日志末尾 1000 行出现短时间反复 MASTER/BACKUP 切换，但没有 FAULT 或脚本失败", rule_id: "keepalived-p0-v1.keepalived.error_log.key_evidence.warn", reason: null, note: null }
+      CRIT: { rule: "日志出现 Entering FAULT 或健康检查脚本失败", rule_id: "keepalived-p0-v1.keepalived.error_log.key_evidence.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "日志路径无法发现、文件不可读或尚未配置日志文件" }
+  local.keepalived.capability.stability:
+    name: Keepalived 能力与漂移稳定性
+    source_anchor: "P1 Keepalived能力与漂移稳定性：getcap/systemd capability/漂移日志；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "运行二进制具备 cap_net_admin、cap_net_raw 等网络能力，且最近日志无 FAULT、脚本失败或频繁切换", rule_id: "keepalived-p0-v1.keepalived.capability.stability.ok", reason: null, note: null }
+      WARN: { rule: "最近日志出现频繁 MASTER/BACKUP 切换，但没有明确 FAULT 或脚本失败", rule_id: "keepalived-p0-v1.keepalived.capability.stability.warn", reason: null, note: null }
+      CRIT: { rule: "缺少 cap_net_admin/cap_net_raw 等必要能力，或日志出现 FAULT/脚本失败", rule_id: "keepalived-p0-v1.keepalived.capability.stability.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "getcap/systemctl/日志不可用，或运行二进制/日志路径无法发现" }

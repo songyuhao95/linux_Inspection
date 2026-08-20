@@ -723,6 +723,179 @@ def parse_nginx_security_baseline(output: str) -> Dict[str, Any]:
     }
 
 
+# -- local.keepalived.* ------------------------------------------------------
+
+
+def _has_keepalived_missing_marker(output: str, marker: str) -> bool:
+    return marker in _content_lines(output)
+
+
+_KEEPALIVED_VERSION_RE = re.compile(
+    r"\bkeepalived\s*(?:v|/)?\s*([0-9][A-Za-z0-9._-]*)\b", re.IGNORECASE
+)
+
+
+def parse_keepalived_version(output: str) -> Dict[str, Any]:
+    """从运行中的 Keepalived ``-v`` 输出提取统一的 keepalived/x.y.z。"""
+    if _has_keepalived_missing_marker(output, "INSPECT_KEEPALIVED_RUNNING_NOT_FOUND"):
+        raise ParseError("未发现运行中的 Keepalived 或其可执行文件")
+    match = _KEEPALIVED_VERSION_RE.search(output)
+    if not match:
+        raise ParseError("keepalived -v 未返回可识别版本号")
+    version = "keepalived/" + match.group(1)
+    return {"version": version, "summary": [mask_output(ln) for ln in _content_lines(output)[:3]]}
+
+
+_IP_WITH_PREFIX_RE = re.compile(r"(?<![0-9A-Fa-f:.])([0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{0,4}){2,7}|[0-9]{1,3}(?:\.[0-9]{1,3}){3})(?:/[0-9]+)?")
+
+
+def _without_prefix(value: str) -> str:
+    return value.split("/", 1)[0].strip()
+
+
+def parse_keepalived_vip_bound(output: str) -> Dict[str, Any]:
+    """解析配置角色/VIP 与 ``ip -brief addr`` 的实际绑定结果。"""
+    if _has_keepalived_missing_marker(output, "INSPECT_KEEPALIVED_CONFIG_NOT_FOUND"):
+        raise ParseError("未发现 Keepalived 配置文件（进程参数与 inspect.conf 候选均无可用路径）")
+    lines = _content_lines(output)
+    state = ""
+    expected: List[str] = []
+    for line in lines:
+        if line.startswith("CONFIG_STATE="):
+            state = line.split("=", 1)[1].strip().upper()
+        elif line.startswith("CONFIG_VIP="):
+            value = _without_prefix(line.split("=", 1)[1])
+            if value:
+                expected.append(value)
+    if not state or not expected:
+        raise ParseError("Keepalived 配置缺少 state 或 virtual_ipaddress")
+    actual_text = "\n".join(
+        line for line in lines
+        if not line.startswith(("INSPECT_", "CONFIG_"))
+    )
+    actual = {_without_prefix(m.group(0)) for m in _IP_WITH_PREFIX_RE.finditer(actual_text)}
+    bound = [vip for vip in expected if vip in actual]
+    return {
+        "state": state,
+        "expected_vips": expected,
+        "bound_vips": bound,
+        "bound": bool(bound),
+        "summary": [mask_output(line) for line in lines[-8:]],
+    }
+
+
+_HTTP_STATUS_RE = re.compile(r"\bHTTP/[0-9.]+[ \t]+(?P<status>[1-5][0-9]{2})")
+
+
+def parse_keepalived_vip_access(output: str) -> Dict[str, Any]:
+    if _has_keepalived_missing_marker(output, "INSPECT_KEEPALIVED_VIP_NOT_FOUND"):
+        raise ParseError("未发现 Keepalived VIP 或访问端口")
+    lines = _content_lines(output)
+    accesses = [line for line in lines if line.startswith("CONFIG_ACCESS=")]
+    statuses = [int(m.group("status")) for m in (_HTTP_STATUS_RE.search(line) for line in lines) if m]
+    if not accesses:
+        raise ParseError("未生成 Keepalived VIP 访问目标")
+    return {
+        "targets": [line.split("=", 1)[1] for line in accesses],
+        "http_status": statuses[0] if statuses else None,
+        "reachable": bool(statuses),
+        "rows": [mask_output(line) for line in lines[-8:]],
+    }
+
+
+def _keepalived_content_lines(output: str) -> List[str]:
+    return [
+        line for line in _content_lines(output)
+        if not line.startswith("INSPECT_KEEPALIVED_")
+        and not line.startswith("CONFIG_")
+    ]
+
+
+def parse_keepalived_config_baseline(output: str) -> Dict[str, Any]:
+    if _has_keepalived_missing_marker(output, "INSPECT_KEEPALIVED_CONFIG_NOT_FOUND"):
+        raise ParseError("未发现可读取的 Keepalived 配置文件")
+    lines = _keepalived_content_lines(output)
+    directives = set()
+    for line in lines:
+        for name in (
+            "state", "interface", "virtual_router_id", "priority", "advert_int",
+            "virtual_ipaddress", "script", "track_script",
+        ):
+            if re.search(r"\b" + re.escape(name) + r"\b", line):
+                directives.add(name)
+    if not lines:
+        raise ParseError("Keepalived 配置文件不可读或无关键配置输出")
+    return {"directives": sorted(directives), "rows": [mask_output(line) for line in lines[:15]]}
+
+
+def parse_keepalived_healthcheck(output: str) -> Dict[str, Any]:
+    if _has_keepalived_missing_marker(output, "INSPECT_KEEPALIVED_CONFIG_NOT_FOUND"):
+        raise ParseError("未发现 Keepalived 配置文件")
+    lines = _content_lines(output)
+    if _has_keepalived_missing_marker(output, "INSPECT_KEEPALIVED_SCRIPT_NOT_FOUND"):
+        return {"configured": False, "script": None, "present": False, "executable": False, "rows": []}
+    script = next((line.split("=", 1)[1] for line in lines if line.startswith("CONFIG_SCRIPT=")), None)
+    if not script:
+        raise ParseError("未发现 Keepalived 健康检查脚本引用")
+    executable = any(line == "SCRIPT_EXECUTABLE=true" for line in lines)
+    return {
+        "configured": True,
+        "script": mask_output(script),
+        "present": executable,
+        "executable": executable,
+        "rows": [mask_output(line) for line in lines[-5:]],
+    }
+
+
+def parse_keepalived_error_log(output: str) -> Dict[str, Any]:
+    if _has_keepalived_missing_marker(output, "INSPECT_KEEPALIVED_LOG_NOT_FOUND"):
+        raise ParseError("未发现 Keepalived 日志文件（进程/inspect.conf 候选均无可用路径）")
+    lines = [
+        line for line in _content_lines(output)
+        if not line.startswith("INSPECT_KEEPALIVED_LOG=")
+    ]
+    text = "\n".join(lines)
+    transitions = len(re.findall(r"Entering (?:MASTER|BACKUP)", text, re.IGNORECASE))
+    faults = len(re.findall(r"Entering FAULT", text, re.IGNORECASE))
+    script_failures = len(re.findall(r"script.*failed", text, re.IGNORECASE))
+    return {
+        "hit_count": len(lines),
+        "transition_count": transitions,
+        "fault_count": faults,
+        "script_failure_count": script_failures,
+        "keyword_counts": {
+            "MASTER_BACKUP": transitions,
+            "FAULT": faults,
+            "SCRIPT_FAILED": script_failures,
+        },
+        "last_hits": [mask_output(line) for line in lines[-5:]],
+    }
+
+
+def parse_keepalived_capability_stability(output: str) -> Dict[str, Any]:
+    if _has_keepalived_missing_marker(output, "INSPECT_KEEPALIVED_CAPABILITY_NOT_FOUND"):
+        raise ParseError("未发现 Keepalived 二进制或日志路径")
+    lines = _content_lines(output)
+    log_marker = next((line for line in lines if line.startswith("INSPECT_KEEPALIVED_LOG=")), None)
+    text = "\n".join(lines)
+    has_net_admin = bool(re.search(r"cap_net_admin", text, re.IGNORECASE))
+    has_net_raw = bool(re.search(r"cap_net_raw", text, re.IGNORECASE))
+    log_lines = [line for line in lines if not line.startswith("INSPECT_KEEPALIVED_LOG=")]
+    log_text = "\n".join(log_lines)
+    transitions = len(re.findall(r"Entering (?:MASTER|BACKUP)", log_text, re.IGNORECASE))
+    faults = len(re.findall(r"Entering FAULT", log_text, re.IGNORECASE))
+    script_failures = len(re.findall(r"script.*failed", log_text, re.IGNORECASE))
+    return {
+        "has_net_admin": has_net_admin,
+        "has_net_raw": has_net_raw,
+        "log_available": log_marker is not None,
+        "transition_count": transitions,
+        "fault_count": faults,
+        "script_failure_count": script_failures,
+        "rows": [mask_output(line) for line in lines[-10:]],
+    }
+
+
 # --------------------------------------------------------------------------
 # 解析器注册表（metrics.py parser 字段名 ↔ 函数；TD §5.2 按名注册）
 # --------------------------------------------------------------------------
@@ -747,6 +920,14 @@ PARSERS: Dict[str, Any] = {
     "local.nginx.access_log.status_codes": parse_nginx_access_log_status_codes,
     "local.nginx.config.baseline": parse_nginx_config_baseline,
     "local.nginx.security.baseline": parse_nginx_security_baseline,
+    "local.keepalived.process.present": parse_process_present,
+    "local.keepalived.version": parse_keepalived_version,
+    "local.keepalived.vip.bound": parse_keepalived_vip_bound,
+    "local.keepalived.vip.access": parse_keepalived_vip_access,
+    "local.keepalived.config.baseline": parse_keepalived_config_baseline,
+    "local.keepalived.healthcheck.script": parse_keepalived_healthcheck,
+    "local.keepalived.error_log.key_evidence": parse_keepalived_error_log,
+    "local.keepalived.capability.stability": parse_keepalived_capability_stability,
 }
 
 # parser 字段名与注册表一一对应（tests 机械校验）
@@ -1107,6 +1288,104 @@ def _judge_nginx_security_baseline(
     }
 
 
+# -- local.keepalived.* 判定（keepalived-p0-v1） -----------------------------
+
+
+def _judge_keepalived_version(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    expected = [
+        str(item).strip()
+        for item in (profile or {}).get("keepalived_version", [])
+        if str(item).strip()
+    ]
+    actual = str(parsed.get("version") or "")
+    if not expected:
+        return _unknown_decision(resolved, extra_note="inspect.conf 未配置 keepalived_version 版本基线")
+    note = f"实际版本={actual}；允许版本={'、'.join(expected)}"
+    if actual in expected:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK), "note": note}
+    return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT), "note": note}
+
+
+def _judge_keepalived_vip_bound(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    state = parsed.get("state")
+    bound = bool(parsed.get("bound"))
+    if state == "MASTER" and bound:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    if state == "BACKUP" and not bound:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {
+        "status": STATUS_CRIT,
+        "rule": _baseline_rule(resolved, STATUS_CRIT),
+        "note": f"配置角色={state}；配置 VIP={'、'.join(parsed.get('expected_vips', []))}；当前持有={'、'.join(parsed.get('bound_vips', [])) or '无'}",
+    }
+
+
+def _judge_keepalived_vip_access(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    status = parsed.get("http_status")
+    if status is None:
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    if status >= 500:
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
+_KEEPALIVED_CONFIG_DIRECTIVES = frozenset(
+    {"state", "interface", "virtual_router_id", "priority", "advert_int",
+     "virtual_ipaddress", "script", "track_script"}
+)
+
+
+def _judge_keepalived_config_baseline(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    missing = sorted(_KEEPALIVED_CONFIG_DIRECTIVES - set(parsed.get("directives", [])))
+    if not missing:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {
+        "status": STATUS_WARN,
+        "rule": _baseline_rule(resolved, STATUS_WARN),
+        "note": "配置基线缺失关键项：" + "、".join(missing),
+    }
+
+
+def _judge_keepalived_healthcheck(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    if parsed.get("present") and parsed.get("executable"):
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+
+
+def _judge_keepalived_error_log(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    if parsed.get("fault_count", 0) or parsed.get("script_failure_count", 0):
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    if parsed.get("transition_count", 0) >= 3:
+        return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN)}
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
+def _judge_keepalived_capability_stability(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    if not parsed.get("log_available"):
+        return _unknown_decision(resolved, extra_note="Keepalived 日志不可用，无法判断漂移稳定性")
+    if not parsed.get("has_net_admin") or not parsed.get("has_net_raw"):
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    if parsed.get("fault_count", 0) or parsed.get("script_failure_count", 0):
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    if parsed.get("transition_count", 0) >= 3:
+        return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN)}
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
 # 指标 → 判定函数（数值边界全部来自 MR §5/§6 已批准基线）
 JUDGERS: Dict[str, Any] = {
     "local.process.present": _judge_process_present,
@@ -1128,6 +1407,14 @@ JUDGERS: Dict[str, Any] = {
     "local.nginx.access_log.status_codes": _judge_nginx_access_log_status_codes,
     "local.nginx.config.baseline": _judge_nginx_config_baseline,
     "local.nginx.security.baseline": _judge_nginx_security_baseline,
+    "local.keepalived.process.present": _judge_process_present,
+    "local.keepalived.version": _judge_keepalived_version,
+    "local.keepalived.vip.bound": _judge_keepalived_vip_bound,
+    "local.keepalived.vip.access": _judge_keepalived_vip_access,
+    "local.keepalived.config.baseline": _judge_keepalived_config_baseline,
+    "local.keepalived.healthcheck.script": _judge_keepalived_healthcheck,
+    "local.keepalived.error_log.key_evidence": _judge_keepalived_error_log,
+    "local.keepalived.capability.stability": _judge_keepalived_capability_stability,
 }
 
 # 数值化指标（normalized_value 非 null，可参与外部配置数值规则；MR §5）
@@ -1143,6 +1430,7 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.nginx.error_log.key_evidence",
         "local.nginx.connections.status",
         "local.nginx.access_log.status_codes",
+        "local.keepalived.error_log.key_evidence",
     }
 )
 
@@ -1174,6 +1462,8 @@ def _normalized_value(metric_id: str, parsed: Dict[str, Any]) -> Optional[float]
         return float(parsed["active"]) if parsed["configured"] else None
     if metric_id == "local.nginx.access_log.status_codes":
         return float(parsed["five_xx"])
+    if metric_id == "local.keepalived.error_log.key_evidence":
+        return float(parsed["hit_count"])
     return None
 
 
@@ -1222,6 +1512,23 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
     if metric_id == "local.nginx.security.baseline":
         return (f"server_tokens_off={parsed['server_tokens_off']};"
                 f"autoindex_off={parsed['autoindex_off']}")
+    if metric_id == "local.keepalived.process.present":
+        return "present" if parsed["present"] else "absent"
+    if metric_id == "local.keepalived.version":
+        return parsed["version"]
+    if metric_id == "local.keepalived.vip.bound":
+        return f"state={parsed['state']};bound={parsed['bound']}"
+    if metric_id == "local.keepalived.vip.access":
+        status = "null" if parsed["http_status"] is None else str(parsed["http_status"])
+        return f"reachable={parsed['reachable']};http_status={status}"
+    if metric_id == "local.keepalived.config.baseline":
+        return ";".join(parsed["directives"])
+    if metric_id == "local.keepalived.healthcheck.script":
+        return parsed.get("script") or "not_configured"
+    if metric_id == "local.keepalived.error_log.key_evidence":
+        return str(parsed["hit_count"])
+    if metric_id == "local.keepalived.capability.stability":
+        return f"net_admin={parsed['has_net_admin']};net_raw={parsed['has_net_raw']}"
     return None
 
 
@@ -1390,6 +1697,36 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
     if metric_id == "local.nginx.security.baseline":
         return (f"server_tokens off={parsed['server_tokens_off']}；"
                 f"autoindex off={parsed['autoindex_off']}")
+    if metric_id == "local.keepalived.process.present":
+        if not parsed["present"]:
+            return "未匹配到 Keepalived 进程（absent）"
+        return "；".join(parsed["summary"])
+    if metric_id == "local.keepalived.version":
+        return parsed["version"]
+    if metric_id == "local.keepalived.vip.bound":
+        return (
+            f"state={parsed['state']}；配置VIP={'、'.join(parsed['expected_vips'])}；"
+            f"当前持有={'、'.join(parsed['bound_vips']) or '无'}"
+        )
+    if metric_id == "local.keepalived.vip.access":
+        status = "null" if parsed["http_status"] is None else str(parsed["http_status"])
+        return f"targets={'、'.join(parsed['targets'])}；http_status={status}"
+    if metric_id == "local.keepalived.config.baseline":
+        return "关键指令: " + ("、".join(parsed["directives"]) if parsed["directives"] else "无命中")
+    if metric_id == "local.keepalived.healthcheck.script":
+        return f"script={parsed.get('script') or '未配置'}；可执行={parsed.get('executable', False)}"
+    if metric_id == "local.keepalived.error_log.key_evidence":
+        last = " / ".join(parsed["last_hits"]) if parsed["last_hits"] else "无命中"
+        return (
+            f"hits={parsed['hit_count']}；MASTER/BACKUP切换={parsed['transition_count']}；"
+            f"FAULT={parsed['fault_count']}；脚本失败={parsed['script_failure_count']}；最近命中: {last}"
+        )
+    if metric_id == "local.keepalived.capability.stability":
+        return (
+            f"cap_net_admin={parsed['has_net_admin']}；cap_net_raw={parsed['has_net_raw']}；"
+            f"切换={parsed['transition_count']}；FAULT={parsed['fault_count']}；"
+            f"脚本失败={parsed['script_failure_count']}"
+        )
     return ""
 
 
@@ -1405,6 +1742,8 @@ def _scope_for(metric_id: str) -> str:
     """指标 scope：Nginx 指标归 nginx-p0-v1，其余走 linux-common-p0-v1。"""
     if metric_id.startswith("local.nginx."):
         return "nginx-p0-v1"
+    if metric_id.startswith("local.keepalived."):
+        return "keepalived-p0-v1"
     return SCOPE
 
 
@@ -1962,6 +2301,12 @@ def normalize_run_results(
         ):
             if "nginx" not in host_profiles:
                 host_profiles.append("nginx")
+        if any(
+            str(m.get("metric_id", "")).startswith("local.keepalived.")
+            for m in host_result.get("metrics", [])
+        ):
+            if "keepalived" not in host_profiles:
+                host_profiles.append("keepalived")
         documents.append(
             normalize_host_result(
                 host_result,
@@ -2269,6 +2614,13 @@ __all__ = [
     "parse_nginx_port_listening",
     "parse_nginx_security_baseline",
     "parse_nginx_version",
+    "parse_keepalived_capability_stability",
+    "parse_keepalived_config_baseline",
+    "parse_keepalived_error_log",
+    "parse_keepalived_healthcheck",
+    "parse_keepalived_version",
+    "parse_keepalived_vip_access",
+    "parse_keepalived_vip_bound",
     "parse_process_present",
     "parse_service_active",
     "parse_swap_used_percent",

@@ -54,12 +54,13 @@ STATUS_COLORS: Dict[str, str] = {
 }
 VALID_STATUSES = tuple(STATUS_COLORS)
 
-# RR §3 三 Sheet + nginx 中间件明细 Sheet
+# RR §3 基础汇总、Linux 基础和各中间件明细 Sheet
 SHEET_OVERVIEW = "Overview"
 SHEET_LOCAL = "Local"
 SHEET_NGINX = "nginx"
+SHEET_KEEPALIVED = "keepalived"
 SHEET_ERRORS = "Errors-Evidence"
-SHEET_NAMES = (SHEET_OVERVIEW, SHEET_LOCAL, SHEET_NGINX, SHEET_ERRORS)
+SHEET_NAMES = (SHEET_OVERVIEW, SHEET_LOCAL, SHEET_NGINX, SHEET_KEEPALIVED, SHEET_ERRORS)
 
 # Local 列：以主机/IP 开始；详情指标逐行展开；只保留可读阈值解释和
 # 事实源提供的复现命令，不把来源/证据摘要/provenance 冗余复制到报表。
@@ -370,7 +371,7 @@ def _metric_prefix_filter(prefix: str):
     return _keep
 
 
-_MIDDLEWARE_METRIC_PREFIXES = ("local.nginx.",)
+_MIDDLEWARE_METRIC_PREFIXES = ("local.nginx.", "local.keepalived.")
 
 
 def _local_metric_filter(metric: Mapping[str, Any]) -> bool:
@@ -544,6 +545,13 @@ def _write_workbook(
         metric_filter=_metric_prefix_filter("local.nginx."),
     )
 
+    # ============ keepalived（Keepalived 中间件明细） ============
+    _write_detail_sheet(
+        workbook, SHEET_KEEPALIVED, NGINX_HEADERS, local_widths,
+        docs, host_ips, header_fmt, cell_fmt, status_fmts, crit_value_fmt,
+        metric_filter=_metric_prefix_filter("local.keepalived."),
+    )
+
     # ============ Errors-Evidence（RR §3：error 非空指标与主机 +
     # 文档冲突/缺失 UNKNOWN 清单） ============
     ws = workbook.add_worksheet(SHEET_ERRORS)
@@ -690,6 +698,7 @@ __all__ = [
     "SHEET_LOCAL",
     "SHEET_NAMES",
     "SHEET_NGINX",
+    "SHEET_KEEPALIVED",
     "SHEET_OVERVIEW",
     "STATUS_COLORS",
     "VALID_STATUSES",

@@ -228,6 +228,7 @@ def _as_strings(value: Any) -> List[str]:
 # 由版本化 metric_id 前缀确定；未来新增中间件在此登记。
 _MIDDLEWARE_PREFIXES: tuple = (
     ("local.nginx.", "nginx"),
+    ("local.keepalived.", "keepalived"),
 )
 
 

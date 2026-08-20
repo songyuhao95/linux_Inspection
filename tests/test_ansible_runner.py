@@ -44,6 +44,11 @@ _FULL_PROFILE = {
     "nginx_error_log": "/opt/nginx/logs/error.log",
     "nginx_access_log": "/opt/nginx/logs/access.log",
     "nginx_port": 8010,
+    "keepalived_bin": "/usr/sbin/keepalived",
+    "keepalived_conf": "/opt/keepalived/conf/keepalived.conf",
+    "keepalived_log": "/opt/keepalived/logs/keepalived.log",
+    "keepalived_vip": "192.0.2.253",
+    "keepalived_port": 8010,
 }
 
 # --- 包加载：worktree 中无 inspect/__init__.py（stdlib 同名吸收，
@@ -99,7 +104,7 @@ def _spec(metric_id, command, timeout=10, become=False, error_code=None, error_m
 def test_registry_covers_all_metrics():
     ids = [s.metric_id for s in _specs(_PROFILE)]
     assert set(ids) == set(metrics.ALL_METRIC_IDS)
-    assert len(ids) == len(metrics.ALL_METRIC_IDS) == 19
+    assert len(ids) == len(metrics.ALL_METRIC_IDS) == 27
 
 
 def test_registry_timeouts_match_metrics_registry():
@@ -115,7 +120,7 @@ def test_registry_templates_only_allowed_binaries():
         for b in allowed:
             # Nginx 手册要求的本地 HTTP 探测使用 curl（P0 端口与本地访问 /
             # P1 连接状态），属白名单命令；其余指标仍禁止网络类命令。
-            if s.metric_id.startswith("local.nginx."):
+            if s.metric_id.startswith(("local.nginx.", "local.keepalived.")):
                 assert b not in ("rm", "wget", "ssh", "sh", "bash")
             else:
                 assert b in ("timeout",) or b not in ("rm", "curl", "wget", "ssh", "sh", "bash")
@@ -144,7 +149,7 @@ def test_playbook_minimal_become_only_declared_metrics():
     assert pb.count("become: true") == 2  # 仅 port.listening + logs.key_evidence
     # probe + 8 个 linux 基础 false + nginx.process.present（无 profile 占位、
     # 无 become）；其余 nginx 指标缺 profile 不进 playbook
-    assert pb.count("become: false") == 10
+    assert pb.count("become: false") == 11
 
 
 def test_playbook_no_retries():
@@ -194,8 +199,8 @@ def test_playbook_no_unsupported_profile_tasks():
     specs = _specs({})
     unsupported = [s for s in specs if s.error_code == ar.ERROR_UNSUPPORTED_PROFILE]
     supported = [s for s in specs if s.error_code is None]
-    assert len(unsupported) == 12  # 4 linux + 8 nginx（process.present 无 profile 占位）
-    assert len(supported) == 7  # 6 linux + nginx.process.present
+    assert len(unsupported) == 19  # linux + nginx + keepalived 的 profile 依赖指标
+    assert len(supported) == 8  # 6 linux + nginx/keepalived process.present
     pb = ar.generate_playbook(specs)
     for s in unsupported:
         assert s.metric_id not in pb
@@ -346,6 +351,13 @@ def test_profile_missing_marks_unsupported():
         "local.nginx.access_log.status_codes",
         "local.nginx.config.baseline",
         "local.nginx.security.baseline",
+        "local.keepalived.version",
+        "local.keepalived.vip.bound",
+        "local.keepalived.vip.access",
+        "local.keepalived.config.baseline",
+        "local.keepalived.healthcheck.script",
+        "local.keepalived.error_log.key_evidence",
+        "local.keepalived.capability.stability",
     }
     for s in specs:
         if s.metric_id in need_profile:
@@ -616,7 +628,7 @@ def test_fixture_full_success_host(capsys, tmp_path):
     assert result["execution_status"] == ar.STATUS_SUCCESS
     host = result["hosts"][0]
     assert host["probe_status"] == probe.PROBE_OK
-    assert host["summary"]["total"] == 19  # 10 linux + 9 nginx
+    assert host["summary"]["total"] == 27  # 10 linux + 9 nginx + 8 keepalived
     assert host["summary"]["failed"] == 0
     # 预录输出（剥离 # 头）原样回传
     m = next(x for x in host["metrics"] if x["metric_id"] == "local.process.present")

@@ -1,0 +1,2 @@
+# fixture: running Keepalived master/VRRP process
+9999 /usr/sbin/keepalived -f /opt/keepalived/conf/keepalived.conf -p /opt/keepalived/run/keepalived.pid

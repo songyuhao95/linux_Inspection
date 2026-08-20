@@ -1,0 +1,4 @@
+# fixture: configured executable health-check script
+CONFIG_SCRIPT=/opt/keepalived/scripts/check_nginx.sh
+-rwxr-x--- 1 keepalived keepalived 240 Jan 1 00:00 /opt/keepalived/scripts/check_nginx.sh
+SCRIPT_EXECUTABLE=true

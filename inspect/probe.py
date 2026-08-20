@@ -48,6 +48,9 @@ PROBE_COMMANDS = (
     "head",
     "ls",
     "sed",
+    "ip",
+    "awk",
+    "getcap",
 )
 
 # 探测结果取值
@@ -157,6 +160,14 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     "local.nginx.access_log.status_codes": ("bash", "pgrep", "tail", "grep", "head"),
     "local.nginx.config.baseline": ("bash", "pgrep", "grep", "head"),
     "local.nginx.security.baseline": ("bash", "pgrep", "grep", "head"),
+    "local.keepalived.process.present": ("bash", "pgrep"),
+    "local.keepalived.version": ("bash", "pgrep", "head", "sed"),
+    "local.keepalived.vip.bound": ("bash", "pgrep", "head", "sed", "ip", "awk"),
+    "local.keepalived.vip.access": ("bash", "pgrep", "head", "sed", "awk", "curl"),
+    "local.keepalived.config.baseline": ("bash", "pgrep", "head", "sed", "grep"),
+    "local.keepalived.healthcheck.script": ("bash", "pgrep", "head", "sed", "awk", "ls"),
+    "local.keepalived.error_log.key_evidence": ("bash", "pgrep", "head", "tail", "grep"),
+    "local.keepalived.capability.stability": ("bash", "pgrep", "head", "getcap", "systemctl", "tail"),
 }
 
 

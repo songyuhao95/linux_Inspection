@@ -14,3 +14,7 @@
 /usr/bin/curl
 /usr/bin/head
 /usr/bin/ls
+/usr/bin/sed
+/usr/sbin/ip
+/usr/bin/awk
+/usr/sbin/getcap

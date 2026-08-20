@@ -23,6 +23,7 @@
 - Linux x86_64/CPython 3.12 的报表依赖已随项目 runtime 提交（`pandas`、`numpy`、`xlsxwriter` 及其依赖），新 Linux 环境无需重复安装；精确版本见 `runtime/report-requirements.lock`；
 - 已完成 `--local` 本地 Linux 基础指标采集，以及远程 `-H` 的统一 JSON 事实源；
 - 已完成第一个中间件模块 **Nginx**（`inspect/modules/nginx.py`）：进程发现 + 白名单、9 个指标（含运行版本基线）、Excel `nginx` Sheet、HTML 中间件卡片/筛选/分组、`--nginx` 只巡检 Nginx；
+- 已完成 **Keepalived**（`inspect/modules/keepalived.py`）：进程发现 + 白名单、版本、VIP 绑定/访问、配置基线、健康检查脚本、关键日志和能力稳定性共 8 个指标，Excel `keepalived` Sheet、HTML 筛选/分组、`--keepalived` 只巡检 Keepalived；
 - 当前远程认证以项目 inventory 为配置入口，公开模板不包含可用主机或真实凭据；
 - 远程真实 VM 验证按 `docs/g0-real-vm.md` 执行，部署到 VM 按 `docs/local-vm-deploy.md` 执行；
 - 新增中间件时只扩展 `inspect/modules/`，并同步更新 `docs/specs/`、测试和本 README 的交接状态。
@@ -57,7 +58,7 @@ HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态
 
 ## 监控模块扩展
 
-监控模块注册在 `inspect/modules/`，统一通过 `MonitorModule` 和 `ModuleRegistry` 暴露指标。当前内置模块为 `linux_basic`（Linux 主机基础指标）、`linux_common`（需要产品 profile 的通用指标）和 `nginx`（Nginx 中间件）。以后新增中间件时，应：
+监控模块注册在 `inspect/modules/`，统一通过 `MonitorModule` 和 `ModuleRegistry` 暴露指标。当前内置模块为 `linux_basic`（Linux 主机基础指标）、`linux_common`（需要产品 profile 的通用指标）、`nginx`（Nginx 中间件）和 `keepalived`（Keepalived 中间件）。以后新增中间件时，应：
 
 1. 在 `inspect/metrics.py` 增加带版本/来源锚点的指标定义；
 2. 在 `inspect/modules/` 增加模块文件并显式注册；
@@ -65,8 +66,8 @@ HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态
 4. 为模块增加 fixture 与测试。
 
 仅把任意 `.sh`/`.py` 文件放入目录不会自动执行，必须显式注册并通过 allow-list 校验。
-默认巡检 = `linux_basic` + 全部已注册中间件（当前为 `nginx`）；`--nginx` 只巡检
-Nginx 中间件（仍保留 Linux 主机基础指标）。未选择的模块不进入执行计划，不会生成
+默认巡检 = `linux_basic` + 全部已注册中间件（当前为 `nginx`、`keepalived`）；`--nginx`
+或 `--keepalived` 只巡检对应中间件（仍保留 Linux 主机基础指标）。未选择的模块不进入执行计划，不会生成
 `UNSUPPORTED_PROFILE` 的 UNKNOWN 指标。
 
 ### Linux 主机基础指标
@@ -134,6 +135,22 @@ PID/process_pattern，按“主机 → 实例 → 指标”独立采集；详见
 bash inspect.sh --local --nginx
 bash inspect.sh -H inspection --nginx
 ```
+
+### Keepalived 中间件监控（keepalived-p0-v1）
+
+`inspect/modules/keepalived.py` 按《安徽农金Nginx、Keepalived运维巡检手册v1.0》实现
+8 个指标：进程存在性、运行版本、VIP 绑定、VIP 访问、配置基线、健康检查脚本、关键日志、
+能力与漂移稳定性。路径优先从运行中的 Keepalived 进程及其 `-f` 配置参数发现，找不到时
+使用 `inspect.conf` 的 `keepalived_*` 候选值；两者都找不到时为 UNKNOWN。Keepalived
+白名单主机未运行标记 CRIT，非白名单主机跳过该中间件。Excel `Local` 只保留 Linux 基础
+指标，Keepalived 指标写入独立的 `keepalived` Sheet；HTML 中间件筛选和分组自动适配。
+
+```bash
+bash inspect.sh --local --keepalived
+bash inspect.sh -H inspection --keepalived
+```
+
+详细指标、阈值、路径发现和多实例边界见 `docs/specs/keepalived-middleware.md`。
 
 ## 终端指标输出
 

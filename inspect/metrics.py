@@ -428,6 +428,136 @@ NGINX_RULE_PREFIX = _NGINX_RULE_PREFIX
 
 METRICS.extend(NGINX_METRICS)
 
+
+# --------------------------------------------------------------------------
+# Keepalived 中间件指标（keepalived-p0-v1）
+# --------------------------------------------------------------------------
+_KEEPALIVED_RULE_PREFIX = "keepalived-p0-v1"
+_KEEPALIVED_ANCHOR = (
+    "安徽农金Nginx、Keepalived运维巡检手册v1.0.docx（P0 必看指标表：Keepalived本节点服务/"
+    "VIP绑定状态/VIP访问/配置基线/健康检查脚本/关键日志；P1 关注指标表：Keepalived能力与漂移稳定性）；"
+    "定位：T5R4/T5R6；"
+    + _MANUAL_SHA
+)
+
+KEEPALIVED_METRICS = [
+    {
+        "metric_id": "local.keepalived.process.present",
+        "name": "Keepalived 进程存在性",
+        "command": "pgrep -fa '[k]eepalived'",
+        "timeout_sec": 10,
+        "parser": "parse_process_present",
+        "unit": "布尔（present/absent）+ 匹配行数",
+        "source_anchor": "P0 指标表「Keepalived本节点服务」行（pgrep -fa 'keepalived.*keepalived.conf'）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（Keepalived 主进程/VRRP 子进程存在=正常；未运行=CRIT）+ keepalived 白名单",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.process.present"],
+        "conflicts": [],
+        "doc_baseline": "发现 Keepalived 进程 → OK；未发现 → 白名单主机 CRIT「未运行」，非白名单主机跳过 Keepalived 指标",
+        "unknown_conditions": "无权限或 pgrep 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.version",
+        "name": "Keepalived 版本",
+        "command": "{keepalived_bin} -v 2>&1",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_version",
+        "unit": "版本号",
+        "source_anchor": "环境信息「Keepalived版本」行（以 keepalived -v 输出为准）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "inspect.conf keepalived_version 版本基线（实际版本一致=正常；不一致=CRIT）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.version"],
+        "conflicts": [],
+        "doc_baseline": "运行中的 Keepalived 版本命中 inspect.conf keepalived_version 候选值 → OK；不一致 → CRIT",
+        "unknown_conditions": "无法发现运行中的 Keepalived 可执行文件、-v 无版本输出或未配置 keepalived_version → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.vip.bound",
+        "name": "VIP 绑定状态",
+        "command": "ip -brief addr；解析 {keepalived_conf} 中 virtual_ipaddress 与 state",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_vip_bound",
+        "unit": "枚举（bound/unbound）+ VIP/角色",
+        "source_anchor": "P0 指标表「VIP绑定状态」行（ip -brief addr；ip addr show dev interface）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（MASTER 持有 VIP、BACKUP 不持有 VIP）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.vip.bound"],
+        "conflicts": ["单主机巡检无法单独证明另一台节点是否同时持有 VIP"],
+        "doc_baseline": "从实际 Keepalived 配置读取 state/VIP；MASTER 应持有 VIP，BACKUP 正常不持有 VIP；符合角色预期 → OK；角色异常、MASTER 无 VIP 或 BACKUP 持有 VIP → CRIT",
+        "unknown_conditions": "运行配置不可发现、virtual_ipaddress 未配置、ip 不可用或无法读取地址 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.vip.access",
+        "name": "VIP 访问",
+        "command": "curl -sS -I --connect-timeout 3 http://{keepalived_vip}:{keepalived_port}/",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_vip_access",
+        "unit": "枚举（reachable/unreachable）+ HTTP 状态",
+        "source_anchor": "P0 指标表「VIP访问」行（curl -sS -I --connect-timeout 3 http://VIP:8010/）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（VIP 可访问且非 5xx=正常；无法访问/5xx=CRIT）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.vip.access"],
+        "conflicts": [],
+        "doc_baseline": "优先读取配置中的 virtual_ipaddress，并使用 inspect.conf keepalived_port（未配置时 UNKNOWN）；VIP HTTP 返回 200/3xx/401/403 等可解释状态 → OK；连接失败或 5xx → CRIT",
+        "unknown_conditions": "VIP/端口无法从配置或 inspect.conf 得到、curl 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.config.baseline",
+        "name": "Keepalived 配置基线",
+        "command": "egrep 'state|interface|virtual_router_id|priority|advert_int|virtual_ipaddress|script|track_script' {keepalived_conf}",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_config_baseline",
+        "unit": "关键指令命中集合",
+        "source_anchor": "P0 指标表「Keepalived配置基线」行（egrep state/interface/virtual_router_id/priority/advert_int/virtual_ipaddress/script/track_script）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（VRRP 角色、网卡、VRID、优先级、VIP、健康检查配置齐全=正常）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.config.baseline"],
+        "conflicts": [],
+        "doc_baseline": "配置中同时存在 state、interface、virtual_router_id、priority、advert_int、virtual_ipaddress、script、track_script 等关键项 → OK；缺失 → WARN，表示可能配置漂移",
+        "unknown_conditions": "配置文件不可发现、不可读或 grep 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.healthcheck.script",
+        "name": "健康检查脚本",
+        "command": "解析 {keepalived_conf} 中 vrrp_script 的 script 路径；ls -l；test -x",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_healthcheck",
+        "unit": "枚举（present/executable）",
+        "source_anchor": "P0 指标表「健康检查脚本」行（ls -l /opt/keepalived/scripts/check_nginx.sh；echo $?）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（脚本存在且可执行=正常；缺失/不可执行=CRIT）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.healthcheck.script"],
+        "conflicts": [],
+        "doc_baseline": "从实际配置解析 track_script 引用的脚本；脚本存在且可执行（建议权限 750 或更严格）→ OK；缺失或不可执行 → CRIT。为安全起见巡检只做静态权限检查，不执行现场脚本",
+        "unknown_conditions": "配置不可发现、未找到 script 引用或路径不可判定 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.error_log.key_evidence",
+        "name": "Keepalived 关键日志",
+        "command": "tail -n 1000 {keepalived_log} | egrep -i 'Entering MASTER|Entering BACKUP|Entering FAULT|script.*failed|VRRP'",
+        "timeout_sec": 15,
+        "parser": "parse_keepalived_error_log",
+        "unit": "命中行数 + 事件分布",
+        "source_anchor": "P0 指标表「关键日志」行（tail keepalived.log；egrep Entering MASTER/BACKUP/FAULT/script failed/VRRP）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（无 FAULT/脚本失败且无频繁角色切换=正常）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.error_log.key_evidence"],
+        "conflicts": [],
+        "doc_baseline": "日志末尾 1000 行无 FAULT、健康检查脚本失败且 MASTER/BACKUP 切换不频繁 → OK；发现 FAULT/脚本失败 → CRIT；短时间反复切换 → WARN",
+        "unknown_conditions": "日志路径无法发现、文件不可读或日志尚未配置 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.capability.stability",
+        "name": "Keepalived 能力与漂移稳定性",
+        "command": "getcap {keepalived_bin}；systemctl show keepalived-opt -p AmbientCapabilities -p CapabilityBoundingSet；tail -n 50 {keepalived_log}",
+        "timeout_sec": 15,
+        "parser": "parse_keepalived_capability_stability",
+        "unit": "枚举（capability/stability）",
+        "source_anchor": "P1 指标表「Keepalived能力与漂移稳定性」行（getcap、systemctl capability、日志切换/FAULT/脚本失败）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（具备 cap_net_admin/cap_net_raw 且无故障切换=正常）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.capability.stability"],
+        "conflicts": [],
+        "doc_baseline": "运行二进制具备 cap_net_admin、cap_net_raw 等网络能力，且最近日志无 FAULT/脚本失败/频繁切换 → OK；能力缺失或故障事件 → CRIT；日志缺失无法判断稳定性 → UNKNOWN",
+        "unknown_conditions": "getcap/systemctl/日志不可用，或运行二进制/日志路径无法发现 → UNKNOWN",
+    },
+]
+
+KEEPALIVED_RULE_PREFIX = _KEEPALIVED_RULE_PREFIX
+METRICS.extend(KEEPALIVED_METRICS)
+
 _METRICS_BY_ID = {m["metric_id"]: m for m in METRICS}
 
 # 注册表字段契约（tests/test_metrics.py 校验每个条目的键集）

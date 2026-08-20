@@ -40,6 +40,14 @@ ALL_METRIC_IDS = [
     "local.nginx.access_log.status_codes",
     "local.nginx.config.baseline",
     "local.nginx.security.baseline",
+    "local.keepalived.process.present",
+    "local.keepalived.version",
+    "local.keepalived.vip.bound",
+    "local.keepalived.vip.access",
+    "local.keepalived.config.baseline",
+    "local.keepalived.healthcheck.script",
+    "local.keepalived.error_log.key_evidence",
+    "local.keepalived.capability.stability",
 ]
 
 EXIT_CODE_TABLE_LINE = "退出码: 0 成功 / 2 用法错误 / 10 执行失败 / 20 业务告警"
@@ -78,8 +86,8 @@ def test_help_contains_exit_code_table_exact_line():
     assert EXIT_CODE_TABLE_LINE in r.stdout
 
 
-def test_list_metrics_lists_all_19_ids():
-    """--list-metrics 退出码 0，输出全部 19 个指标 ID（10 共同 P0 + 9 Nginx）。"""
+def test_list_metrics_lists_all_27_ids():
+    """--list-metrics 退出码 0，输出全部 27 个指标 ID（Linux + Nginx + Keepalived）。"""
     r = run_cli("--list-metrics")
     assert r.returncode == 0
     for mid in ALL_METRIC_IDS:

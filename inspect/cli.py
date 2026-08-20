@@ -86,8 +86,9 @@ _HELP_EPILOG = """主机选择示例:
   INSPECT_FIXTURE_DIR 为两种模式共用的零连接调试路径。
 
 中间件选择:
-  默认巡检全部已注册中间件（当前：Nginx）+ Linux 主机基础指标；
+  默认巡检全部已注册中间件（当前：Nginx、Keepalived）+ Linux 主机基础指标；
   --nginx 只巡检 Nginx 中间件 + Linux 主机基础指标；
+  --keepalived 只巡检 Keepalived 中间件 + Linux 主机基础指标；
   Nginx 进程发现：未运行且不在 inspect.conf 白名单 → 跳过该主机 Nginx 指标；
   白名单内未运行 → CRIT「未运行」。
 
@@ -123,6 +124,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--nginx", action="store_true",
         help="只巡检 Nginx 中间件（默认巡检全部已注册中间件）",
     )
+    parser.add_argument(
+        "--keepalived", action="store_true",
+        help="只巡检 Keepalived 中间件（默认巡检全部已注册中间件）",
+    )
     parser.add_argument("--all", action="store_true", help="inventory 全部主机")
     parser.add_argument(
         "--list-metrics", action="store_true", help="列出已实现指标，不采集",
@@ -155,6 +160,8 @@ def validate_args(ns: argparse.Namespace) -> List[str]:
         errors.append("--limit 仅可与 --inventory 一起使用")
     if ns.all and not ns.inventory:
         errors.append("--all 仅可与 --inventory 一起使用")
+    if ns.nginx and getattr(ns, "keepalived", False):
+        errors.append("--nginx 与 --keepalived 互斥，请二选一")
     query = ns.list_metrics or bool(ns.info)
     if query and (
         ns.hosts or ns.inventory or ns.local or ns.limit or ns.all
@@ -275,26 +282,36 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     except inventory_mod.InventoryError as exc:
         return _fail(exc)
 
-    nginx_cfg = config_mod.load_nginx_config()
+    try:
+        inspect_conf = config_mod.load_inspect_conf()
+        nginx_cfg = config_mod.load_nginx_config()
+        keepalived_cfg = config_mod.load_keepalived_config()
+    except config_mod.ConfigError as exc:
+        return _fail(exc)
     if ns.nginx:
         selected_modules = ("linux_basic", "nginx")
+    elif getattr(ns, "keepalived", False):
+        selected_modules = ("linux_basic", "keepalived")
     else:
         selected_modules = ("linux_basic",) + tuple(middleware_module_ids())
     specs = runner_mod.build_metric_command_specs(
-        module_ids=selected_modules, profile=nginx_cfg
+        module_ids=selected_modules, profile=inspect_conf
     )
     fixture_dir = os.environ.get(runner_mod.FIXTURE_ENV_VAR)
     nginx_whitelist = list(nginx_cfg.get("whitelist") or [])
+    keepalived_whitelist = list(keepalived_cfg.get("whitelist") or [])
     try:
         if host_selection.kind == "local":
             run_result = local_runner.run_local(
                 host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir,
                 nginx_whitelist=nginx_whitelist,
+                keepalived_whitelist=keepalived_whitelist,
             )
         else:
             run_result = runner_mod.run(
                 host_selection, specs, fixture_dir=fixture_dir, runtime_dir=runtime_dir,
                 nginx_whitelist=nginx_whitelist,
+                keepalived_whitelist=keepalived_whitelist,
             )
     except (
         local_runner.LocalExecutionError,
@@ -326,7 +343,7 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
         # Nginx inspect.conf values are used only for metric explanation and
         # baseline interpretation; SSH credentials remain exclusively in the
         # selected inventory file.
-        profile=nginx_cfg,
+        profile=inspect_conf,
         product_profiles=[],
         resolved_thresholds=resolved_thresholds,
         inventory_source=_inventory_source(host_selection),

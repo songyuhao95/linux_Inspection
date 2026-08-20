@@ -86,6 +86,14 @@ EXPECTED_METRIC_IDS = [
     "local.nginx.access_log.status_codes",
     "local.nginx.config.baseline",
     "local.nginx.security.baseline",
+    "local.keepalived.process.present",
+    "local.keepalived.version",
+    "local.keepalived.vip.bound",
+    "local.keepalived.vip.access",
+    "local.keepalived.config.baseline",
+    "local.keepalived.healthcheck.script",
+    "local.keepalived.error_log.key_evidence",
+    "local.keepalived.capability.stability",
 ]
 
 # MR §6 表格"已定义"单元格（未列出的层 = "（文档未定义）" → rule: null）
@@ -153,7 +161,9 @@ def test_baseline_exactly_10_metrics_in_mr_order():
     baseline = cfg.load_document_baseline()
     assert list(baseline) == EXPECTED_METRIC_IDS[:10]
     nginx = cfg.load_nginx_baseline()
-    assert list(nginx) == EXPECTED_METRIC_IDS[10:]
+    assert list(nginx) == EXPECTED_METRIC_IDS[10:19]
+    keepalived = cfg.load_keepalived_baseline()
+    assert list(keepalived) == EXPECTED_METRIC_IDS[19:]
 
 
 def test_baseline_rules_match_mr_section6_verbatim():
@@ -215,11 +225,12 @@ def test_no_override_all_document_baseline():
     resolved = cfg.build_resolved_thresholds()
     assert set(resolved) == set(EXPECTED_METRIC_IDS)
     for metric_id, entry in resolved.items():
-        expected_version = (
-            cfg.NGINX_BASELINE_VERSION
-            if metric_id.startswith("local.nginx.")
-            else cfg.DOC_BASELINE_VERSION
-        )
+        if metric_id.startswith("local.nginx."):
+            expected_version = cfg.NGINX_BASELINE_VERSION
+        elif metric_id.startswith("local.keepalived."):
+            expected_version = cfg.KEEPALIVED_BASELINE_VERSION
+        else:
+            expected_version = cfg.DOC_BASELINE_VERSION
         assert entry["layer"] == cfg.LAYER_DOCUMENT_BASELINE, metric_id
         assert entry["version"] == expected_version, metric_id
         assert entry["provenance"]["config_sources"] == []
