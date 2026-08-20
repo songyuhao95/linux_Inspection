@@ -269,7 +269,7 @@ NGINX_METRICS = [
     {
         "metric_id": "local.nginx.config.valid",
         "name": "Nginx 配置有效性",
-        "command": "{nginx_bin} -t -c {nginx_conf}",
+        "command": "{nginx_bin} -t -e {nginx_error_log} -c {nginx_conf}",
         "timeout_sec": 10,
         "parser": "parse_nginx_config_valid",
         "unit": "枚举（valid/invalid）",

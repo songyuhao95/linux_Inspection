@@ -132,6 +132,11 @@ class TestModuleRegistration:
             assert entry["layer"] == config_mod.LAYER_DOCUMENT_BASELINE, mid
             assert entry["version"] == config_mod.NGINX_BASELINE_VERSION, mid
 
+    def test_config_valid_command_uses_configured_error_log(self):
+        specs = _nginx_specs()
+        spec = next(s for s in specs if s.metric_id == "local.nginx.config.valid")
+        assert "-e /opt/nginx/logs/error.log" in spec.command
+
 
 # --------------------------------------------------------------------------
 # 2. 进程发现选择（select_nginx_metrics）

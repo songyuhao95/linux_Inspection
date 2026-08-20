@@ -299,8 +299,8 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx本节点服务」行",
     },
     "local.nginx.config.valid": {
-        "command": "{nginx_bin} -t -c {nginx_conf}",
-        "profile_keys": ("nginx_bin", "nginx_conf"),
+        "command": "{nginx_bin} -t -e {nginx_error_log} -c {nginx_conf}",
+        "profile_keys": ("nginx_bin", "nginx_error_log", "nginx_conf"),
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx配置有效性」行",
     },

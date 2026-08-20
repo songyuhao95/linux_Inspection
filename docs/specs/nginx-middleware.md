@@ -47,9 +47,10 @@ HTTP 探测使用 `curl`（手册要求），仅限 `local.nginx.*` 指标模板
 报告中的 `threshold_rule` 现在把“检查对象、取值来源和判定动作”写在一起，便于
 运维复现：
 
-- **配置有效性**：执行 `nginx_bin -t -c nginx_conf`。Nginx 的成功信息通常写到
-  stderr，因此 stdout 和 stderr 都会检查；同时出现 `syntax is ok` 与
-  `test is successful` 才是 OK。
+- **配置有效性**：执行 `nginx_bin -t -e nginx_error_log -c nginx_conf`，把错误日志
+  路径显式指定为配置中的日志文件，避免测试账号因默认 `/var/log/nginx/error.log`
+  无权限而无法完成配置测试。Nginx 的成功信息通常写到 stderr，因此 stdout 和 stderr
+  都会检查；同时出现 `syntax is ok` 与 `test is successful` 才是 OK。
 - **端口监听与本地访问**：端口来自 `nginx.yml` 的 `nginx_port`，默认 8010，先用
   `ss -tlnp` 检查该端口是否 LISTEN，再用 curl 访问 `127.0.0.1:<端口>/`；连接失败、
   未监听或 HTTP 5xx 为 CRIT。
