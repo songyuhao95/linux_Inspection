@@ -860,8 +860,7 @@ def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any])
         verify = f"curl -k -sS --connect-timeout 3 --max-time 10 $es_auth -X POST \"$es_endpoint/{repo}/_verify?pretty\"{status}"
         return prefix + f"; if test -z \"$es_endpoint\" || test -z \"{repos}\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND; else " + _es_curl("/_snapshot/_all?pretty") + status + "; " + verify + "; fi"
     if metric_id == "local.elasticsearch.system.parameters":
-        user = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_system_user")) or "es"
-        return prefix + f"; printf 'ES_MAX_MAP_COUNT=%s\\n' \"$(cat /proc/sys/vm/max_map_count 2>/dev/null)\"; free -m; printf 'ES_ULIMIT_NOFILE=%s\\n' \"$(su - {user} -c 'ulimit -n' 2>/dev/null)\"; printf 'ES_ULIMIT_NPROC=%s\\n' \"$(su - {user} -c 'ulimit -u' 2>/dev/null)\"; printf 'ES_ULIMIT_MEMLOCK=%s\\n' \"$(su - {user} -c 'ulimit -l' 2>/dev/null)\""
+        return prefix + "; printf 'ES_MAX_MAP_COUNT=%s\\n' \"$(cat /proc/sys/vm/max_map_count 2>/dev/null)\"; free -m; printf 'ES_ULIMIT_NOFILE=%s\\n' \"$(su - \"$es_user\" -c 'ulimit -n' 2>/dev/null)\"; printf 'ES_ULIMIT_NPROC=%s\\n' \"$(su - \"$es_user\" -c 'ulimit -u' 2>/dev/null)\"; printf 'ES_ULIMIT_MEMLOCK=%s\\n' \"$(su - \"$es_user\" -c 'ulimit -l' 2>/dev/null)\""
     if metric_id == "local.elasticsearch.process.present":
         raise CommandConfigError("Elasticsearch 进程指标使用静态命令")
     raise CommandConfigError(f"未注册的 Elasticsearch 动态指标命令: {metric_id}")

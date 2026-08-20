@@ -1044,7 +1044,7 @@ def parse_elasticsearch_service_port(output: str) -> Dict[str, Any]:
     lines = _content_lines(output)
     process = any("elasticsearch" in line.lower() for line in lines if "LISTEN" not in line)
     listen_lines = [line for line in lines if "LISTEN" in line]
-    ports = sorted({int(x) for x in re.findall(r":(\d+)\b", "\n".join(listen_lines)) if int(x) > 0})
+    ports = sorted({int(x) for x in re.findall(r"[^\s]+:(\d+)(?=\s|$)", "\n".join(listen_lines)) if int(x) > 0})
     return {"process": process, "ports": ports, "summary": [mask_output(x) for x in lines[:10]]}
 
 
