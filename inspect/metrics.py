@@ -250,15 +250,13 @@ NGINX_METRICS = [
     {
         "metric_id": "local.nginx.process.present",
         "name": "Nginx 进程存在性",
-        "command": (
-            "pgrep -fa 'nginx: master|nginx: worker|/usr/sbin/nginx|/opt/nginx/sbin/nginx'"
-        ),
+        "command": "pgrep -fa '[n]ginx: (master|worker) process'",
         "timeout_sec": 10,
         "parser": "parse_process_present",
         "unit": "布尔（present/absent）+ 匹配行数",
         "source_anchor": (
-            "P0 指标表「Nginx本节点服务」行（pgrep -fa 'nginx: master|nginx: worker|"
-            "/usr/sbin/nginx|/opt/nginx/sbin/nginx'）；" + _NGINX_ANCHOR
+            "P0 指标表「Nginx本节点服务」行（pgrep -fa '[n]ginx: (master|worker) "
+            "process'；使用 [n] 避免匹配承载该命令的 shell）；" + _NGINX_ANCHOR
         ),
         "threshold_layer": "文档基线（进程存在=正常；未运行=CRIT）+ nginx 白名单（白名单内未运行 → CRIT 未运行）",
         "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.process.present"],

@@ -300,7 +300,11 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
     },
     # ---- Nginx 中间件（nginx-p0-v1；安徽农金Nginx、Keepalived运维巡检手册）----
     "local.nginx.process.present": {
-        "command": "pgrep -fa 'nginx: master|nginx: worker|/usr/sbin/nginx|/opt/nginx/sbin/nginx'",
+        # The bracket expression prevents pgrep from matching the shell that
+        # contains this command.  Only the actual Nginx master/worker process
+        # names count; a command line mentioning an nginx path is not proof
+        # that Nginx is running.
+        "command": "pgrep -fa '[n]ginx: (master|worker) process'",
         "profile_keys": (),
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx本节点服务」行",
@@ -556,7 +560,8 @@ def _nginx_discovery_prefix(profile: Dict[str, Any], *, include_dump: bool) -> s
     errors_loop = errors or ":"
     accesses_loop = accesses or ":"
     parts = [
-        "master_line=$(pgrep -fa 'nginx: master process' | head -n 1)",
+        # Use the same self-match-safe expression as the process metric.
+        "master_line=$(pgrep -fa '[n]ginx: master process' | head -n 1)",
         "nginx_bin=$(printf '%s\\n' \"$master_line\" | sed -nE 's/.*nginx: master process[[:space:]]+([^[:space:]]+).*/\\1/p')",
         "nginx_conf=$(printf '%s\\n' \"$master_line\" | sed -nE 's/.*[[:space:]]-c[[:space:]]*=?[[:space:]]*([^[:space:]]+).*/\\1/p')",
         "nginx_error_log=$(printf '%s\\n' \"$master_line\" | sed -nE 's/.*[[:space:]]-e[[:space:]]*=?[[:space:]]*([^[:space:]]+).*/\\1/p')",

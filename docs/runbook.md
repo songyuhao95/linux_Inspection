@@ -35,7 +35,8 @@ bash inspect.sh --local --nginx          # 本机
 bash inspect.sh -H inspection --nginx    # 远程 inventory 主机组
 ```
 
-Nginx 进程发现：未运行且不在 `inspect.conf` 白名单 → 跳过该主机 Nginx 指标；
+Nginx 进程发现只匹配真实 `nginx: master process`/`nginx: worker process` 行，使用
+`[n]` 写法避免 `pgrep` 匹配承载命令的 shell。未运行且不在 `inspect.conf` 白名单 → 跳过该主机 Nginx 指标；
 白名单内未运行 → CRIT「未运行」。Nginx 路径与白名单在仓库根 `inspect.conf` 配置
 （格式为 `参数 = 候选值1|候选值2`）。账号密码仍放在 inventory 文件中，不放入
 inspect.conf。详见 `docs/specs/nginx-middleware.md`。

@@ -242,8 +242,16 @@ def _middleware_values(doc: Mapping[str, Any], metric: Mapping[str, Any]) -> Lis
         if values:
             return values
     host = doc.get("host") or {}
-    values = _as_strings(host.get("product_profiles"))
-    return values or ["Linux 基础"]
+    host_profiles = _as_strings(host.get("product_profiles"))
+    # A host can run Nginx while its Linux CPU, memory, filesystem, etc.
+    # metrics still belong to the Linux 基础 dimension.  Do not let the host
+    # profile label all local.* metrics as nginx, otherwise selecting nginx
+    # would incorrectly reveal every metric collected from an Nginx host.
+    # Keep the legacy host-profile fallback for other fixture/future
+    # middleware documents until those metric-id prefixes are registered.
+    if metric_id.startswith("local.") and "nginx" in {p.lower() for p in host_profiles}:
+        return ["Linux 基础"]
+    return host_profiles or ["Linux 基础"]
 
 
 def _detail_status(metric: Mapping[str, Any], detail: Mapping[str, Any]) -> str:

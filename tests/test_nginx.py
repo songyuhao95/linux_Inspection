@@ -414,6 +414,13 @@ class TestRenderIntegration:
         metric = {"metric_id": "local.cpu.utilization", "name": "CPU", "status": "OK"}
         assert rh._middleware_values({"host": {}}, metric) == ["Linux 基础"]
 
+    def test_html_linux_basics_do_not_inherit_host_nginx_profile(self):
+        from inspect import render_html as rh
+
+        metric = {"metric_id": "local.swap.used_percent", "name": "Swap", "status": "OK"}
+        doc = {"host": {"product_profiles": ["nginx"]}}
+        assert rh._middleware_values(doc, metric) == ["Linux 基础"]
+
     def test_excel_nginx_sheet_contains_nginx_metrics_only(self, monkeypatch, tmp_path):
         import sys
 

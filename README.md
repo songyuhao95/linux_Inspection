@@ -100,7 +100,8 @@ Nginx 中间件（仍保留 Linux 主机基础指标）。未选择的模块不�
 - `local.nginx.security.baseline`：安全配置基线（server_tokens/autoindex）。
 
 **进程发现与白名单**：默认巡检先执行 `local.nginx.process.present` 判断主机是否运行
-Nginx。运行中 → 采集全部 Nginx 指标；未运行且主机 IP **不在** `inspect.conf` 白名单 →
+Nginx。进程判断只匹配真实的 `nginx: master process`/`nginx: worker process` 行，并用
+`[n]` 防止 `pgrep` 把承载命令的 shell 误判为 Nginx。运行中 → 采集全部 Nginx 指标；未运行且主机 IP **不在** `inspect.conf` 白名单 →
 跳过该主机 Nginx 指标（该主机不是 Nginx 节点）；未运行且 **在** 白名单 → 标记
 `CRIT 未运行`（只保留进程存在性指标）。进程发现本身采集失败（无权限等）→ 保留全部
 Nginx 指标为 UNKNOWN（不伪装结论）。
@@ -115,7 +116,9 @@ Nginx 指标为 UNKNOWN（不伪装结论）。
 **报表**：Excel 新增 `nginx` Sheet（只列 `local.nginx.*` 指标，字段与 `Local` 一致）；
 `Local` Sheet 只保留 Linux 基础指标。HTML 指标卡片按 metric_id 前缀归入「nginx」
 中间件维度，左侧中间件/监控指标筛选与按中间件/按监控指标分组自动生效；磁盘和
-inode 指标会按每个挂载点展开，与 Excel 行保持一致。
+inode 指标会按每个挂载点展开，与 Excel 行保持一致。即使同一主机同时运行 Nginx，
+CPU、内存、Swap、磁盘等 `local.*` 基础指标仍归入「Linux 基础」；选择「nginx」
+筛选时只显示 `local.nginx.*` 指标。
 
 **多实例说明**：当前 v1 按主机的一组 Nginx 配置、端口和日志路径巡检，进程发现只
 确认主机上是否存在任一 Nginx 进程，不能逐实例区分。后续可将 `inspect.conf` 扩展为
