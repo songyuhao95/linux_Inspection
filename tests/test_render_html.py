@@ -364,6 +364,33 @@ class TestLayout:
         assert ".metric-grid > .metric-card,\n.metric-grid > .host-error" in template
         assert "width: 100%;" in template
 
+    def test_filesystem_and_inode_details_expand_like_excel(self, tmp_path):
+        """HTML 每个挂载点/文件系统都应生成独立卡片，而非只取汇总值。"""
+        import copy
+
+        docs = fixture_docs()
+        disk = next(m for m in docs[0]["metrics"] if m["metric_id"] == "local.filesystem.used_percent")
+        disk["evidence"]["details"] = [
+            {"filesystem": "/dev/root", "mount": "/", "used_percent": 61.0, "status": "OK"},
+            {"filesystem": "/dev/iso", "mount": "/mnt/iso", "used_percent": 100.0, "status": "CRIT"},
+        ]
+        inode = copy.deepcopy(disk)
+        inode["metric_id"] = "local.filesystem.inode_used_percent"
+        inode["name"] = "inode 使用率"
+        inode["evidence"]["command"] = "df -i"
+        inode["evidence"]["details"] = [
+            {"filesystem": "/dev/root", "mount": "/", "used_percent": 1.0, "status": "OK"},
+            {"filesystem": "/dev/iso", "mount": "/mnt/iso", "used_percent": 2.0, "status": "OK"},
+        ]
+        docs[0]["metrics"].append(inode)
+
+        body = body_text(render_str(docs, tmp_path, "details.html"))
+        assert "磁盘使用率: /" in body
+        assert "磁盘使用率: /mnt/iso" in body
+        assert "inode 使用率: /mnt/iso" in body
+        assert "挂载点：/mnt/iso" in body
+        assert 'data-status="CRIT"' in body
+
     def test_cards_carry_filter_attributes(self, tmp_path):
         s = render_str(fixture_docs(), tmp_path)
         # 仅指标卡开标签（导航按钮/宏观卡/主机区也带 data-*，需限定作用域）

@@ -111,8 +111,15 @@ Nginx 指标为 UNKNOWN（不伪装结论）。
 `.gitignore` 忽略，白名单等现场信息不入库。
 
 **报表**：Excel 新增 `nginx` Sheet（只列 `local.nginx.*` 指标，字段与 `Local` 一致）；
-HTML 指标卡片按 metric_id 前缀归入「nginx」中间件维度，左侧中间件/监控指标筛选与
-按中间件/按监控指标分组自动生效。
+`Local` Sheet 只保留 Linux 基础指标。HTML 指标卡片按 metric_id 前缀归入「nginx」
+中间件维度，左侧中间件/监控指标筛选与按中间件/按监控指标分组自动生效；磁盘和
+inode 指标会按每个挂载点展开，与 Excel 行保持一致。
+
+**多实例说明**：当前 v1 按主机的一组 Nginx 配置、端口和日志路径巡检，进程发现只
+确认主机上是否存在任一 Nginx 进程，不能逐实例区分。后续可将 `nginx.yml` 扩展为
+`instances` 列表，用稳定的 `instance_id` 配合配置文件、端口、日志路径和可选 master
+PID/process_pattern，按“主机 → 实例 → 指标”独立采集；详见
+`docs/specs/nginx-middleware.md`。
 
 **只巡检 Nginx**：
 

@@ -1579,6 +1579,25 @@ def _error_host_document(
     }
 
 
+def _parser_input(metric_id: str, metric_result: Mapping[str, Any]) -> str:
+    """Return the parser input while preserving command output channels.
+
+    ``nginx -t`` writes its successful validation messages to stderr.  Ansible
+    correctly keeps stdout/stderr separate, so feeding stdout only makes a
+    valid configuration look invalid.  Other parsers retain the historical
+    stdout-only behavior because their commands use stdout as the data stream.
+    """
+    stdout = str(metric_result.get("stdout") or "")
+    if metric_id != "local.nginx.config.valid":
+        return stdout
+    stderr = str(metric_result.get("stderr") or "")
+    if not stderr:
+        return stdout
+    if stdout and not stdout.endswith("\n"):
+        stdout += "\n"
+    return stdout + stderr
+
+
 def normalize_host_result(
     host_result: Dict[str, Any],
     *,
@@ -1679,7 +1698,7 @@ def normalize_host_result(
             )
             continue
         try:
-            parsed = PARSERS[metric_id](mres.get("stdout", ""))
+            parsed = PARSERS[metric_id](_parser_input(metric_id, mres))
         except ParseError as exc:
             metric_docs.append(
                 _error_metric_document(

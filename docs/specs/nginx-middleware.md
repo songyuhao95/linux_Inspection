@@ -42,10 +42,56 @@ HTTP 探测使用 `curl`（手册要求），仅限 `local.nginx.*` 指标模板
 `nginx_port`、`whitelist`。缺省值来自手册环境信息（`/opt/nginx`、端口 `8010`）。
 `nginx.yml` 被 `.gitignore` 忽略；现场信息通过 `nginx.yml.example` 模板复制配置。
 
+## 阈值判定说明
+
+报告中的 `threshold_rule` 现在把“检查对象、取值来源和判定动作”写在一起，便于
+运维复现：
+
+- **配置有效性**：执行 `nginx_bin -t -c nginx_conf`。Nginx 的成功信息通常写到
+  stderr，因此 stdout 和 stderr 都会检查；同时出现 `syntax is ok` 与
+  `test is successful` 才是 OK。
+- **端口监听与本地访问**：端口来自 `nginx.yml` 的 `nginx_port`，默认 8010，先用
+  `ss -tlnp` 检查该端口是否 LISTEN，再用 curl 访问 `127.0.0.1:<端口>/`；连接失败、
+  未监听或 HTTP 5xx 为 CRIT。
+- **错误日志**：文件来自 `nginx_error_log`，默认 `/opt/nginx/logs/error.log`，读取
+  末尾 1000 行，扫描 emerg、alert、crit、error、permission denied、bind()、
+  connect() failed、upstream timed out 等关键字；命中为 WARN。
+- **访问日志**：文件来自 `nginx_access_log`，默认 `/opt/nginx/logs/access.log`，读取
+  末尾 1000 行并统计状态码；5xx 命中为 WARN。
+- **配置基线**：文件来自 `nginx_conf`，默认 `/opt/nginx/conf/nginx.conf`；检查
+  `worker_processes`、`worker_connections`、`keepalive_timeout` 三项核心指令，
+  同时采集 `worker_rlimit_nofile`、`use epoll`、`multi_accept`、
+  `client_max_body_size`、`limit_req`、`limit_conn` 关注项。
+- **安全基线**：同一 `nginx_conf` 检查 `server_tokens off` 和 `autoindex off`，
+  分别用于避免暴露版本信息和目录索引；缺任一项为 WARN。
+
+## 多实例行为与演进方案
+
+当前 `nginx-p0-v1` 的粒度是“每台主机一个逻辑 Nginx 实例”：
+
+- 进程发现会匹配主机上的 Nginx master/worker 进程；只要发现任一匹配进程，主机就
+  进入运行态。
+- 配置、端口、日志和基线指标统一使用 `nginx.yml` 中的一组
+  `nginx_bin/nginx_conf/nginx_port/nginx_error_log/nginx_access_log`。因此同一主机有
+  多个实例时，v1 不能逐实例给出结论，默认配置对应的实例是报告对象；进程存在性
+  只能回答“是否有 Nginx 进程”，不能回答每个实例是否正常。
+- 这不会把多个实例的输出静默拼成一个假值；但运维应把当前结果理解为“配置所指向
+  实例的结果”，并在现场为目标实例填写配置文件、端口和日志路径。
+
+可行的 v2 方案是把配置改为 `instances` 列表，每个实例至少包含：
+`instance_id`、`nginx_bin`、`nginx_conf`、`nginx_port`、日志路径，以及可选的
+`master_pid` 或 `process_pattern`。采集器对每个实例独立执行进程、配置、端口和日志
+检查，事实源在 `evidence.details` 增加 `instance_id`、配置路径和端口，报表按
+“主机 → 实例 → 指标”展示并支持实例筛选。PID 只作为当前采集时的身份校验，不能单独
+作为长期标识；长期标识应使用人工配置的 `instance_id`，这样 master 重启后仍能追踪
+同一个实例。该方案需要升级事实源契约/筛选维度后再实现，避免在 v1 的 metric_id
+中拼接动态 PID。
+
 ## 报表集成
 
-- **Excel**：新增 `nginx` Sheet（`SHEET_NGINX`），只列 `local.nginx.*` 指标，字段与
-  `Local` 一致；Sheet 顺序 Overview / Local / nginx / Errors-Evidence。
+- **Excel**：`Local` 只列 Linux 基础指标；新增 `nginx` Sheet（`SHEET_NGINX`）只列
+  `local.nginx.*` 指标，字段与 Local 一致；Sheet 顺序 Overview / Local / nginx /
+  Errors-Evidence。
 - **HTML**：`render_html._middleware_values` 按 metric_id 前缀 `local.nginx.` 归入
   「nginx」中间件维度；左侧中间件/监控指标多选筛选与按中间件/按监控指标分组自动生效；
   Linux 基础指标仍归「Linux 基础」。

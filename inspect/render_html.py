@@ -246,13 +246,53 @@ def _middleware_values(doc: Mapping[str, Any], metric: Mapping[str, Any]) -> Lis
     return values or ["Linux 基础"]
 
 
-def _threshold_rule_text(metric: Mapping[str, Any]) -> str:
+def _detail_status(metric: Mapping[str, Any], detail: Mapping[str, Any]) -> str:
+    """使用事实源明细状态；渲染层不重新计算阈值。"""
+    status = detail.get("status")
+    if status in STATUSES:
+        return str(status)
+    status = metric.get("status")
+    return str(status) if status in STATUSES else "UNKNOWN"
+
+
+def _detail_value(detail: Mapping[str, Any]) -> Any:
+    """取得已由采集/规范化层计算好的明细值。"""
+    if "load" in detail:
+        return detail.get("load")
+    if "used_percent" in detail:
+        return detail.get("used_percent")
+    return None
+
+
+def _metric_rows(metric: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """将 evidence.details 展开为与 Excel 一致的逐盘/逐窗口行。"""
+    evidence = metric.get("evidence") or {}
+    details = evidence.get("details") if isinstance(evidence, Mapping) else None
+    if not isinstance(details, list):
+        return [{"detail": None}]
+    rows = [{"detail": detail} for detail in details if isinstance(detail, Mapping)]
+    return rows or [{"detail": None}]
+
+
+def _metric_display_name(metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]]) -> str:
+    """为明细卡片生成可读名称，例如“磁盘使用率: /var”。"""
+    name = str(metric.get("name") or metric.get("metric_id") or "")
+    if detail:
+        window = detail.get("window")
+        mount = detail.get("mount")
+        if window is not None and str(window) != "":
+            return f"{window}系统负载"
+        if mount is not None and str(mount) != "":
+            return f"{name}: {mount}"
+    return name
+
+
+def _threshold_rule_text(
+    metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]] = None
+) -> str:
     """Build the same human-readable threshold_rule text used by Excel."""
     threshold = metric.get("threshold") or {}
     parts: List[str] = []
-    evidence = metric.get("evidence") or {}
-    details = evidence.get("details") if isinstance(evidence, Mapping) else None
-    detail = details[0] if isinstance(details, list) and details and isinstance(details[0], Mapping) else None
     if detail:
         for key, label in (("window", "测量周期"), ("cpu_cores", "CPU核数"),
                            ("mount", "挂载点"), ("filesystem", "文件系统")):
@@ -284,13 +324,12 @@ def _metric_card(
     middleware_values: Optional[Sequence[str]] = None,
     *,
     show_host: bool = False,
+    detail: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """Render exactly the Excel Local columns, without evidence/source sections."""
-    status = metric.get("status")
-    if status not in STATUSES:
-        status = "UNKNOWN"
+    status = _detail_status(metric, detail or {})
     metric_id = metric.get("metric_id", "")
-    name = metric.get("name", "")
+    name = _metric_display_name(metric, detail)
     middleware_values = list(middleware_values or ["Linux 基础"])
     middleware_attr = "|".join(middleware_values)
     card_cls = "metric-card status-" + status.lower()
@@ -300,16 +339,18 @@ def _metric_card(
     )
     evidence = metric.get("evidence")
     command = evidence.get("command") if isinstance(evidence, Mapping) else None
+    detail_value = _detail_value(detail or {}) if detail else None
+    has_detail_value = detail is not None and detail_value is not None
     local_fields = {
         "host": host_name,
         "ip": host_ip,
         "metric_id": metric_id,
         "name": name,
-        "raw_value": metric.get("raw_value"),
-        "normalized_value": metric.get("normalized_value"),
+        "raw_value": detail_value if has_detail_value else metric.get("raw_value"),
+        "normalized_value": detail_value if has_detail_value else metric.get("normalized_value"),
         "unit": metric.get("unit"),
         "status": status,
-        "threshold_rule": _threshold_rule_text(metric),
+        "threshold_rule": _threshold_rule_text(metric, detail),
         "command": command,
     }
     return "".join([
@@ -426,10 +467,13 @@ def _host_section(doc: Mapping[str, Any], host_ips: Optional[Mapping[str, str]] 
     host = doc.get("host") or {}
     host_name = host.get("name", "")
     host_ip = _display_host_ip(doc, host_ips)
-    cards = [
-        _metric_card(m, host_name, host_ip, _middleware_values(doc, m))
-        for m in doc.get("metrics") or []
-    ]
+    cards: List[str] = []
+    for metric in doc.get("metrics") or []:
+        for row in _metric_rows(metric):
+            cards.append(_metric_card(
+                metric, host_name, host_ip, _middleware_values(doc, metric),
+                detail=row["detail"],
+            ))
     error_block = _host_error_block(doc)
     return "".join([
         '<section class="report-group host-section" data-host="' + esc(host_name)
@@ -603,11 +647,15 @@ def _status_details(
                     cards.append(host_error)
             host_name = str((doc.get("host") or {}).get("name", ""))
             for metric in doc.get("metrics") or []:
-                metric_status = metric.get("status") if metric.get("status") in STATUSES else "UNKNOWN"
-                if metric_status == status:
-                    cards.append(_metric_card(
-                        metric, host_name, _display_host_ip(doc, host_ips), _middleware_values(doc, metric), show_host=True
-                    ))
+                for row in _metric_rows(metric):
+                    detail = row["detail"]
+                    metric_status = _detail_status(metric, detail or {})
+                    if metric_status == status:
+                        cards.append(_metric_card(
+                            metric, host_name, _display_host_ip(doc, host_ips),
+                            _middleware_values(doc, metric), show_host=True,
+                            detail=detail,
+                        ))
         if cards:
             parts.append(
                 '<section class="report-group status-group" data-group-value="' + esc(status) + '">'
@@ -630,10 +678,12 @@ def _metric_details(
             host_name = str((doc.get("host") or {}).get("name", ""))
             for metric in doc.get("metrics") or []:
                 if str(metric.get("metric_id") or "") == metric_id:
-                    cards.append(_metric_card(
-                        metric, host_name, _display_host_ip(doc, host_ips),
-                        _middleware_values(doc, metric), show_host=True
-                    ))
+                    for row in _metric_rows(metric):
+                        cards.append(_metric_card(
+                            metric, host_name, _display_host_ip(doc, host_ips),
+                            _middleware_values(doc, metric), show_host=True,
+                            detail=row["detail"],
+                        ))
         if cards:
             parts.append(
                 '<section class="report-group metric-group" data-group-value="' + esc(metric_id) + '">'
@@ -658,7 +708,11 @@ def _middleware_details(
             for metric in doc.get("metrics") or []:
                 values = _middleware_values(doc, metric)
                 if middleware in values:
-                    cards.append(_metric_card(metric, host_name, _display_host_ip(doc, host_ips), values, show_host=True))
+                    for row in _metric_rows(metric):
+                        cards.append(_metric_card(
+                            metric, host_name, _display_host_ip(doc, host_ips), values,
+                            show_host=True, detail=row["detail"],
+                        ))
         if cards:
             parts.append(
                 '<section class="report-group middleware-group" data-group-value="' + esc(middleware) + '">'

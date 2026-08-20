@@ -67,8 +67,10 @@ def _nginx_specs():
     )
 
 
-def _metric_result(metric_id: str, stdout: str = "", *, rc: int = 0, error=None) -> dict:
-    return {"metric_id": metric_id, "rc": rc, "stdout": stdout, "stderr": "", "error": error}
+def _metric_result(
+    metric_id: str, stdout: str = "", *, rc: int = 0, stderr: str = "", error=None
+) -> dict:
+    return {"metric_id": metric_id, "rc": rc, "stdout": stdout, "stderr": stderr, "error": error}
 
 
 def _host_result(host: str, metrics: list, ip: str = "192.168.0.101") -> dict:
@@ -202,6 +204,27 @@ class TestParsersAndJudgment:
             "nginx: [emerg] unknown directive \"foo\" in /opt/nginx/conf/nginx.conf:1\n"
         )
         assert parsed["valid"] is False
+
+    def test_config_valid_success_written_to_stderr_is_ok(self):
+        """nginx -t 的成功文本通常在 stderr，不能被当成配置失败。"""
+        hr = _host_result(
+            "nginx-a",
+            [_metric_result(
+                "local.nginx.config.valid",
+                stderr=(
+                    "nginx: the configuration file /opt/nginx/conf/nginx.conf syntax is ok\n"
+                    "nginx: configuration file /opt/nginx/conf/nginx.conf test is successful\n"
+                ),
+            )],
+        )
+        doc = n.normalize_host_result(
+            hr, run_id=RUN_ID, collected_at=COLLECTED,
+            resolved_thresholds=config_mod.build_resolved_thresholds(),
+        )
+        metric = doc["metrics"][0]
+        assert metric["status"] == "OK"
+        assert metric["raw_value"] == "valid"
+        assert "syntax is ok" in metric["evidence"]["output_summary"]
 
     def test_port_listening_ok(self):
         parsed = n.parse_nginx_port_listening(
@@ -452,3 +475,11 @@ class TestRenderIntegration:
             if col == 2 and row >= 1
         }
         assert metric_ids == set(NGINX_IDS)
+        local_sheet = wb.sheets[1]
+        local_metric_ids = {
+            local_sheet.cells[(row, col)][0]
+            for (row, col) in local_sheet.cells
+            if col == 2 and row >= 1
+        }
+        assert local_metric_ids
+        assert not any(mid.startswith("local.nginx.") for mid in local_metric_ids)

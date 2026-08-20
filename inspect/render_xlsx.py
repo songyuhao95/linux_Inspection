@@ -370,6 +370,15 @@ def _metric_prefix_filter(prefix: str):
     return _keep
 
 
+_MIDDLEWARE_METRIC_PREFIXES = ("local.nginx.",)
+
+
+def _local_metric_filter(metric: Mapping[str, Any]) -> bool:
+    """Local Sheet 仅保留 Linux 基础指标，中间件各写入自己的 Sheet。"""
+    metric_id = str(metric.get("metric_id") or "")
+    return not any(metric_id.startswith(prefix) for prefix in _MIDDLEWARE_METRIC_PREFIXES)
+
+
 def _write_detail_sheet(
     workbook: Any,
     sheet_name: str,
@@ -525,6 +534,7 @@ def _write_workbook(
     _write_detail_sheet(
         workbook, SHEET_LOCAL, LOCAL_HEADERS, local_widths,
         docs, host_ips, header_fmt, cell_fmt, status_fmts, crit_value_fmt,
+        metric_filter=_local_metric_filter,
     )
 
     # ============ nginx（Nginx 中间件明细；只列 local.nginx.* 指标） ============

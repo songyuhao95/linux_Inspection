@@ -346,6 +346,7 @@ NGINX_METRICS = [
         "metric_id": "local.nginx.access_log.status_codes",
         "name": "访问日志状态码",
         "command": (
+            "ls -1 {nginx_access_log} 2>/dev/null; "
             "tail -n 1000 {nginx_access_log} | grep -E ' [1-5][0-9][0-9] '"
         ),
         "timeout_sec": 15,
@@ -365,6 +366,7 @@ NGINX_METRICS = [
         "metric_id": "local.nginx.config.baseline",
         "name": "Nginx 配置基线",
         "command": (
+            "ls -1 {nginx_conf} 2>/dev/null; "
             "grep -E 'worker_processes|worker_rlimit_nofile|worker_connections|"
             "use epoll|multi_accept|keepalive_timeout|client_max_body_size|limit_req|"
             "limit_conn' {nginx_conf}"
@@ -387,6 +389,7 @@ NGINX_METRICS = [
         "metric_id": "local.nginx.security.baseline",
         "name": "安全配置基线",
         "command": (
+            "ls -1 {nginx_conf} 2>/dev/null; "
             "grep -E 'server_tokens|autoindex|X-Frame-Options|X-Content-Type-Options|"
             "Content-Security-Policy|request_method' {nginx_conf}"
         ),
