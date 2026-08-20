@@ -12,7 +12,7 @@
 
 API 使用 `elasticsearch_endpoint`，默认示例为 `https://127.0.0.1:9200`，采用 `curl -k` 兼容自签名证书。认证不把密码写入 `inspect.conf`、命令行、JSON 或报表；可在目标主机配置 `elasticsearch_auth_file` 指向 curl netrc 文件。未授权 401/403、连接失败、配置/日志/证书不可读均为 UNKNOWN，绝不会默认通过。
 
-端口优先从运行配置的 `http.port`/`transport.port` 读取，随后使用 `inspect.conf` 9200/9300 候选。集群 `green`、期望节点数达到、活跃分片 100% 为正常；`yellow` 为 WARN，`red` 或节点严重缺失为 CRIT。未分配主分片为 CRIT，未分配副本或初始化中为 WARN。慢日志未启用时显示“未配置”，不默认判定为故障。
+端口优先从运行配置的 `http.port`/`transport.port` 读取，随后使用 `inspect.conf` 9200/9300 候选；API 地址优先由实际配置的 `network.host`/`http.host` 与 HTTP 端口组合，无法解析时才使用 `elasticsearch_endpoint` 候选。集群 `green`、期望节点数达到、活跃分片 100% 为正常；`yellow` 为 WARN，`red` 或节点严重缺失为 CRIT。未分配主分片为 CRIT，未分配副本或初始化中为 WARN。慢日志未启用时显示“未配置”，不默认判定为故障。
 
 ## 使用
 

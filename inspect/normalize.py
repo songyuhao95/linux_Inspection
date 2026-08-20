@@ -1043,11 +1043,18 @@ def parse_elasticsearch_shards(output: str) -> Dict[str, Any]:
 def parse_elasticsearch_service_port(output: str) -> Dict[str, Any]:
     lines = _content_lines(output)
     process = any("elasticsearch" in line.lower() for line in lines if "LISTEN" not in line)
-    ports = sorted({int(x) for x in re.findall(r":(\d+)\b", output or "") if int(x) > 0})
+    listen_lines = [line for line in lines if "LISTEN" in line]
+    ports = sorted({int(x) for x in re.findall(r":(\d+)\b", "\n".join(listen_lines)) if int(x) > 0})
     return {"process": process, "ports": ports, "summary": [mask_output(x) for x in lines[:10]]}
 
 
 def parse_elasticsearch_heap_gc(output: str) -> Dict[str, Any]:
+    statuses = _es_http_statuses(output)
+    if any(status >= 400 for status in statuses):
+        raise ParseError(
+            "Elasticsearch heap API HTTP "
+            + ",".join(str(status) for status in statuses if status >= 400)
+        )
     lines = _es_lines(output)
     heaps = [float(x) for x in re.findall(r"(?:^|\s)(\d+(?:\.\d+)?)\s*$", "\n".join(lines))]
     max_heap = max(heaps) if heaps else None

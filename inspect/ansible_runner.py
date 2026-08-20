@@ -776,6 +776,7 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
     auths = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_auth_file")) or ":"
     http_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_http_port")) or "9200"
     transport_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_transport_port")) or "9300"
+    system_users = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_system_user")) or "es"
     return "; ".join([
         "es_process_line=$(pgrep -fa '(^|[[:space:]/])elasticsearch[[:space:]]|org\\.elasticsearch\\.bootstrap\\.Elasticsearch' | head -n 1)",
         "es_home=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.home=([^[:space:]]+).*/\\1/p')",
@@ -786,6 +787,9 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         "if test -z \"$es_conf_dir\" && test -n \"$es_home\"; then es_conf_dir=\"$es_home/config\"; fi",
         "es_conf=\"\"; if test -n \"$es_conf_dir\" && test -f \"$es_conf_dir/elasticsearch.yml\"; then es_conf=\"$es_conf_dir/elasticsearch.yml\"; fi",
         f"if test -z \"$es_conf\"; then for p in {confs}; do if test -f \"$p\"; then es_conf=\"$p\"; break; fi; done; fi",
+        "es_pid=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/^([0-9]+).*/\\1/p')",
+        "es_user=\"\"; if test -n \"$es_pid\"; then es_user=$(ps -o user= -p \"$es_pid\" | sed -n 's/[[:space:]]//gp'); fi",
+        f"if test -z \"$es_user\"; then for p in {system_users}; do es_user=\"$p\"; break; done; fi",
         "es_log_dir=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.logs=([^[:space:]]+).*/\\1/p')",
         "if test -z \"$es_log_dir\" && test -n \"$es_home\"; then es_log_dir=\"$es_home/logs\"; fi",
         "es_log=\"\"; if test -n \"$es_log_dir\"; then for p in \"$es_log_dir\"/*; do if test -f \"$p\"; then es_log=\"$p\"; break; fi; done; fi",
@@ -797,7 +801,10 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         "es_transport_port=$(test -n \"$es_conf\" && sed -nE 's/^[[:space:]]*transport.port:[[:space:]]*([0-9]+).*/\\1/p' \"$es_conf\" | head -n 1)",
         f"if test -z \"$es_transport_port\"; then es_transport_port={transport_ports}; fi",
         "es_endpoint=\"\"",
-        f"for p in {endpoints}; do es_endpoint=\"$p\"; break; done",
+        "es_bind_host=$(test -n \"$es_conf\" && sed -nE 's/^[[:space:]]*(network.host|http.host|network.bind_host):[[:space:]]*([^#[:space:]]+).*/\\2/p' \"$es_conf\" | head -n 1)",
+        "case \"$es_bind_host\" in 0.0.0.0|_site_|_local_|\\[::\\]|::) es_bind_host=127.0.0.1;; esac",
+        "if test -n \"$es_bind_host\"; then es_endpoint=\"https://$es_bind_host:$es_http_port\"; fi",
+        f"if test -z \"$es_endpoint\"; then for p in {endpoints}; do es_endpoint=\"$p\"; break; done; fi",
         "if test -z \"$es_endpoint\"; then es_endpoint=\"https://127.0.0.1:$es_http_port\"; fi",
         "es_auth=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth=\"--netrc-file $p\"; break; fi; done",
         "es_cert=\"\"; if test -n \"$es_conf\"; then es_cert=$(grep -Eo '/[^[:space:]]+\\.(crt|pem)' \"$es_conf\" | head -n 1); fi",
@@ -830,7 +837,7 @@ def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any])
     if metric_id == "local.elasticsearch.service.port":
         return prefix + "; ps -ef | grep '[e]lasticsearch'; ss -tlnp | grep -E \" :$es_http_port|:$es_http_port|:$es_transport_port\""
     if metric_id == "local.elasticsearch.heap.gc":
-        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,heap.percent") + "; if test -n \"$es_gc_log\"; then tail -n 200 \"$es_gc_log\" | grep -Ei 'Pause|Full|OutOfMemory|heap'; else printf '%s\\n' INSPECT_ELASTICSEARCH_GC_LOG_NOT_FOUND; fi"
+        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,heap.percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; if test -n \"$es_gc_log\"; then tail -n 200 \"$es_gc_log\" | grep -Ei 'Pause|Full|OutOfMemory|heap'; else printf '%s\\n' INSPECT_ELASTICSEARCH_GC_LOG_NOT_FOUND; fi"
     if metric_id == "local.elasticsearch.thread_pool.rejected":
         return prefix + "; " + _es_curl("/_cat/thread_pool/search,write?v&h=node_name,name,active,queue,rejected,completed") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.cluster.settings":
