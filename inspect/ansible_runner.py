@@ -520,6 +520,23 @@ def _nginx_shell_words(values: Sequence[str]) -> str:
     return " ".join(values)
 
 
+def _is_runtime_nginx_profile(profile: Dict[str, Any]) -> bool:
+    """Identify the list-shaped profile loaded from inspect.conf.
+
+    The scalar-shaped legacy profile remains supported for fixture/test callers
+    and old library integrations.  The CLI always supplies the list-shaped
+    inspect.conf result, including an all-empty result when no fallbacks are
+    configured, so production execution always uses auto-discovery.
+    """
+    keys = (
+        "nginx_bin", "nginx_conf", "nginx_error_log", "nginx_access_log",
+        "nginx_port",
+    )
+    return any(key in profile for key in keys) and all(
+        key not in profile or isinstance(profile.get(key), list) for key in keys
+    )
+
+
 def _nginx_discovery_prefix(profile: Dict[str, Any], *, include_dump: bool) -> str:
     """Discover one running Nginx instance and resolve its paths.
 
@@ -660,7 +677,11 @@ def build_metric_command_specs(
         # Nginx is process-discovered.  Its command must still be emitted
         # when inspect.conf has no candidate values so that the target can
         # report UNKNOWN (rather than being mislabeled UNSUPPORTED_PROFILE).
-        if metric_id.startswith("local.nginx.") and metric_id != NGINX_PROCESS_METRIC:
+        if (
+            metric_id.startswith("local.nginx.")
+            and metric_id != NGINX_PROCESS_METRIC
+            and _is_runtime_nginx_profile(profile)
+        ):
             command = _build_nginx_metric_command(metric_id, profile)
             specs.append(
                 CommandSpec(
