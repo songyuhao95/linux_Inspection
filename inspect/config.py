@@ -53,6 +53,9 @@ NGINX_BASELINE_VERSION = "nginx-p0-v1"
 # Keepalived 中间件文档基线版本（同一份 Nginx/Keepalived 巡检手册）
 KEEPALIVED_BASELINE_VERSION = "keepalived-p0-v1"
 
+# Elasticsearch 运维巡检手册 P0/P1 基线版本
+ELASTICSEARCH_BASELINE_VERSION = "elasticsearch-p0-p1-v1"
+
 # 包内数据/模式文件（相对本模块定位，随包分发）
 BASELINE_FILE = (
     Path(__file__).resolve().parent / "data" / "thresholds" / "linux-common-p0-v1.yaml"
@@ -62,6 +65,9 @@ NGINX_BASELINE_FILE = (
 )
 KEEPALIVED_BASELINE_FILE = (
     Path(__file__).resolve().parent / "data" / "thresholds" / "keepalived-p0-v1.yaml"
+)
+ELASTICSEARCH_BASELINE_FILE = (
+    Path(__file__).resolve().parent / "data" / "thresholds" / "elasticsearch-p0-p1-v1.yaml"
 )
 OVERRIDE_SCHEMA_FILE = (
     Path(__file__).resolve().parent / "schema" / "threshold-override-v1.schema.json"
@@ -824,6 +830,7 @@ def build_resolved_thresholds(
         baseline.update(load_document_baseline())
         baseline.update(load_nginx_baseline())
         baseline.update(load_keepalived_baseline())
+        baseline.update(load_elasticsearch_baseline())
 
     if override is None:
         override_doc: Dict[str, Any] = {}
@@ -924,6 +931,23 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "keepalived_version": [],
     "keepalived_baseline": [],
     "keepalived_whitelist": [],
+    "elasticsearch_bin": [],
+    "elasticsearch_conf": [],
+    "elasticsearch_log": [],
+    "elasticsearch_gc_log": [],
+    "elasticsearch_data": [],
+    "elasticsearch_backup": [],
+    "elasticsearch_endpoint": [],
+    "elasticsearch_http_port": [],
+    "elasticsearch_transport_port": [],
+    "elasticsearch_version": [],
+    "elasticsearch_expected_nodes": [],
+    "elasticsearch_seed_hosts": [],
+    "elasticsearch_system_user": [],
+    "elasticsearch_auth_file": [],
+    "elasticsearch_cert": [],
+    "elasticsearch_snapshot_repo": [],
+    "elasticsearch_whitelist": [],
 }
 
 _CONF_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -1042,6 +1066,34 @@ def load_keepalived_baseline(
     }
 
 
+def load_elasticsearch_baseline(
+    path: Optional[Union[str, Path]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """加载 Elasticsearch P0/P1 文档基线阈值。"""
+    if path is None:
+        path = ELASTICSEARCH_BASELINE_FILE
+    data = _read_yaml_file(path)
+    if not isinstance(data, dict):
+        raise ConfigError(f"Elasticsearch 文档基线顶层应为映射: {path}")
+    if data.get("schema") != "threshold-baseline-v1":
+        raise ConfigError(
+            f"Elasticsearch 文档基线 schema 不匹配（期望 threshold-baseline-v1）: {path}"
+        )
+    if data.get("version") != ELASTICSEARCH_BASELINE_VERSION:
+        raise ConfigError(
+            f"Elasticsearch 文档基线 version 不匹配（期望 {ELASTICSEARCH_BASELINE_VERSION}）: {path}"
+        )
+    metrics = data.get("metrics")
+    if not isinstance(metrics, dict) or not metrics:
+        raise ConfigError(f"Elasticsearch 文档基线 metrics 必须为非空映射: {path}")
+    return {
+        metric_id: _validate_baseline_metric(
+            metric_id, spec, path, version=ELASTICSEARCH_BASELINE_VERSION
+        )
+        for metric_id, spec in metrics.items()
+    }
+
+
 def load_nginx_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """从 inspect.conf 读取 Nginx 候选路径、端口、基线和白名单。
 
@@ -1076,6 +1128,24 @@ def load_keepalived_config(path: Optional[Union[str, Path]] = None) -> Dict[str,
     }
 
 
+def load_elasticsearch_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+    """读取 Elasticsearch 路径、API、基线和白名单配置。
+
+    ``elasticsearch_auth_file`` 只表示目标主机上的 curl netrc 文件路径，
+    不把用户名/密码写入 inspect.conf、命令行、事实源或报表。
+    """
+    data = load_inspect_conf(path)
+    return {key: list(data.get(key, [])) for key in (
+        "elasticsearch_bin", "elasticsearch_conf", "elasticsearch_log",
+        "elasticsearch_gc_log", "elasticsearch_data", "elasticsearch_backup",
+        "elasticsearch_endpoint", "elasticsearch_http_port",
+        "elasticsearch_transport_port", "elasticsearch_version",
+        "elasticsearch_expected_nodes", "elasticsearch_seed_hosts",
+        "elasticsearch_system_user", "elasticsearch_auth_file", "elasticsearch_cert",
+        "elasticsearch_snapshot_repo",
+    )} | {"whitelist": list(data.get("elasticsearch_whitelist", []))}
+
+
 __all__ = [
     "ConfigError",
     "DOC_BASELINE_VERSION",
@@ -1085,6 +1155,7 @@ __all__ = [
     "LAYER_UNRESOLVED",
     "NGINX_BASELINE_VERSION",
     "KEEPALIVED_BASELINE_VERSION",
+    "ELASTICSEARCH_BASELINE_VERSION",
     "DEFAULT_RUNTIME_CONFIG_NAME",
     "build_resolved_thresholds",
     "load_document_baseline",
@@ -1092,8 +1163,10 @@ __all__ = [
     "load_inspect_config",
     "load_nginx_baseline",
     "load_keepalived_baseline",
+    "load_elasticsearch_baseline",
     "load_nginx_config",
     "load_keepalived_config",
+    "load_elasticsearch_config",
     "load_override",
     "validate_override_document",
 ]

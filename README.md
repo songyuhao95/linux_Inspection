@@ -58,7 +58,7 @@ HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态
 
 ## 监控模块扩展
 
-监控模块注册在 `inspect/modules/`，统一通过 `MonitorModule` 和 `ModuleRegistry` 暴露指标。当前内置模块为 `linux_basic`（Linux 主机基础指标）、`linux_common`（需要产品 profile 的通用指标）、`nginx`（Nginx 中间件）和 `keepalived`（Keepalived 中间件）。以后新增中间件时，应：
+监控模块注册在 `inspect/modules/`，统一通过 `MonitorModule` 和 `ModuleRegistry` 暴露指标。当前内置模块为 `linux_basic`（Linux 主机基础指标）、`linux_common`（需要产品 profile 的通用指标）、`nginx`（Nginx 中间件）、`keepalived`（Keepalived 中间件）和 `elasticsearch`（Elasticsearch 中间件）。以后新增中间件时，应：
 
 1. 在 `inspect/metrics.py` 增加带版本/来源锚点的指标定义；
 2. 在 `inspect/modules/` 增加模块文件并显式注册；
@@ -66,8 +66,8 @@ HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态
 4. 为模块增加 fixture 与测试。
 
 仅把任意 `.sh`/`.py` 文件放入目录不会自动执行，必须显式注册并通过 allow-list 校验。
-默认巡检 = `linux_basic` + 全部已注册中间件（当前为 `nginx`、`keepalived`）；`--nginx`
-或 `--keepalived` 只巡检对应中间件（仍保留 Linux 主机基础指标）。未选择的模块不进入执行计划，不会生成
+默认巡检 = `linux_basic` + 全部已注册中间件（当前为 `nginx`、`keepalived`、`elasticsearch`）；`--nginx`、
+`--keepalived` 或 `--elasticsearch` 只巡检对应中间件（仍保留 Linux 主机基础指标）。未选择的模块不进入执行计划，不会生成
 `UNSUPPORTED_PROFILE` 的 UNKNOWN 指标。
 
 ### Linux 主机基础指标
@@ -151,6 +151,22 @@ bash inspect.sh -H inspection --keepalived
 ```
 
 详细指标、阈值、路径发现和多实例边界见 `docs/specs/keepalived-middleware.md`。
+
+### Elasticsearch 中间件监控（elasticsearch-p0-p1-v1）
+
+`inspect/modules/elasticsearch.py` 按 Elasticsearch 巡检手册 P0/P1 指标表实现 20 个指标，
+包括集群健康、节点、分片、Heap/GC、线程池、动态设置、发现配置、索引、慢日志、安全、证书、
+快照和系统参数。路径优先从运行中的 JVM `-Des.path.*` 与配置文件发现，`inspect.conf` 的
+`elasticsearch_*` 只作兜底；白名单和未运行主机语义与 Nginx/Keepalived 一致。API 认证使用目标主机
+的 curl netrc 文件路径，不在项目配置、事实源或报表中保存密码。Excel 输出独立的 `elasticsearch`
+Sheet，HTML 筛选/分组按 `local.elasticsearch.*` 自动适配。
+
+```bash
+bash inspect.sh --local --elasticsearch
+bash inspect.sh -H inspection --elasticsearch --html out/elasticsearch.html --excel out/elasticsearch.xlsx
+```
+
+详细路径发现、认证边界、阈值和多实例说明见 `docs/specs/elasticsearch-middleware.md`。
 
 ## 终端指标输出
 

@@ -51,6 +51,8 @@ PROBE_COMMANDS = (
     "ip",
     "awk",
     "getcap",
+    "openssl",
+    "su",
 )
 
 # 探测结果取值
@@ -168,6 +170,26 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     "local.keepalived.healthcheck.script": ("bash", "pgrep", "head", "sed", "awk", "ls"),
     "local.keepalived.error_log.key_evidence": ("bash", "pgrep", "head", "tail", "grep"),
     "local.keepalived.capability.stability": ("bash", "pgrep", "head", "getcap", "systemctl", "tail"),
+    "local.elasticsearch.process.present": ("bash", "pgrep"),
+    "local.elasticsearch.version": ("bash", "pgrep", "head", "sed"),
+    "local.elasticsearch.cluster.health": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.nodes.online": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.nodes.cpu": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.nodes.memory": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.nodes.disk": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.disk.watermark": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.shards.unassigned": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.service.port": ("bash", "pgrep", "ps", "head", "sed", "ss", "grep"),
+    "local.elasticsearch.heap.gc": ("bash", "pgrep", "head", "sed", "curl", "tail", "grep"),
+    "local.elasticsearch.thread_pool.rejected": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.cluster.settings": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.discovery.config": ("bash", "pgrep", "head", "sed", "grep"),
+    "local.elasticsearch.indices.health": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.slowlog.key_evidence": ("bash", "pgrep", "head", "sed", "ls", "tail"),
+    "local.elasticsearch.security.accounts": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.certificate.validity": ("bash", "pgrep", "head", "sed", "openssl"),
+    "local.elasticsearch.snapshot.repository": ("bash", "pgrep", "head", "sed", "curl"),
+    "local.elasticsearch.system.parameters": ("bash", "pgrep", "head", "sed", "cat", "free", "su"),
 }
 
 

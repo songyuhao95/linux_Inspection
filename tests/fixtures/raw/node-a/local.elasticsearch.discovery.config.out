@@ -1,0 +1,4 @@
+INSPECT_ELASTICSEARCH_CONF=/opt/elasticsearch/config/elasticsearch.yml
+discovery.seed_hosts: ["192.0.2.101:9300", "192.0.2.102:9300", "192.0.2.103:9300"]
+network.host: 192.0.2.101
+node.name: es-01

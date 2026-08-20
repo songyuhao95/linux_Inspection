@@ -9,7 +9,9 @@ from inspect.modules import ModuleRegistry, MonitorModule, default_registry
 def test_default_registry_exposes_named_modules_and_all_metrics():
     registry = default_registry()
     modules = list(registry.iter_modules())
-    assert [module.module_id for module in modules] == ["linux_common", "linux_basic", "nginx", "keepalived"]
+    assert [module.module_id for module in modules] == [
+        "linux_common", "linux_basic", "nginx", "keepalived", "elasticsearch",
+    ]
     assert modules[0].display_name == "Linux 通用 P0"
     assert modules[1].display_name == "Linux 主机基础指标"
     assert modules[2].display_name == "Nginx 中间件"
@@ -28,7 +30,7 @@ def test_default_registry_exposes_named_modules_and_all_metrics():
 
 def test_middleware_module_ids_lists_only_middleware():
     from inspect.modules import middleware_module_ids
-    assert middleware_module_ids() == ("nginx", "keepalived")
+    assert middleware_module_ids() == ("nginx", "keepalived", "elasticsearch")
 
 
 def test_registry_supports_explicit_collection_module_selection():

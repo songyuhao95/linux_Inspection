@@ -558,6 +558,141 @@ KEEPALIVED_METRICS = [
 KEEPALIVED_RULE_PREFIX = _KEEPALIVED_RULE_PREFIX
 METRICS.extend(KEEPALIVED_METRICS)
 
+# --------------------------------------------------------------------------
+# Elasticsearch 中间件指标（elasticsearch-p0-p1-v1）
+# --------------------------------------------------------------------------
+_ELASTICSEARCH_RULE_PREFIX = "elasticsearch-p0-p1-v1"
+_ELASTICSEARCH_ANCHOR = (
+    "安徽农金Elasticsearch运维巡检手册v1.0.docx（P0 表62、P1 表65；"
+    "定位：T5R3/T5R4/T5R5/T5R11/T6R1；Elasticsearch 8.17.0 HTTPS API/9200、"
+    "传输端口9300、/opt/elasticsearch 默认布局）；"
+    + _MANUAL_SHA
+)
+
+
+def _es_metric(metric_id, name, command, parser, unit, baseline, unknown, *, timeout=10):
+    """Create a fully populated metric definition for the ES adapter."""
+    return {
+        "metric_id": metric_id,
+        "name": name,
+        "command": command,
+        "timeout_sec": timeout,
+        "parser": parser,
+        "unit": unit,
+        "source_anchor": _ELASTICSEARCH_ANCHOR,
+        "threshold_layer": "Elasticsearch 文档基线（可由 thresholds-override.yml 覆盖）",
+        "threshold_rule_ids": [f"{_ELASTICSEARCH_RULE_PREFIX}:{metric_id}"],
+        "conflicts": [],
+        "doc_baseline": baseline,
+        "unknown_conditions": unknown,
+    }
+
+
+ELASTICSEARCH_METRICS = [
+    _es_metric("local.elasticsearch.process.present", "Elasticsearch 进程存在性",
+                "pgrep -fa '(^|[[:space:]/])elasticsearch[[:space:]]|org\\.elasticsearch\\.bootstrap\\.Elasticsearch'",
+                "parse_process_present", "布尔（present/absent）+ 匹配行数",
+                "发现运行中的 Elasticsearch JVM/启动脚本 → OK；白名单主机未运行 → CRIT；非白名单主机跳过",
+                "pgrep 不可用或无权限 → UNKNOWN"),
+    _es_metric("local.elasticsearch.version", "Elasticsearch 版本",
+                "{elasticsearch_bin} --version 2>&1", "parse_elasticsearch_version", "版本号",
+                "运行实例版本命中 inspect.conf elasticsearch_version → OK；不一致 → CRIT",
+                "无法从进程发现二进制、--version 无输出或未配置版本基线 → UNKNOWN"),
+    _es_metric("local.elasticsearch.cluster.health", "集群健康",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_cluster/health?pretty",
+                "parse_elasticsearch_cluster_health", "枚举（green/yellow/red）+ 节点数 + 分片百分比",
+                "status=green、节点数达到 elasticsearch_expected_nodes、active_shards_percent=100 → OK；yellow → WARN；red/节点严重不足 → CRIT",
+                "HTTP 401/403/连接失败、返回非 JSON 或无法发现端点 → UNKNOWN"),
+    _es_metric("local.elasticsearch.nodes.online", "集群在线节点数",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_cat/nodes?v&h=name,ip,node.role,master,heap.percent,cpu,load_1m,disk.used_percent",
+                "parse_elasticsearch_nodes", "在线节点数",
+                "在线节点数达到 elasticsearch_expected_nodes → OK；少 1 台 → WARN；少 2 台及以上 → CRIT",
+                "API 未授权、返回为空/格式异常或未配置期望节点数 → UNKNOWN"),
+    _es_metric("local.elasticsearch.nodes.cpu", "Elasticsearch 节点 CPU",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_cat/nodes?v&h=name,ip,cpu,load_1m,load_5m,load_15m",
+                "parse_elasticsearch_nodes_cpu", "%（节点最大 CPU）",
+                "节点最大 CPU <80% → OK；80%–90% → WARN；>90% → CRIT",
+                "API 未授权、无节点行或 CPU 字段不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.nodes.memory", "Elasticsearch 节点内存",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_cat/nodes?v&h=name,heap.percent,ram.percent",
+                "parse_elasticsearch_nodes_memory", "%（最大 heap/ram）",
+                "heap <75% 且 ram <90% → OK；heap 75%–85% 或 ram 90%–95% → WARN；heap >85% 或 ram >95% → CRIT",
+                "API 未授权、无节点行或 heap/ram 字段不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.nodes.disk", "Elasticsearch 节点磁盘",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_cat/allocation?v",
+                "parse_elasticsearch_nodes_disk", "%（节点最大 disk.percent）",
+                "disk.percent <75% → OK；75%–85% → WARN；>85% → CRIT（>95% 有 flood-stage 只读风险）",
+                "API 未授权、无 allocation 行或 disk.percent 不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.disk.watermark", "磁盘水位线",
+                "curl -k -sS {elasticsearch_auth} '{elasticsearch_endpoint}/_cluster/settings?include_defaults=true&filter_path=**.watermark*'",
+                "parse_elasticsearch_watermark", "水位线配置与当前最高磁盘使用率",
+                "能读取 low/high/flood_stage 配置且当前磁盘未越过 high → OK；接近/超过 high → WARN/CRIT",
+                "API 未授权、设置返回非 JSON 或无法关联磁盘数据 → UNKNOWN"),
+    _es_metric("local.elasticsearch.shards.unassigned", "未分配分片",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_cat/shards?v&h=index,shard,prirep,state,node,unassigned.reason",
+                "parse_elasticsearch_shards", "未分配/初始化分片数",
+                "无 UNASSIGNED/持续 INITIALIZING → OK；副本未分配 → WARN；主分片未分配 → CRIT",
+                "API 未授权、返回为空或分片表不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.service.port", "Elasticsearch 服务与端口",
+                "ps -ef | grep '[e]lasticsearch'; ss -tlnp | grep -E ':{elasticsearch_http_port}|:{elasticsearch_transport_port}'",
+                "parse_elasticsearch_service_port", "进程 + HTTP/Transport 端口状态",
+                "运行进程存在且 9200 HTTP、9300 Transport（或 inspect.conf 配置端口）均监听 → OK；任一缺失 → CRIT",
+                "ps/ss 不可用、端口未配置或输出无法核对 → UNKNOWN"),
+    _es_metric("local.elasticsearch.heap.gc", "Elasticsearch Heap/GC",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_cat/nodes?v&h=name,heap.percent; tail -n 200 {elasticsearch_gc_log} | grep -Ei 'Pause|Full|OutOfMemory|heap'",
+                "parse_elasticsearch_heap_gc", "最大 heap 百分比 + GC/OOM 命中数",
+                "heap <75% 且无 Full GC/OOM → OK；heap 75%–85% 或 Full GC → WARN；OOM/heap >85% → CRIT",
+                "API/GC 日志不可读或路径无法发现 → UNKNOWN", timeout=15),
+    _es_metric("local.elasticsearch.thread_pool.rejected", "线程池拒绝",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_cat/thread_pool/search,write?v&h=node_name,name,active,queue,rejected,completed",
+                "parse_elasticsearch_thread_pool", "rejected/queue 总数",
+                "search/write rejected=0 且 queue=0 → OK；出现排队或拒绝 → WARN；持续大量拒绝 → CRIT",
+                "API 未授权、线程池表为空或字段不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.cluster.settings", "集群动态设置",
+                "curl -k -sS {elasticsearch_auth} '{elasticsearch_endpoint}/_cluster/settings?flat_settings=true&pretty'",
+                "parse_elasticsearch_cluster_settings", "动态设置检查结果",
+                "不存在 allocation.enable=none/primaries 或临时 rebalance 禁用 → OK；发现遗留限制 → WARN",
+                "API 未授权、返回非 JSON 或无法读取设置 → UNKNOWN"),
+    _es_metric("local.elasticsearch.discovery.config", "集群发现配置",
+                "grep -E 'discovery.seed_hosts|cluster.initial_master_nodes|network.host|node.name' {elasticsearch_conf}",
+                "parse_elasticsearch_discovery_config", "seed_hosts/initial_master_nodes 配置检查",
+                "seed_hosts 覆盖规划节点且集群形成后不再保留 cluster.initial_master_nodes → OK；缺失/漂移 → WARN",
+                "elasticsearch.yml 不存在、不可读或关键项无法解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.indices.health", "索引健康与规模",
+                "curl -k -sS {elasticsearch_auth} '{elasticsearch_endpoint}/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc'",
+                "parse_elasticsearch_indices", "索引数 + red/yellow 数",
+                "无 red/yellow 索引 → OK；yellow → WARN；red → CRIT；结果同时展示索引规模",
+                "API 未授权、返回为空或索引表不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.slowlog.key_evidence", "慢查询/写入日志",
+                "ls -1 {elasticsearch_log}/*slowlog* 2>/dev/null; tail -n 100 {elasticsearch_log}/*slowlog* 2>/dev/null",
+                "parse_elasticsearch_slowlog", "慢日志文件数 + 命中行数",
+                "慢日志无持续命中 → OK；发现慢查询/慢写入记录 → WARN；慢日志未启用时明确说明而不误报",
+                "日志目录无法发现、不可读或命令不可用 → UNKNOWN", timeout=15),
+    _es_metric("local.elasticsearch.security.accounts", "安全账号与权限",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_security/user?pretty; curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_security/role?pretty",
+                "parse_elasticsearch_security", "用户/角色数量 + superuser 风险",
+                "无未知高权限账号、应用不使用 elastic 超级用户 → OK；发现非基线 superuser → WARN",
+                "安全 API 未授权或返回非 JSON → UNKNOWN"),
+    _es_metric("local.elasticsearch.certificate.validity", "HTTPS 证书有效期",
+                "openssl x509 -in {elasticsearch_cert} -noout -dates -checkend 2592000",
+                "parse_elasticsearch_certificate", "证书剩余天数",
+                "证书未过期且剩余 ≥30 天 → OK；剩余 <30 天 → WARN；已过期/检查失败 → CRIT",
+                "证书路径无法从进程/config/inspect.conf 发现、openssl 不可用或格式异常 → UNKNOWN"),
+    _es_metric("local.elasticsearch.snapshot.repository", "快照仓库",
+                "curl -k -sS {elasticsearch_auth} {elasticsearch_endpoint}/_snapshot/_all?pretty; curl -k -sS -X POST {elasticsearch_auth} {elasticsearch_endpoint}/_snapshot/{elasticsearch_snapshot_repo}/_verify?pretty",
+                "parse_elasticsearch_snapshot", "仓库数量 + verify 状态",
+                "存在已注册仓库且 _verify 成功 → OK；仓库缺失或 verify 失败 → WARN/CRIT",
+                "API 未授权、仓库名未配置或返回非 JSON → UNKNOWN"),
+    _es_metric("local.elasticsearch.system.parameters", "Elasticsearch 系统参数",
+                "cat /proc/sys/vm/max_map_count; free -m; su - {elasticsearch_system_user} -c 'ulimit -n; ulimit -u; ulimit -l'",
+                "parse_elasticsearch_system_parameters", "max_map_count/swap/nofile/nproc/memlock",
+                "max_map_count=262144、Swap=0、nofile≥65535、nproc≥4096、memlock=unlimited → OK；任一不满足 → WARN/CRIT",
+                "系统文件或运行用户不可读取、命令缺失 → UNKNOWN"),
+]
+
+ELASTICSEARCH_RULE_PREFIX = _ELASTICSEARCH_RULE_PREFIX
+METRICS.extend(ELASTICSEARCH_METRICS)
+
 _METRICS_BY_ID = {m["metric_id"]: m for m in METRICS}
 
 # 注册表字段契约（tests/test_metrics.py 校验每个条目的键集）
@@ -590,5 +725,5 @@ def iter_metrics():
 
 
 def count_metrics():
-    """已实现指标总数（当前恒为 10）。"""
+    """返回已注册指标总数。"""
     return len(METRICS)

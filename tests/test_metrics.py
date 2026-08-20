@@ -42,6 +42,26 @@ EXPECTED_IDS = [
     "local.keepalived.healthcheck.script",
     "local.keepalived.error_log.key_evidence",
     "local.keepalived.capability.stability",
+    "local.elasticsearch.process.present",
+    "local.elasticsearch.version",
+    "local.elasticsearch.cluster.health",
+    "local.elasticsearch.nodes.online",
+    "local.elasticsearch.nodes.cpu",
+    "local.elasticsearch.nodes.memory",
+    "local.elasticsearch.nodes.disk",
+    "local.elasticsearch.disk.watermark",
+    "local.elasticsearch.shards.unassigned",
+    "local.elasticsearch.service.port",
+    "local.elasticsearch.heap.gc",
+    "local.elasticsearch.thread_pool.rejected",
+    "local.elasticsearch.cluster.settings",
+    "local.elasticsearch.discovery.config",
+    "local.elasticsearch.indices.health",
+    "local.elasticsearch.slowlog.key_evidence",
+    "local.elasticsearch.security.accounts",
+    "local.elasticsearch.certificate.validity",
+    "local.elasticsearch.snapshot.repository",
+    "local.elasticsearch.system.parameters",
 ]
 
 # MR §5 超时列：指标命令 10s、日志类 15s（TD §5.2）
@@ -51,14 +71,16 @@ LOG_IDS = {
     "local.nginx.access_log.status_codes",
     "local.keepalived.error_log.key_evidence",
     "local.keepalived.capability.stability",
+    "local.elasticsearch.heap.gc",
+    "local.elasticsearch.slowlog.key_evidence",
 }
 TIMEOUT_10S = set(EXPECTED_IDS) - LOG_IDS
 
 
-def test_registry_has_exactly_27_metrics():
-    """注册表共 19 条（10 个共同 P0 + 9 个 Nginx 中间件）。"""
-    assert reg.count_metrics() == 27
-    assert len(reg.METRICS) == 27
+def test_registry_has_exactly_47_metrics():
+    """注册表共 47 条（Linux + Nginx + Keepalived + Elasticsearch）。"""
+    assert reg.count_metrics() == 47
+    assert len(reg.METRICS) == 47
 
 
 def test_metric_ids_are_exact_expected_set():
@@ -139,7 +161,7 @@ def test_parser_names_unique():
     # local.process.present 与 local.nginx.process.present 复用；
     # parse_logs_key_evidence 只被 local.logs.key_evidence 使用
     # （nginx 关键日志用带 ls 标记剥离的 parse_nginx_error_log）。
-    assert parsers.count("parse_process_present") == 3
+    assert parsers.count("parse_process_present") == 4
     assert parsers.count("parse_logs_key_evidence") == 1
 
 
@@ -150,6 +172,8 @@ def test_threshold_rule_ids_reference_version():
             prefix = reg.NGINX_RULE_PREFIX
         elif m["metric_id"].startswith("local.keepalived."):
             prefix = reg.KEEPALIVED_RULE_PREFIX
+        elif m["metric_id"].startswith("local.elasticsearch."):
+            prefix = reg.ELASTICSEARCH_RULE_PREFIX
         else:
             prefix = reg.VERSION
         for rid in m["threshold_rule_ids"]:

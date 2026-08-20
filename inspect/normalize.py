@@ -39,6 +39,7 @@ ansible_runner（其返回值为普通 dict 数据，按鸭子类型消费）；
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
@@ -896,6 +897,276 @@ def parse_keepalived_capability_stability(output: str) -> Dict[str, Any]:
     }
 
 
+# -- local.elasticsearch.* --------------------------------------------------
+
+
+def _es_lines(output: str) -> List[str]:
+    return [
+        line for line in _content_lines(output)
+        if not line.startswith("INSPECT_ELASTICSEARCH_")
+    ]
+
+
+def _es_http_status(output: str) -> Optional[int]:
+    match = re.search(r"INSPECT_ELASTICSEARCH_HTTP_STATUS=(\d{3})", output or "")
+    return int(match.group(1)) if match else None
+
+
+def _es_http_statuses(output: str) -> List[int]:
+    return [int(value) for value in re.findall(
+        r"INSPECT_ELASTICSEARCH_HTTP_STATUS=(\d{3})", output or ""
+    )]
+
+
+def _es_json(output: str) -> Any:
+    status = _es_http_status(output)
+    if status is not None and status >= 400:
+        raise ParseError(f"Elasticsearch API HTTP {status}（认证/权限或服务错误）")
+    text = "\n".join(_es_lines(output)).strip()
+    if not text:
+        raise ParseError("Elasticsearch API 未返回内容")
+    start = min((idx for idx in (text.find("{"), text.find("[")) if idx >= 0), default=-1)
+    if start < 0:
+        raise ParseError("Elasticsearch API 返回不是 JSON")
+    try:
+        return json.loads(text[start:])
+    except json.JSONDecodeError as exc:
+        raise ParseError("Elasticsearch API JSON 解析失败") from exc
+
+
+def parse_elasticsearch_version(output: str) -> Dict[str, Any]:
+    if "INSPECT_ELASTICSEARCH_RUNNING_NOT_FOUND" in _content_lines(output):
+        raise ParseError("未发现运行中的 Elasticsearch 或其可执行文件")
+    match = re.search(r"(?:Version|version)\s*[:=]\s*([0-9][A-Za-z0-9._+-]*)", output or "")
+    if not match:
+        match = re.search(r"\b([0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9._-]+)?)\b", output or "")
+    if not match:
+        raise ParseError("Elasticsearch --version 未返回可识别版本号")
+    return {"version": match.group(1), "summary": [mask_output(x) for x in _content_lines(output)[:3]]}
+
+
+def parse_elasticsearch_cluster_health(output: str) -> Dict[str, Any]:
+    data = _es_json(output)
+    try:
+        return {
+            "status": str(data["status"]).lower(),
+            "nodes": int(data.get("number_of_nodes", 0)),
+            "active_shards_percent": float(data.get("active_shards_percent_as_number", 0)),
+            "summary": f"status={data.get('status')}; nodes={data.get('number_of_nodes')}; active_shards_percent={data.get('active_shards_percent_as_number')}",
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ParseError("集群健康 JSON 缺少 status/节点数/分片百分比") from exc
+
+
+def _es_cat_rows(output: str) -> List[List[str]]:
+    status = _es_http_status(output)
+    if status is not None and status >= 400:
+        raise ParseError(f"Elasticsearch API HTTP {status}")
+    lines = _es_lines(output)
+    if not lines:
+        raise ParseError("Elasticsearch CAT API 无返回行")
+    rows = []
+    for line in lines:
+        parts = line.split()
+        if not parts or parts[0].lower() in {"name", "node_name", "index", "shard", "health", "node"}:
+            continue
+        rows.append(parts)
+    if not rows:
+        raise ParseError("Elasticsearch CAT API 无数据行")
+    return rows
+
+
+def parse_elasticsearch_nodes(output: str) -> Dict[str, Any]:
+    rows = _es_cat_rows(output)
+    return {"count": len(rows), "rows": rows, "summary": [mask_output(" ".join(row)) for row in rows[:10]]}
+
+
+def parse_elasticsearch_nodes_cpu(output: str) -> Dict[str, Any]:
+    rows = _es_cat_rows(output)
+    values = []
+    for row in rows:
+        for token in row[2:]:
+            if re.fullmatch(r"\d+(?:\.\d+)?", token):
+                values.append(float(token))
+                break
+    if not values:
+        raise ParseError("节点 CPU 字段不可解析")
+    return {"max_cpu": max(values), "avg_cpu": sum(values) / len(values), "count": len(values), "rows": rows}
+
+
+def parse_elasticsearch_nodes_memory(output: str) -> Dict[str, Any]:
+    rows = _es_cat_rows(output)
+    heaps: List[float] = []
+    rams: List[float] = []
+    for row in rows:
+        nums = [float(token) for token in row[1:] if re.fullmatch(r"\d+(?:\.\d+)?", token)]
+        if len(nums) >= 2:
+            heaps.append(nums[0]); rams.append(nums[1])
+    if not heaps:
+        raise ParseError("节点 heap.percent/ram.percent 不可解析")
+    return {"max_heap": max(heaps), "max_ram": max(rams) if rams else 0, "count": len(heaps), "rows": rows}
+
+
+def parse_elasticsearch_nodes_disk(output: str) -> Dict[str, Any]:
+    rows = _es_cat_rows(output)
+    values: List[float] = []
+    for row in rows:
+        for token in reversed(row):
+            token = token.rstrip("%")
+            if re.fullmatch(r"\d+(?:\.\d+)?", token):
+                values.append(float(token)); break
+    if not values:
+        raise ParseError("allocation disk.percent 不可解析")
+    return {"max_disk": max(values), "count": len(values), "rows": rows}
+
+
+def parse_elasticsearch_watermark(output: str) -> Dict[str, Any]:
+    data = _es_json(output)
+    text = json.dumps(data, ensure_ascii=False).lower()
+    values = {key: (re.search(rf"{key}[^0-9]*(\d+%|\d+gb|\d+g)", text).group(1) if re.search(rf"{key}[^0-9]*(\d+%|\d+gb|\d+g)", text) else None) for key in ("low", "high", "flood_stage")}
+    return {"watermarks": values, "current_max_disk": None, "summary": json.dumps(data, ensure_ascii=False)[:600]}
+
+
+def parse_elasticsearch_shards(output: str) -> Dict[str, Any]:
+    rows = _es_cat_rows(output)
+    unassigned_primary = unassigned_replica = initializing = 0
+    for row in rows:
+        state = next((item.upper() for item in row if item.upper() in {"UNASSIGNED", "INITIALIZING", "STARTED", "RELOCATING"}), "")
+        if state == "UNASSIGNED":
+            if "p" in row[:4]: unassigned_primary += 1
+            else: unassigned_replica += 1
+        elif state == "INITIALIZING":
+            initializing += 1
+    return {"unassigned_primary": unassigned_primary, "unassigned_replica": unassigned_replica, "initializing": initializing, "rows": rows}
+
+
+def parse_elasticsearch_service_port(output: str) -> Dict[str, Any]:
+    lines = _content_lines(output)
+    process = any("elasticsearch" in line.lower() for line in lines if "LISTEN" not in line)
+    ports = sorted({int(x) for x in re.findall(r":(\d+)\b", output or "") if int(x) > 0})
+    return {"process": process, "ports": ports, "summary": [mask_output(x) for x in lines[:10]]}
+
+
+def parse_elasticsearch_heap_gc(output: str) -> Dict[str, Any]:
+    lines = _es_lines(output)
+    heaps = [float(x) for x in re.findall(r"(?:^|\s)(\d+(?:\.\d+)?)\s*$", "\n".join(lines))]
+    max_heap = max(heaps) if heaps else None
+    full_gc = len(re.findall(r"Full", output or "", re.IGNORECASE))
+    oom = len(re.findall(r"OutOfMemory", output or "", re.IGNORECASE))
+    if max_heap is None and "INSPECT_ELASTICSEARCH_GC_LOG_NOT_FOUND" in _content_lines(output):
+        raise ParseError("无法读取 Elasticsearch heap 或 GC 日志")
+    return {"max_heap": max_heap, "full_gc": full_gc, "oom": oom, "rows": [mask_output(x) for x in lines[-10:]]}
+
+
+def parse_elasticsearch_thread_pool(output: str) -> Dict[str, Any]:
+    rows = _es_cat_rows(output)
+    queue = rejected = 0
+    for row in rows:
+        nums = [int(x) for x in row if re.fullmatch(r"\d+", x)]
+        if len(nums) >= 3:
+            queue += nums[-3]; rejected += nums[-2]
+    return {"queue": queue, "rejected": rejected, "rows": rows}
+
+
+def parse_elasticsearch_cluster_settings(output: str) -> Dict[str, Any]:
+    data = _es_json(output)
+    text = json.dumps(data, ensure_ascii=False).lower()
+    restricted = bool(re.search(r"allocation\.enable[^,}]*\b(?:none|primaries)\b|rebalance[^,}]*\bnone\b", text))
+    return {"restricted": restricted, "summary": json.dumps(data, ensure_ascii=False)[:600]}
+
+
+def parse_elasticsearch_discovery_config(output: str) -> Dict[str, Any]:
+    lines = _es_lines(output)
+    if "INSPECT_ELASTICSEARCH_CONFIG_NOT_FOUND" in _content_lines(output) or not lines:
+        raise ParseError("未发现 Elasticsearch 配置文件")
+    seed = [line for line in lines if "discovery.seed_hosts" in line]
+    initial = [line for line in lines if "cluster.initial_master_nodes" in line]
+    return {"seed_hosts": seed, "initial_master_nodes": initial, "rows": [mask_output(x) for x in lines]}
+
+
+def parse_elasticsearch_indices(output: str) -> Dict[str, Any]:
+    rows = _es_cat_rows(output)
+    red = sum(1 for row in rows if row[0].lower() == "red")
+    yellow = sum(1 for row in rows if row[0].lower() == "yellow")
+    return {"count": len(rows), "red": red, "yellow": yellow, "rows": rows}
+
+
+def parse_elasticsearch_slowlog(output: str) -> Dict[str, Any]:
+    lines = _es_lines(output)
+    if "INSPECT_ELASTICSEARCH_LOG_NOT_FOUND" in _content_lines(output):
+        raise ParseError("未发现 Elasticsearch 日志目录")
+    files = [line for line in lines if "slowlog" in line]
+    hits = [line for line in lines if line not in files]
+    return {"files": len(files), "hit_count": len(hits), "rows": [mask_output(x) for x in hits[-10:]]}
+
+
+def parse_elasticsearch_security(output: str) -> Dict[str, Any]:
+    statuses = _es_http_statuses(output)
+    if any(status >= 400 for status in statuses):
+        raise ParseError(
+            "Elasticsearch security API HTTP "
+            + ",".join(str(status) for status in statuses if status >= 400)
+        )
+    objects = re.findall(r"\{(?:[^{}]|\{[^{}]*\})*\}", "\n".join(_es_lines(output)), re.S)
+    if not objects:
+        raise ParseError("安全 API 未返回 JSON")
+    text = "\n".join(objects).lower()
+    superusers = len(re.findall(r"superuser", text))
+    users = max(0, len(objects) - 1)
+    return {"users": users, "superusers": superusers, "rows": [mask_output(x) for x in objects[:6]]}
+
+
+def parse_elasticsearch_certificate(output: str) -> Dict[str, Any]:
+    if "INSPECT_ELASTICSEARCH_CERT_NOT_FOUND" in _content_lines(output):
+        raise ParseError("未发现 Elasticsearch HTTPS 证书")
+    match = re.search(r"notAfter=(.+)", output or "", re.IGNORECASE)
+    if not match:
+        raise ParseError("openssl 未返回 notAfter")
+    from email.utils import parsedate_to_datetime
+    try:
+        expiry = parsedate_to_datetime(match.group(1).strip())
+        days = (expiry - datetime.now(expiry.tzinfo)).total_seconds() / 86400
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ParseError("证书到期时间不可解析") from exc
+    return {"days_remaining": days, "expiry": mask_output(match.group(1).strip())}
+
+
+def parse_elasticsearch_snapshot(output: str) -> Dict[str, Any]:
+    if "INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND" in _content_lines(output):
+        raise ParseError("未配置 Elasticsearch 快照仓库")
+    statuses = _es_http_statuses(output)
+    if any(status >= 400 for status in statuses):
+        raise ParseError(
+            "Elasticsearch snapshot API HTTP "
+            + ",".join(str(status) for status in statuses if status >= 400)
+        )
+    data = _es_lines(output)
+    text = "\n".join(data)
+    repository_count = len(re.findall(r'"[^"\\]+"\s*:\s*\{\s*"type"\s*:', text))
+    verify_ok = (
+        any('"nodes"' in line or '"status"' in line for line in data[-10:])
+        and not any('"error"' in line for line in data[-10:])
+    )
+    return {
+        "repository_count": repository_count,
+        "verify_ok": verify_ok,
+        "rows": [mask_output(x) for x in data[-10:]],
+    }
+
+
+def parse_elasticsearch_system_parameters(output: str) -> Dict[str, Any]:
+    lines = _content_lines(output)
+    max_map = next((int(m.group(1)) for m in [re.search(r"ES_MAX_MAP_COUNT=(\d+)", output or "")] if m), None)
+    nofile = next((int(m.group(1)) for m in [re.search(r"ES_ULIMIT_NOFILE=(\d+)", output or "")] if m), None)
+    nproc = next((int(m.group(1)) for m in [re.search(r"ES_ULIMIT_NPROC=(\d+)", output or "")] if m), None)
+    memlock = re.search(r"ES_ULIMIT_MEMLOCK=([^\s]+)", output or "")
+    swap = re.search(r"^Swap:\s+(\d+)\s+(\d+)\s+(\d+)", output or "", re.M)
+    if max_map is None or nofile is None or nproc is None or not memlock:
+        raise ParseError("系统参数输出不完整")
+    swap_used = int(swap.group(2)) if swap else None
+    return {"max_map_count": max_map, "nofile": nofile, "nproc": nproc, "memlock": memlock.group(1), "swap_used": swap_used, "rows": [mask_output(x) for x in lines]}
+
+
 # --------------------------------------------------------------------------
 # 解析器注册表（metrics.py parser 字段名 ↔ 函数；TD §5.2 按名注册）
 # --------------------------------------------------------------------------
@@ -928,6 +1199,26 @@ PARSERS: Dict[str, Any] = {
     "local.keepalived.healthcheck.script": parse_keepalived_healthcheck,
     "local.keepalived.error_log.key_evidence": parse_keepalived_error_log,
     "local.keepalived.capability.stability": parse_keepalived_capability_stability,
+    "local.elasticsearch.process.present": parse_process_present,
+    "local.elasticsearch.version": parse_elasticsearch_version,
+    "local.elasticsearch.cluster.health": parse_elasticsearch_cluster_health,
+    "local.elasticsearch.nodes.online": parse_elasticsearch_nodes,
+    "local.elasticsearch.nodes.cpu": parse_elasticsearch_nodes_cpu,
+    "local.elasticsearch.nodes.memory": parse_elasticsearch_nodes_memory,
+    "local.elasticsearch.nodes.disk": parse_elasticsearch_nodes_disk,
+    "local.elasticsearch.disk.watermark": parse_elasticsearch_watermark,
+    "local.elasticsearch.shards.unassigned": parse_elasticsearch_shards,
+    "local.elasticsearch.service.port": parse_elasticsearch_service_port,
+    "local.elasticsearch.heap.gc": parse_elasticsearch_heap_gc,
+    "local.elasticsearch.thread_pool.rejected": parse_elasticsearch_thread_pool,
+    "local.elasticsearch.cluster.settings": parse_elasticsearch_cluster_settings,
+    "local.elasticsearch.discovery.config": parse_elasticsearch_discovery_config,
+    "local.elasticsearch.indices.health": parse_elasticsearch_indices,
+    "local.elasticsearch.slowlog.key_evidence": parse_elasticsearch_slowlog,
+    "local.elasticsearch.security.accounts": parse_elasticsearch_security,
+    "local.elasticsearch.certificate.validity": parse_elasticsearch_certificate,
+    "local.elasticsearch.snapshot.repository": parse_elasticsearch_snapshot,
+    "local.elasticsearch.system.parameters": parse_elasticsearch_system_parameters,
 }
 
 # parser 字段名与注册表一一对应（tests 机械校验）
@@ -1386,6 +1677,151 @@ def _judge_keepalived_capability_stability(
     return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
 
 
+# -- local.elasticsearch.* 判定（elasticsearch-p0-p1-v1） -------------------
+
+
+def _judge_elasticsearch_version(parsed, resolved, profile=None):
+    expected = [str(x).strip() for x in (profile or {}).get("elasticsearch_version", []) if str(x).strip()]
+    if not expected:
+        return _unknown_decision(resolved, extra_note="inspect.conf 未配置 elasticsearch_version 版本基线")
+    actual = str(parsed.get("version") or "")
+    if actual in expected:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK), "note": f"实际版本={actual}；允许版本={'、'.join(expected)}"}
+    return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT), "note": f"实际版本={actual}；允许版本={'、'.join(expected)}"}
+
+
+def _judge_es_cluster_health(parsed, resolved, profile=None):
+    expected_values = (profile or {}).get("elasticsearch_expected_nodes", [])
+    expected = int(expected_values[0]) if expected_values else 0
+    if parsed["status"] == "red" or (expected and parsed["nodes"] <= expected - 2):
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    if parsed["status"] == "yellow" or (expected and parsed["nodes"] < expected) or parsed["active_shards_percent"] < 100:
+        return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN)}
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
+def _judge_es_nodes_online(parsed, resolved, profile=None):
+    expected = int((profile or {}).get("elasticsearch_expected_nodes", [0])[0] or 0)
+    if not expected:
+        return _unknown_decision(resolved, extra_note="未配置 elasticsearch_expected_nodes")
+    missing = expected - int(parsed["count"])
+    if missing <= 0:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {"status": STATUS_WARN if missing == 1 else STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_WARN if missing == 1 else STATUS_CRIT)}
+
+
+def _judge_es_nodes_cpu(parsed, resolved, profile=None):
+    value = parsed["max_cpu"]
+    status = STATUS_OK if value < 80 else STATUS_WARN if value <= 90 else STATUS_CRIT
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_nodes_memory(parsed, resolved, profile=None):
+    if parsed["max_heap"] > 85 or parsed["max_ram"] > 95:
+        status = STATUS_CRIT
+    elif parsed["max_heap"] >= 75 or parsed["max_ram"] >= 90:
+        status = STATUS_WARN
+    else:
+        status = STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_nodes_disk(parsed, resolved, profile=None):
+    value = parsed["max_disk"]
+    status = STATUS_OK if value < 75 else STATUS_WARN if value <= 85 else STATUS_CRIT
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_watermark(parsed, resolved, profile=None):
+    if not any(parsed.get("watermarks", {}).values()):
+        return _unknown_decision(resolved, extra_note="未读取到 Elasticsearch low/high/flood_stage 水位线")
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
+def _judge_es_shards(parsed, resolved, profile=None):
+    if parsed["unassigned_primary"]:
+        status = STATUS_CRIT
+    elif parsed["unassigned_replica"] or parsed["initializing"]:
+        status = STATUS_WARN
+    else:
+        status = STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_service_port(parsed, resolved, profile=None):
+    ports = {int(x) for x in (profile or {}).get("elasticsearch_http_port", ["9200"])} | {int(x) for x in (profile or {}).get("elasticsearch_transport_port", ["9300"])}
+    if not ports:
+        return _unknown_decision(resolved, extra_note="HTTP/Transport 端口未配置")
+    if parsed["process"] and ports.issubset(set(parsed["ports"])):
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+
+
+def _judge_es_heap_gc(parsed, resolved, profile=None):
+    if parsed.get("oom"):
+        status = STATUS_CRIT
+    elif parsed.get("max_heap") is not None and parsed["max_heap"] > 85:
+        status = STATUS_CRIT
+    elif parsed.get("full_gc") or (parsed.get("max_heap") is not None and parsed["max_heap"] >= 75):
+        status = STATUS_WARN
+    else:
+        status = STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_thread_pool(parsed, resolved, profile=None):
+    status = STATUS_OK if parsed["queue"] == 0 and parsed["rejected"] == 0 else STATUS_WARN
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_cluster_settings(parsed, resolved, profile=None):
+    status = STATUS_WARN if parsed.get("restricted") else STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_discovery_config(parsed, resolved, profile=None):
+    expected = [str(x) for x in (profile or {}).get("elasticsearch_seed_hosts", [])]
+    joined = " ".join(parsed.get("seed_hosts", []))
+    if expected and all(item.split(":", 1)[0] in joined for item in expected):
+        if parsed.get("initial_master_nodes"):
+            return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN), "note": "集群已运行时仍保留 cluster.initial_master_nodes，请确认是否应删除"}
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+    return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN), "note": "seed_hosts 与 inspect.conf 规划节点不完全一致"}
+
+
+def _judge_es_indices(parsed, resolved, profile=None):
+    status = STATUS_CRIT if parsed["red"] else STATUS_WARN if parsed["yellow"] else STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_slowlog(parsed, resolved, profile=None):
+    status = STATUS_WARN if parsed["hit_count"] else STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status), "note": "未启用慢日志时按未配置说明展示，不默认判定为故障" if not parsed["files"] else None}
+
+
+def _judge_es_security(parsed, resolved, profile=None):
+    status = STATUS_WARN if parsed["superusers"] > 1 else STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_certificate(parsed, resolved, profile=None):
+    days = parsed["days_remaining"]
+    status = STATUS_CRIT if days <= 0 else STATUS_WARN if days < 30 else STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_snapshot(parsed, resolved, profile=None):
+    status = STATUS_OK if parsed["repository_count"] > 0 and parsed["verify_ok"] else STATUS_WARN
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
+def _judge_es_system_parameters(parsed, resolved, profile=None):
+    critical = parsed["max_map_count"] < 262144 or parsed["nofile"] < 65535 or parsed["nproc"] < 4096
+    warning = parsed.get("swap_used") not in (None, 0) or str(parsed["memlock"]).lower() not in {"unlimited", "-1"}
+    status = STATUS_CRIT if critical else STATUS_WARN if warning else STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
 # 指标 → 判定函数（数值边界全部来自 MR §5/§6 已批准基线）
 JUDGERS: Dict[str, Any] = {
     "local.process.present": _judge_process_present,
@@ -1415,6 +1851,26 @@ JUDGERS: Dict[str, Any] = {
     "local.keepalived.healthcheck.script": _judge_keepalived_healthcheck,
     "local.keepalived.error_log.key_evidence": _judge_keepalived_error_log,
     "local.keepalived.capability.stability": _judge_keepalived_capability_stability,
+    "local.elasticsearch.process.present": _judge_process_present,
+    "local.elasticsearch.version": _judge_elasticsearch_version,
+    "local.elasticsearch.cluster.health": _judge_es_cluster_health,
+    "local.elasticsearch.nodes.online": _judge_es_nodes_online,
+    "local.elasticsearch.nodes.cpu": _judge_es_nodes_cpu,
+    "local.elasticsearch.nodes.memory": _judge_es_nodes_memory,
+    "local.elasticsearch.nodes.disk": _judge_es_nodes_disk,
+    "local.elasticsearch.disk.watermark": _judge_es_watermark,
+    "local.elasticsearch.shards.unassigned": _judge_es_shards,
+    "local.elasticsearch.service.port": _judge_es_service_port,
+    "local.elasticsearch.heap.gc": _judge_es_heap_gc,
+    "local.elasticsearch.thread_pool.rejected": _judge_es_thread_pool,
+    "local.elasticsearch.cluster.settings": _judge_es_cluster_settings,
+    "local.elasticsearch.discovery.config": _judge_es_discovery_config,
+    "local.elasticsearch.indices.health": _judge_es_indices,
+    "local.elasticsearch.slowlog.key_evidence": _judge_es_slowlog,
+    "local.elasticsearch.security.accounts": _judge_es_security,
+    "local.elasticsearch.certificate.validity": _judge_es_certificate,
+    "local.elasticsearch.snapshot.repository": _judge_es_snapshot,
+    "local.elasticsearch.system.parameters": _judge_es_system_parameters,
 }
 
 # 数值化指标（normalized_value 非 null，可参与外部配置数值规则；MR §5）
@@ -1431,6 +1887,18 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.nginx.connections.status",
         "local.nginx.access_log.status_codes",
         "local.keepalived.error_log.key_evidence",
+        "local.elasticsearch.nodes.online",
+        "local.elasticsearch.nodes.cpu",
+        "local.elasticsearch.nodes.memory",
+        "local.elasticsearch.nodes.disk",
+        "local.elasticsearch.shards.unassigned",
+        "local.elasticsearch.heap.gc",
+        "local.elasticsearch.thread_pool.rejected",
+        "local.elasticsearch.indices.health",
+        "local.elasticsearch.slowlog.key_evidence",
+        "local.elasticsearch.security.accounts",
+        "local.elasticsearch.certificate.validity",
+        "local.elasticsearch.system.parameters",
     }
 )
 
@@ -1464,6 +1932,30 @@ def _normalized_value(metric_id: str, parsed: Dict[str, Any]) -> Optional[float]
         return float(parsed["five_xx"])
     if metric_id == "local.keepalived.error_log.key_evidence":
         return float(parsed["hit_count"])
+    if metric_id == "local.elasticsearch.nodes.online":
+        return float(parsed["count"])
+    if metric_id == "local.elasticsearch.nodes.cpu":
+        return float(parsed["max_cpu"])
+    if metric_id == "local.elasticsearch.nodes.memory":
+        return float(parsed["max_heap"])
+    if metric_id == "local.elasticsearch.nodes.disk":
+        return float(parsed["max_disk"])
+    if metric_id == "local.elasticsearch.shards.unassigned":
+        return float(parsed["unassigned_primary"] + parsed["unassigned_replica"])
+    if metric_id == "local.elasticsearch.heap.gc":
+        return float(parsed["max_heap"]) if parsed.get("max_heap") is not None else None
+    if metric_id == "local.elasticsearch.thread_pool.rejected":
+        return float(parsed["rejected"])
+    if metric_id == "local.elasticsearch.indices.health":
+        return float(parsed["count"])
+    if metric_id == "local.elasticsearch.slowlog.key_evidence":
+        return float(parsed["hit_count"])
+    if metric_id == "local.elasticsearch.security.accounts":
+        return float(parsed["superusers"])
+    if metric_id == "local.elasticsearch.certificate.validity":
+        return float(parsed["days_remaining"])
+    if metric_id == "local.elasticsearch.system.parameters":
+        return float(parsed["max_map_count"])
     return None
 
 
@@ -1529,6 +2021,46 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
         return str(parsed["hit_count"])
     if metric_id == "local.keepalived.capability.stability":
         return f"net_admin={parsed['has_net_admin']};net_raw={parsed['has_net_raw']}"
+    if metric_id == "local.elasticsearch.process.present":
+        return "present" if parsed["present"] else "absent"
+    if metric_id == "local.elasticsearch.version":
+        return parsed["version"]
+    if metric_id == "local.elasticsearch.cluster.health":
+        return parsed["summary"]
+    if metric_id == "local.elasticsearch.nodes.online":
+        return str(parsed["count"])
+    if metric_id == "local.elasticsearch.nodes.cpu":
+        return str(parsed["max_cpu"])
+    if metric_id == "local.elasticsearch.nodes.memory":
+        return f"heap={parsed['max_heap']};ram={parsed['max_ram']}"
+    if metric_id == "local.elasticsearch.nodes.disk":
+        return str(parsed["max_disk"])
+    if metric_id == "local.elasticsearch.disk.watermark":
+        return ";".join(f"{k}={v}" for k, v in parsed["watermarks"].items())
+    if metric_id == "local.elasticsearch.shards.unassigned":
+        return f"primary={parsed['unassigned_primary']};replica={parsed['unassigned_replica']};initializing={parsed['initializing']}"
+    if metric_id == "local.elasticsearch.service.port":
+        return f"process={parsed['process']};ports={','.join(map(str, parsed['ports']))}"
+    if metric_id == "local.elasticsearch.heap.gc":
+        return f"heap={parsed.get('max_heap')};full_gc={parsed['full_gc']};oom={parsed['oom']}"
+    if metric_id == "local.elasticsearch.thread_pool.rejected":
+        return f"queue={parsed['queue']};rejected={parsed['rejected']}"
+    if metric_id == "local.elasticsearch.cluster.settings":
+        return "restricted" if parsed["restricted"] else "clean"
+    if metric_id == "local.elasticsearch.discovery.config":
+        return f"seed_hosts={len(parsed['seed_hosts'])};initial_master_nodes={bool(parsed['initial_master_nodes'])}"
+    if metric_id == "local.elasticsearch.indices.health":
+        return f"indices={parsed['count']};red={parsed['red']};yellow={parsed['yellow']}"
+    if metric_id == "local.elasticsearch.slowlog.key_evidence":
+        return f"files={parsed['files']};hits={parsed['hit_count']}"
+    if metric_id == "local.elasticsearch.security.accounts":
+        return f"users={parsed['users']};superusers={parsed['superusers']}"
+    if metric_id == "local.elasticsearch.certificate.validity":
+        return f"days_remaining={parsed['days_remaining']:.1f};expiry={parsed['expiry']}"
+    if metric_id == "local.elasticsearch.snapshot.repository":
+        return f"repositories={parsed['repository_count']};verify={parsed['verify_ok']}"
+    if metric_id == "local.elasticsearch.system.parameters":
+        return f"max_map_count={parsed['max_map_count']};swap_used={parsed['swap_used']};nofile={parsed['nofile']};nproc={parsed['nproc']};memlock={parsed['memlock']}"
     return None
 
 
@@ -1727,6 +2259,47 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
             f"切换={parsed['transition_count']}；FAULT={parsed['fault_count']}；"
             f"脚本失败={parsed['script_failure_count']}"
         )
+    if metric_id.startswith("local.elasticsearch."):
+        if metric_id == "local.elasticsearch.process.present":
+            return "发现 Elasticsearch 进程" if parsed["present"] else "未发现 Elasticsearch 进程"
+        if metric_id == "local.elasticsearch.version":
+            return parsed["version"]
+        if metric_id == "local.elasticsearch.cluster.health":
+            return parsed["summary"]
+        if metric_id == "local.elasticsearch.nodes.online":
+            return f"在线节点={parsed['count']}；" + " / ".join(parsed.get("summary", []))
+        if metric_id == "local.elasticsearch.nodes.cpu":
+            return f"节点数={parsed['count']}；最大CPU={parsed['max_cpu']:.1f}%；平均CPU={parsed['avg_cpu']:.1f}%"
+        if metric_id == "local.elasticsearch.nodes.memory":
+            return f"节点数={parsed['count']}；最大heap={parsed['max_heap']:.1f}%；最大ram={parsed['max_ram']:.1f}%"
+        if metric_id == "local.elasticsearch.nodes.disk":
+            return f"节点数={parsed['count']}；最大disk.percent={parsed['max_disk']:.1f}%"
+        if metric_id == "local.elasticsearch.disk.watermark":
+            return "水位线：" + "; ".join(f"{k}={v}" for k, v in parsed["watermarks"].items())
+        if metric_id == "local.elasticsearch.shards.unassigned":
+            return f"主分片未分配={parsed['unassigned_primary']}；副本未分配={parsed['unassigned_replica']}；初始化中={parsed['initializing']}"
+        if metric_id == "local.elasticsearch.service.port":
+            return f"进程={parsed['process']}；监听端口={','.join(map(str, parsed['ports'])) or '无'}"
+        if metric_id == "local.elasticsearch.heap.gc":
+            return f"最大heap={parsed.get('max_heap')}; Full GC命中={parsed['full_gc']}；OOM命中={parsed['oom']}"
+        if metric_id == "local.elasticsearch.thread_pool.rejected":
+            return f"queue={parsed['queue']}；rejected={parsed['rejected']}"
+        if metric_id == "local.elasticsearch.cluster.settings":
+            return "存在限制性动态设置" if parsed["restricted"] else "未发现限制性动态设置"
+        if metric_id == "local.elasticsearch.discovery.config":
+            return f"seed_hosts={len(parsed['seed_hosts'])}；cluster.initial_master_nodes={'存在' if parsed['initial_master_nodes'] else '不存在'}"
+        if metric_id == "local.elasticsearch.indices.health":
+            return f"索引数={parsed['count']}；red={parsed['red']}；yellow={parsed['yellow']}"
+        if metric_id == "local.elasticsearch.slowlog.key_evidence":
+            return f"慢日志文件={parsed['files']}；命中={parsed['hit_count']}"
+        if metric_id == "local.elasticsearch.security.accounts":
+            return f"用户对象={parsed['users']}；superuser 命中={parsed['superusers']}"
+        if metric_id == "local.elasticsearch.certificate.validity":
+            return f"到期时间={parsed['expiry']}；剩余约 {parsed['days_remaining']:.1f} 天"
+        if metric_id == "local.elasticsearch.snapshot.repository":
+            return f"仓库数量={parsed['repository_count']}；verify={parsed['verify_ok']}"
+        if metric_id == "local.elasticsearch.system.parameters":
+            return f"max_map_count={parsed['max_map_count']}；swap_used={parsed['swap_used']}；nofile={parsed['nofile']}；nproc={parsed['nproc']}；memlock={parsed['memlock']}"
     return ""
 
 
@@ -1744,6 +2317,8 @@ def _scope_for(metric_id: str) -> str:
         return "nginx-p0-v1"
     if metric_id.startswith("local.keepalived."):
         return "keepalived-p0-v1"
+    if metric_id.startswith("local.elasticsearch."):
+        return "elasticsearch-p0-p1-v1"
     return SCOPE
 
 
@@ -2307,6 +2882,12 @@ def normalize_run_results(
         ):
             if "keepalived" not in host_profiles:
                 host_profiles.append("keepalived")
+        if any(
+            str(m.get("metric_id", "")).startswith("local.elasticsearch.")
+            for m in host_result.get("metrics", [])
+        ):
+            if "elasticsearch" not in host_profiles:
+                host_profiles.append("elasticsearch")
         documents.append(
             normalize_host_result(
                 host_result,
@@ -2621,6 +3202,25 @@ __all__ = [
     "parse_keepalived_version",
     "parse_keepalived_vip_access",
     "parse_keepalived_vip_bound",
+    "parse_elasticsearch_certificate",
+    "parse_elasticsearch_cluster_health",
+    "parse_elasticsearch_cluster_settings",
+    "parse_elasticsearch_discovery_config",
+    "parse_elasticsearch_heap_gc",
+    "parse_elasticsearch_indices",
+    "parse_elasticsearch_nodes",
+    "parse_elasticsearch_nodes_cpu",
+    "parse_elasticsearch_nodes_disk",
+    "parse_elasticsearch_nodes_memory",
+    "parse_elasticsearch_security",
+    "parse_elasticsearch_service_port",
+    "parse_elasticsearch_shards",
+    "parse_elasticsearch_slowlog",
+    "parse_elasticsearch_snapshot",
+    "parse_elasticsearch_system_parameters",
+    "parse_elasticsearch_thread_pool",
+    "parse_elasticsearch_version",
+    "parse_elasticsearch_watermark",
     "parse_process_present",
     "parse_service_active",
     "parse_swap_used_percent",

@@ -1,0 +1,2 @@
+{"persistent":{},"transient":{},"defaults":{"cluster":{"routing":{"allocation":{"disk":{"watermark":{"low":"85%","high":"90%","flood_stage":"95%"}}}}}}}
+INSPECT_ELASTICSEARCH_HTTP_STATUS=200

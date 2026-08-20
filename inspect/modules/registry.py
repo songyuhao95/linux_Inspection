@@ -114,12 +114,14 @@ def _build_default_registry() -> ModuleRegistry:
     from .linux_common import MODULE as COMMON_MODULE
     from .keepalived import MODULE as KEEPALIVED_MODULE
     from .nginx import MODULE as NGINX_MODULE
+    from .elasticsearch import MODULE as ELASTICSEARCH_MODULE
 
     registry = ModuleRegistry()
     registry.register(COMMON_MODULE)
     registry.register(BASIC_MODULE)
     registry.register(NGINX_MODULE)
     registry.register(KEEPALIVED_MODULE)
+    registry.register(ELASTICSEARCH_MODULE)
     return registry
 
 

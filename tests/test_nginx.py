@@ -115,7 +115,7 @@ class TestModuleRegistration:
         assert module is not None
         assert module.display_name == "Nginx 中间件"
         assert module.metric_ids == NGINX_IDS
-        assert middleware_module_ids() == ("nginx", "keepalived")
+        assert middleware_module_ids() == ("nginx", "keepalived", "elasticsearch")
 
     def test_nginx_metrics_in_catalog(self):
         for mid in NGINX_IDS:

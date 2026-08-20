@@ -18,3 +18,5 @@
 /usr/sbin/ip
 /usr/bin/awk
 /usr/sbin/getcap
+/usr/bin/openssl
+/usr/bin/su

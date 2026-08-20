@@ -1,7 +1,7 @@
 # 运行手册（runbook）— 本地调试与兼容矩阵执行手册
 
 - 文档 ID：runbook
-- 适用：local 垂直切片（10 个共同 P0 指标）CLI 的本地调试与兼容矩阵（TD §9）执行
+- 适用：Linux 基础指标及 Nginx、Keepalived、Elasticsearch 中间件模块的本地调试与兼容矩阵（TD §9）执行
 - 数据流（TD §2，单向）：`采集 → normalize → 原子写 JSON → 报表`；报表只消费 JSON（RR §1）
 - 说明：本手册的本地/fixture 章节不连接目标主机；远程 inventory 章节只描述项目 allow-list 内的只读执行（TD §10.2/REQ-N-08）
 
@@ -28,7 +28,7 @@ SSH 连接参数 / become 方式，AE §8）后显式启用；未设置 `INSPECT
 
 ### 2.0 Nginx 中间件（--nginx / inspect.conf）
 
-默认巡检 = Linux 主机基础指标 + 全部已注册中间件（当前为 Nginx）。只巡检 Nginx：
+默认巡检 = Linux 主机基础指标 + 全部已注册中间件（Nginx、Keepalived、Elasticsearch）。只巡检 Nginx：
 
 ```bash
 bash inspect.sh --local --nginx          # 本机
@@ -59,13 +59,30 @@ VIP HTTP 访问、配置基线、脚本静态权限、关键日志、能力与�
 路径无法发现时输出 UNKNOWN。详细判定和复现命令见
 `docs/specs/keepalived-middleware.md`。
 
+### 2.2 Elasticsearch 中间件（--elasticsearch / inspect.conf）
 
-### 2.2 --local 本机自巡检
+只巡检 Elasticsearch：
+
+```bash
+bash inspect.sh --local --elasticsearch
+bash inspect.sh -H inspection --elasticsearch
+```
+
+模块先从运行中的 Elasticsearch JVM 解析 `-Des.path.home`、`-Des.path.conf`、
+`-Des.path.logs`、配置中的 HTTP/Transport 端口和证书；解析不到时按
+`inspect.conf` 中的 `elasticsearch_*` 候选路径顺序兜底。未运行且不在
+`elasticsearch_whitelist` 的主机跳过 ES 指标；白名单主机未运行保留进程指标并为
+CRIT。API 使用目标机 `elasticsearch_auth_file` 指向的 curl netrc 文件，不把密码写入
+项目配置。401/403、连接失败、路径不可读均为 UNKNOWN，不默认通过。Excel 结果写入
+独立 `elasticsearch` Sheet，HTML 自动纳入中间件/指标筛选与分组。详细指标和阈值见
+`docs/specs/elasticsearch-middleware.md`。
+
+### 2.3 --local 本机自巡检
 
 控制端兼受控端即可跑通全链路；本机命令缺失 → 对应指标 UNKNOWN，链路不断。
 未设置 `INSPECT_FIXTURE_DIR` 时因真实执行未启用（§1）返回 10。
 
-### 2.3 fixture 调试模式（实现/调试专用，非用户 CLI）
+### 2.4 fixture 调试模式（实现/调试专用，非用户 CLI）
 
 环境变量 `INSPECT_FIXTURE_DIR` 指向预录输出目录时，ansible_runner 从夹具
 读取 probe 与指标原始输出（模拟受控端应答），**不产生任何连接、不执行
@@ -85,7 +102,7 @@ INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local
 - `-H`/`-i` 与 fixture 同时出现时仍不连接任何主机（TD §10 边界）。
 - 禁止把夹具数据写成"已验证的现网结论"。
 
-### 2.3 mock inventory
+### 2.5 mock inventory
 
 `tests/fixtures/inventory/hosts.yml`（INI 格式，合成样例）用于 `-i --limit`
 语义验证（不连接真实主机）：
@@ -98,7 +115,7 @@ bash inspect.sh -i tests/fixtures/inventory/hosts.yml --all
 `tests/fixtures/cli/hosts.yml` 为 YAML 格式样例：inventory 层只解析严格 INI
 子集，YAML 文件会明确报 `inventory 解析失败`（退出码 10，不静默跳过）。
 
-### 2.4 项目 inventory 远程调试
+### 2.6 项目 inventory 远程调试
 
 `inventory/hosts.ini` 是仓库内跟踪的脱敏注释模板。真实测试前，在目标控制端
 复制为被忽略的 `inventory/hosts.local.ini`，取消注释并填写主机组和认证变量；真实密码
@@ -120,7 +137,7 @@ bash inspect.sh -i inventory/hosts.local.ini -H inspection
 仍应按组织规则核验和维护 `known_hosts`。无默认 inventory 时才保留旧的环境变量兼容路径。
 `--local` 不调用 Ansible；只有 `-H`/`-i` 远程模式使用项目内 Python 3.12 和 bundled Ansible。
 
-### 2.5 单元级与 e2e
+### 2.7 单元级与 e2e
 
 ```bash
 python -m pytest tests/test_render_stdout.py -q   # 解析器/渲染对夹具断言

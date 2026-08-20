@@ -1,0 +1,2 @@
+{"cluster_name":"es-prod-cluster","status":"green","number_of_nodes":3,"active_shards_percent_as_number":100}
+INSPECT_ELASTICSEARCH_HTTP_STATUS=200

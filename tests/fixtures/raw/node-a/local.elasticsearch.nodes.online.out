@@ -1,0 +1,5 @@
+name ip node.role master heap.percent cpu load_1m load_5m load_15m disk.used_percent
+es-01 192.0.2.101 dim * 35 12 0.10 0.12 0.15 40
+es-02 192.0.2.102 dim - 32 10 0.08 0.10 0.12 41
+es-03 192.0.2.103 dim - 31 9 0.05 0.08 0.10 39
+INSPECT_ELASTICSEARCH_HTTP_STATUS=200

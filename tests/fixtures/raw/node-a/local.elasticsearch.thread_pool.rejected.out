@@ -1,0 +1,4 @@
+node_name name active queue rejected completed
+es-01 search 0 0 0 100
+es-01 write 0 0 0 100
+INSPECT_ELASTICSEARCH_HTTP_STATUS=200

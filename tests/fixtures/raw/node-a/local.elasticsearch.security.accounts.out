@@ -1,0 +1,4 @@
+"elastic": {"roles": ["superuser"]}
+"app_reader": {"roles": ["read"]}
+"nodes": {"cluster": ["monitor"]}
+INSPECT_ELASTICSEARCH_HTTP_STATUS=200

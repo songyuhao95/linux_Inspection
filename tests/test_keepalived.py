@@ -55,7 +55,7 @@ def test_keepalived_module_registered_and_catalogued():
     module = default_registry().get("keepalived")
     assert module is not None
     assert module.metric_ids == KEEPALIVED_IDS
-    assert middleware_module_ids() == ("nginx", "keepalived")
+    assert middleware_module_ids() == ("nginx", "keepalived", "elasticsearch")
     assert tuple(m["metric_id"] for m in metrics.KEEPALIVED_METRICS) == KEEPALIVED_IDS
 
 

@@ -1,0 +1,4 @@
+index shard prirep state node unassigned.reason
+orders 0 p STARTED es-01 -
+orders 0 r STARTED es-02 -
+INSPECT_ELASTICSEARCH_HTTP_STATUS=200

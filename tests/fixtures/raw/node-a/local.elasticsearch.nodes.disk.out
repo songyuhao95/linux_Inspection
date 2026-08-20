@@ -1,0 +1,5 @@
+shards disk.indices disk.used disk.avail disk.total disk.percent host ip node
+10 20gb 40gb 60gb 100gb 40 es-01 192.0.2.101 /data
+10 20gb 41gb 59gb 100gb 41 es-02 192.0.2.102 /data
+10 20gb 39gb 61gb 100gb 39 es-03 192.0.2.103 /data
+INSPECT_ELASTICSEARCH_HTTP_STATUS=200

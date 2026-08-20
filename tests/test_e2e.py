@@ -88,8 +88,8 @@ def extract_inspection_id(stdout: str) -> str:
 def assert_doc(doc, inspection_id: str, host: str) -> None:
     """事实源 host-result-v1 文档断言：计数与夹具预期一致（OK=4/UNKNOWN=2）。
 
-    默认巡检 = linux_basic + 全部中间件；夹具主机无 Nginx 进程且不在
-    白名单 → Nginx 指标被跳过，仅剩 6 个 Linux 基础指标。
+    默认巡检 = linux_basic + 全部中间件；夹具主机无 Nginx/Elasticsearch
+    进程且不在白名单 → 中间件指标被跳过，仅剩 6 个 Linux 基础指标。
     """
     assert doc["inspection_id"] == inspection_id
     assert doc["host"]["name"] == host

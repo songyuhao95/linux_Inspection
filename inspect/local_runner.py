@@ -94,6 +94,7 @@ def _fixture_result(
     fixture_dir: Path,
     nginx_whitelist: Optional[Sequence[str]] = None,
     keepalived_whitelist: Optional[Sequence[str]] = None,
+    elasticsearch_whitelist: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Reuse the existing fixture reader; it does not create a playbook or connect."""
     plan = runner_mod.RunPlan(
@@ -106,6 +107,7 @@ def _fixture_result(
         selection_kind="local",
         nginx_whitelist=tuple(nginx_whitelist or ()),
         keepalived_whitelist=tuple(keepalived_whitelist or ()),
+        elasticsearch_whitelist=tuple(elasticsearch_whitelist or ()),
     )
     result = runner_mod._execute_fixture(plan, fixture_dir)
     result["local_mode"] = True
@@ -119,6 +121,7 @@ def run_local(
     runtime_dir: Optional[Path] = None,
     nginx_whitelist: Optional[Sequence[str]] = None,
     keepalived_whitelist: Optional[Sequence[str]] = None,
+    elasticsearch_whitelist: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Collect the selected local host directly; never call Ansible."""
     del runtime_dir  # kept for the CLI runner signature symmetry
@@ -136,6 +139,7 @@ def run_local(
             resolved_fixture,
             nginx_whitelist=nginx_whitelist,
             keepalived_whitelist=keepalived_whitelist,
+            elasticsearch_whitelist=elasticsearch_whitelist,
         )
 
     bash_path = shutil.which("bash")
@@ -257,6 +261,11 @@ def run_local(
         metric_results,
         host_ip=str(host.ip),
         keepalived_whitelist=keepalived_whitelist,
+    )
+    metric_results = runner_mod.select_elasticsearch_metrics(
+        metric_results,
+        host_ip=str(host.ip),
+        elasticsearch_whitelist=elasticsearch_whitelist,
     )
     host_result = runner_mod.build_host_result(
         host,

@@ -426,7 +426,35 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「Keepalived能力与漂移稳定性」行",
     },
+    # ---- Elasticsearch 中间件（elasticsearch-p0-p1-v1） ----
+    "local.elasticsearch.process.present": {
+        "command": "pgrep -fa '(^|[[:space:]/])elasticsearch[[:space:]]|org\\.elasticsearch\\.bootstrap\\.Elasticsearch'",
+        "profile_keys": (), "become": False,
+        "anchor": "安徽农金Elasticsearch运维巡检手册 P0「服务/进程」行",
+    },
 }
+
+# The remaining Elasticsearch commands are generated only after the target
+# process/config is discovered.  The placeholder is never executed; it keeps
+# every metric present in the single command registry used by validation.
+for _es_metric_id in (
+    "local.elasticsearch.version", "local.elasticsearch.cluster.health",
+    "local.elasticsearch.nodes.online", "local.elasticsearch.nodes.cpu",
+    "local.elasticsearch.nodes.memory", "local.elasticsearch.nodes.disk",
+    "local.elasticsearch.disk.watermark", "local.elasticsearch.shards.unassigned",
+    "local.elasticsearch.service.port", "local.elasticsearch.heap.gc",
+    "local.elasticsearch.thread_pool.rejected", "local.elasticsearch.cluster.settings",
+    "local.elasticsearch.discovery.config", "local.elasticsearch.indices.health",
+    "local.elasticsearch.slowlog.key_evidence", "local.elasticsearch.security.accounts",
+    "local.elasticsearch.certificate.validity", "local.elasticsearch.snapshot.repository",
+    "local.elasticsearch.system.parameters",
+):
+    _COMMAND_TEMPLATES[_es_metric_id] = {
+        "command": "printf 'Elasticsearch dynamic command'",
+        "profile_keys": (),
+        "become": False,
+        "anchor": "安徽农金Elasticsearch运维巡检手册 P0/P1 指标动态采集",
+    }
 
 # 日志类指标（超时 15s，AE §7 / TD §5.2 超时列）
 _LOG_METRIC_IDS = {
@@ -435,6 +463,8 @@ _LOG_METRIC_IDS = {
     "local.nginx.access_log.status_codes",
     "local.keepalived.error_log.key_evidence",
     "local.keepalived.capability.stability",
+    "local.elasticsearch.heap.gc",
+    "local.elasticsearch.slowlog.key_evidence",
 }
 
 
@@ -577,6 +607,15 @@ _KEEPALIVED_UNSAFE_GENERATED_TOKENS = re.compile(
     r"wget|python|perl|ruby|php|eval|exec|source|chmod|chown|mount|umount)\b"
 )
 
+_ELASTICSEARCH_GENERATED_ALLOWED_BINARIES = (
+    "pgrep", "ps", "sed", "head", "tail", "grep", "egrep", "curl", "ls",
+    "ss", "cat", "free", "su", "openssl", "test", "printf", "awk",
+)
+_ELASTICSEARCH_UNSAFE_GENERATED_TOKENS = re.compile(
+    r"\b(?:rm|rmdir|mkfs|dd|shutdown|reboot|poweroff|sudo|ssh|scp|nc|ncat|"
+    r"wget|python|perl|ruby|php|eval|exec|source|chmod|chown|mount|umount)\b"
+)
+
 
 def _nginx_candidates(profile: Dict[str, Any], key: str) -> List[str]:
     """Validate inspect.conf candidates without treating them as auth data."""
@@ -660,6 +699,165 @@ def _is_runtime_keepalived_profile(profile: Dict[str, Any]) -> bool:
     return any(key in profile for key in keys) and all(
         key not in profile or isinstance(profile.get(key), list) for key in keys
     )
+
+
+def _elasticsearch_candidates(profile: Dict[str, Any], key: str) -> List[str]:
+    """Validate Elasticsearch inspect.conf candidate values.
+
+    This is intentionally separate from the legacy product profile validator:
+    inspect.conf values are already parsed into lists and include URLs, ports,
+    glob paths and version strings.
+    """
+    raw = profile.get(key) or []
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        raise CommandConfigError(f"inspect.conf {key} 必须为候选值列表: {raw!r}")
+    result: List[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item:
+            raise CommandConfigError(f"inspect.conf {key} 候选值必须为非空字符串: {item!r}")
+        if key.endswith("_port") or key in {"elasticsearch_expected_nodes"}:
+            if not re.fullmatch(r"[0-9]+", item):
+                raise CommandConfigError(f"inspect.conf {key} 必须为数字: {item!r}")
+        elif key in {
+            "elasticsearch_bin", "elasticsearch_conf", "elasticsearch_log",
+            "elasticsearch_gc_log", "elasticsearch_data", "elasticsearch_backup",
+            "elasticsearch_auth_file", "elasticsearch_cert",
+        }:
+            if not _SAFE_PATH.fullmatch(item):
+                raise CommandConfigError(f"inspect.conf {key} 路径非法: {item!r}")
+        elif key == "elasticsearch_endpoint":
+            if not re.fullmatch(r"https?://[A-Za-z0-9_.:%+\-/]+", item):
+                raise CommandConfigError(f"inspect.conf {key} URL 非法: {item!r}")
+        elif key in {"elasticsearch_system_user", "elasticsearch_snapshot_repo"}:
+            if not re.fullmatch(r"[A-Za-z0-9_.@+-]+", item):
+                raise CommandConfigError(f"inspect.conf {key} 值非法: {item!r}")
+        elif key == "elasticsearch_version":
+            if not re.fullmatch(r"[A-Za-z0-9_.+\-/]+", item):
+                raise CommandConfigError(f"inspect.conf {key} 版本值非法: {item!r}")
+        elif key == "elasticsearch_seed_hosts":
+            if not re.fullmatch(r"[A-Za-z0-9_.:%+\-/]+", item):
+                raise CommandConfigError(f"inspect.conf {key} 节点值非法: {item!r}")
+        else:
+            if not _SAFE_WORD.fullmatch(item):
+                raise CommandConfigError(f"inspect.conf {key} 值非法: {item!r}")
+        result.append(item)
+    return result
+
+
+def _elasticsearch_shell_words(values: Sequence[str]) -> str:
+    return " ".join(values)
+
+
+def _is_runtime_elasticsearch_profile(profile: Dict[str, Any]) -> bool:
+    keys = (
+        "elasticsearch_bin", "elasticsearch_conf", "elasticsearch_log",
+        "elasticsearch_gc_log", "elasticsearch_data", "elasticsearch_backup",
+        "elasticsearch_endpoint", "elasticsearch_http_port",
+        "elasticsearch_transport_port", "elasticsearch_version",
+        "elasticsearch_expected_nodes", "elasticsearch_seed_hosts",
+        "elasticsearch_system_user", "elasticsearch_auth_file",
+        "elasticsearch_cert", "elasticsearch_snapshot_repo",
+    )
+    return any(key in profile for key in keys) and all(
+        key not in profile or isinstance(profile.get(key), list) for key in keys
+    )
+
+
+def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
+    """Discover ES home/config/log/API paths from the running JVM first."""
+    bins = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_bin")) or ":"
+    confs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_conf")) or ":"
+    logs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_log")) or ":"
+    gc_logs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_gc_log")) or ":"
+    certs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_cert")) or ":"
+    endpoints = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_endpoint")) or ":"
+    auths = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_auth_file")) or ":"
+    http_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_http_port")) or "9200"
+    transport_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_transport_port")) or "9300"
+    return "; ".join([
+        "es_process_line=$(pgrep -fa '(^|[[:space:]/])elasticsearch[[:space:]]|org\\.elasticsearch\\.bootstrap\\.Elasticsearch' | head -n 1)",
+        "es_home=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.home=([^[:space:]]+).*/\\1/p')",
+        "es_conf_dir=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.conf=([^[:space:]]+).*/\\1/p')",
+        "es_bin=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*[[:space:]]([^[:space:]]*\\/bin\\/elasticsearch)([[:space:]]|$).*/\\1/p')",
+        "if test -n \"$es_home\" && test -x \"$es_home/bin/elasticsearch\"; then es_bin=\"$es_home/bin/elasticsearch\"; fi",
+        f"if test -z \"$es_bin\" || ! test -x \"$es_bin\"; then for p in {bins}; do if test -x \"$p\"; then es_bin=\"$p\"; break; fi; done; fi",
+        "if test -z \"$es_conf_dir\" && test -n \"$es_home\"; then es_conf_dir=\"$es_home/config\"; fi",
+        "es_conf=\"\"; if test -n \"$es_conf_dir\" && test -f \"$es_conf_dir/elasticsearch.yml\"; then es_conf=\"$es_conf_dir/elasticsearch.yml\"; fi",
+        f"if test -z \"$es_conf\"; then for p in {confs}; do if test -f \"$p\"; then es_conf=\"$p\"; break; fi; done; fi",
+        "es_log_dir=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.logs=([^[:space:]]+).*/\\1/p')",
+        "if test -z \"$es_log_dir\" && test -n \"$es_home\"; then es_log_dir=\"$es_home/logs\"; fi",
+        "es_log=\"\"; if test -n \"$es_log_dir\"; then for p in \"$es_log_dir\"/*; do if test -f \"$p\"; then es_log=\"$p\"; break; fi; done; fi",
+        f"if test -z \"$es_log\"; then for p in {logs}; do if test -f \"$p\"; then es_log=\"$p\"; break; fi; done; fi",
+        "es_gc_log=\"\"; if test -n \"$es_log_dir\"; then for p in \"$es_log_dir\"/gc.log*; do if test -f \"$p\"; then es_gc_log=\"$p\"; break; fi; done; fi",
+        f"if test -z \"$es_gc_log\"; then for p in {gc_logs}; do if test -f \"$p\"; then es_gc_log=\"$p\"; break; fi; done; fi",
+        "es_http_port=$(test -n \"$es_conf\" && sed -nE 's/^[[:space:]]*http.port:[[:space:]]*([0-9]+).*/\\1/p' \"$es_conf\" | head -n 1)",
+        f"if test -z \"$es_http_port\"; then es_http_port={http_ports}; fi",
+        "es_transport_port=$(test -n \"$es_conf\" && sed -nE 's/^[[:space:]]*transport.port:[[:space:]]*([0-9]+).*/\\1/p' \"$es_conf\" | head -n 1)",
+        f"if test -z \"$es_transport_port\"; then es_transport_port={transport_ports}; fi",
+        "es_endpoint=\"\"",
+        f"for p in {endpoints}; do es_endpoint=\"$p\"; break; done",
+        "if test -z \"$es_endpoint\"; then es_endpoint=\"https://127.0.0.1:$es_http_port\"; fi",
+        "es_auth=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth=\"--netrc-file $p\"; break; fi; done",
+        "es_cert=\"\"; if test -n \"$es_conf\"; then es_cert=$(grep -Eo '/[^[:space:]]+\\.(crt|pem)' \"$es_conf\" | head -n 1); fi",
+        f"if test -z \"$es_cert\"; then for p in {certs}; do if test -f \"$p\"; then es_cert=\"$p\"; break; fi; done; fi",
+    ])
+
+
+def _es_curl(path: str) -> str:
+    return f"curl -k -sS --connect-timeout 3 --max-time 10 $es_auth \"$es_endpoint{path}\""
+
+
+def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
+    prefix = _elasticsearch_discovery_prefix(profile)
+    if metric_id == "local.elasticsearch.version":
+        return prefix + "; if test -z \"$es_process_line\" || test -z \"$es_bin\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_RUNNING_NOT_FOUND; else \"$es_bin\" --version 2>&1; fi"
+    if metric_id == "local.elasticsearch.cluster.health":
+        return prefix + "; if test -z \"$es_endpoint\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_ENDPOINT_NOT_FOUND; else " + _es_curl("/_cluster/health?pretty") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; fi"
+    if metric_id == "local.elasticsearch.nodes.online":
+        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,ip,node.role,master,heap.percent,cpu,load_1m,disk.used_percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.nodes.cpu":
+        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,ip,cpu,load_1m,load_5m,load_15m") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.nodes.memory":
+        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,heap.percent,ram.percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.nodes.disk":
+        return prefix + "; " + _es_curl("/_cat/allocation?v") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.disk.watermark":
+        return prefix + "; " + _es_curl("/_cluster/settings?include_defaults=true&filter_path=**.watermark*") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.shards.unassigned":
+        return prefix + "; " + _es_curl("/_cat/shards?v&h=index,shard,prirep,state,node,unassigned.reason") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.service.port":
+        return prefix + "; ps -ef | grep '[e]lasticsearch'; ss -tlnp | grep -E \" :$es_http_port|:$es_http_port|:$es_transport_port\""
+    if metric_id == "local.elasticsearch.heap.gc":
+        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,heap.percent") + "; if test -n \"$es_gc_log\"; then tail -n 200 \"$es_gc_log\" | grep -Ei 'Pause|Full|OutOfMemory|heap'; else printf '%s\\n' INSPECT_ELASTICSEARCH_GC_LOG_NOT_FOUND; fi"
+    if metric_id == "local.elasticsearch.thread_pool.rejected":
+        return prefix + "; " + _es_curl("/_cat/thread_pool/search,write?v&h=node_name,name,active,queue,rejected,completed") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.cluster.settings":
+        return prefix + "; " + _es_curl("/_cluster/settings?flat_settings=true&pretty") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.discovery.config":
+        return prefix + "; if test -z \"$es_conf\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_CONFIG_NOT_FOUND; else printf 'INSPECT_ELASTICSEARCH_CONF=%s\\n' \"$es_conf\"; grep -E 'discovery.seed_hosts|cluster.initial_master_nodes|network.host|node.name' \"$es_conf\"; fi"
+    if metric_id == "local.elasticsearch.indices.health":
+        return prefix + "; " + _es_curl("/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+    if metric_id == "local.elasticsearch.slowlog.key_evidence":
+        return prefix + "; if test -z \"$es_log_dir\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_LOG_NOT_FOUND; else ls -1 \"$es_log_dir\"/*slowlog* 2>/dev/null; tail -n 100 \"$es_log_dir\"/*slowlog* 2>/dev/null; fi"
+    if metric_id == "local.elasticsearch.security.accounts":
+        status = " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + _es_curl("/_security/user?pretty") + status + "; " + _es_curl("/_security/role?pretty") + status
+    if metric_id == "local.elasticsearch.certificate.validity":
+        return prefix + "; if test -z \"$es_cert\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_CERT_NOT_FOUND; else openssl x509 -in \"$es_cert\" -noout -dates -checkend 2592000; fi"
+    if metric_id == "local.elasticsearch.snapshot.repository":
+        repos = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_snapshot_repo")) or ""
+        repo = repos.split()[0] if repos else ""
+        status = " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        verify = f"curl -k -sS --connect-timeout 3 --max-time 10 $es_auth -X POST \"$es_endpoint/{repo}/_verify?pretty\"{status}"
+        return prefix + f"; if test -z \"$es_endpoint\" || test -z \"{repos}\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND; else " + _es_curl("/_snapshot/_all?pretty") + status + "; " + verify + "; fi"
+    if metric_id == "local.elasticsearch.system.parameters":
+        user = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_system_user")) or "es"
+        return prefix + f"; printf 'ES_MAX_MAP_COUNT=%s\\n' \"$(cat /proc/sys/vm/max_map_count 2>/dev/null)\"; free -m; printf 'ES_ULIMIT_NOFILE=%s\\n' \"$(su - {user} -c 'ulimit -n' 2>/dev/null)\"; printf 'ES_ULIMIT_NPROC=%s\\n' \"$(su - {user} -c 'ulimit -u' 2>/dev/null)\"; printf 'ES_ULIMIT_MEMLOCK=%s\\n' \"$(su - {user} -c 'ulimit -l' 2>/dev/null)\""
+    if metric_id == "local.elasticsearch.process.present":
+        raise CommandConfigError("Elasticsearch 进程指标使用静态命令")
+    raise CommandConfigError(f"未注册的 Elasticsearch 动态指标命令: {metric_id}")
 
 
 def _nginx_discovery_prefix(profile: Dict[str, Any], *, include_dump: bool) -> str:
@@ -926,6 +1124,43 @@ def build_metric_command_specs(
                 )
             )
             continue
+        if (
+            metric_id.startswith("local.elasticsearch.")
+            and metric_id != ELASTICSEARCH_PROCESS_METRIC
+            and _is_runtime_elasticsearch_profile(profile)
+        ):
+            command = _build_elasticsearch_metric_command(metric_id, profile)
+            specs.append(
+                CommandSpec(
+                    metric_id=metric_id,
+                    command=command,
+                    timeout_sec=timeout_sec,
+                    become=bool(entry["become"]),
+                    required_commands=required,
+                    source_anchor=entry["anchor"],
+                    allowed_binaries=_ELASTICSEARCH_GENERATED_ALLOWED_BINARIES,
+                    trusted_generated_shell=True,
+                )
+            )
+            continue
+        if (
+            metric_id.startswith("local.elasticsearch.")
+            and metric_id != ELASTICSEARCH_PROCESS_METRIC
+            and not _is_runtime_elasticsearch_profile(profile)
+        ):
+            specs.append(
+                CommandSpec(
+                    metric_id=metric_id,
+                    command=None,
+                    timeout_sec=timeout_sec,
+                    become=bool(entry["become"]),
+                    required_commands=required,
+                    source_anchor=entry["anchor"],
+                    error_code=ERROR_UNSUPPORTED_PROFILE,
+                    error_message="未加载 inspect.conf Elasticsearch 运行配置；无法安全进行实例发现和路径兜底",
+                )
+            )
+            continue
         if all(profile.get(k) is not None for k in entry["profile_keys"]):
             command = _substitute_template(
                 entry["command"], entry["profile_keys"], profile
@@ -1090,15 +1325,17 @@ def validate_command_specs(specs: Sequence[CommandSpec]) -> None:
             if not (
                 spec.metric_id.startswith("local.nginx.")
                 or spec.metric_id.startswith("local.keepalived.")
+                or spec.metric_id.startswith("local.elasticsearch.")
             ):
                 raise CommandNotAllowedError(
                     f"allow-list 拒绝：只有已注册中间件动态命令可使用内部 shell 变量: {spec.metric_id}"
                 )
-            unsafe_tokens = (
-                _NGINX_UNSAFE_GENERATED_TOKENS
-                if spec.metric_id.startswith("local.nginx.")
-                else _KEEPALIVED_UNSAFE_GENERATED_TOKENS
-            )
+            if spec.metric_id.startswith("local.nginx."):
+                unsafe_tokens = _NGINX_UNSAFE_GENERATED_TOKENS
+            elif spec.metric_id.startswith("local.keepalived."):
+                unsafe_tokens = _KEEPALIVED_UNSAFE_GENERATED_TOKENS
+            else:
+                unsafe_tokens = _ELASTICSEARCH_UNSAFE_GENERATED_TOKENS
             if "`" in spec.command or unsafe_tokens.search(spec.command):
                 raise CommandNotAllowedError(
                     f"allow-list 拒绝：中间件动态命令含危险执行词: {spec.metric_id}"
@@ -1235,6 +1472,7 @@ class RunPlan:
     selection_kind: str = "unknown"
     nginx_whitelist: Tuple[str, ...] = ()
     keepalived_whitelist: Tuple[str, ...] = ()
+    elasticsearch_whitelist: Tuple[str, ...] = ()
 
 
 def _default_runtime_dir() -> Path:
@@ -1247,6 +1485,7 @@ def prepare_run(
     runtime_dir: Optional[Path] = None,
     nginx_whitelist: Optional[Sequence[str]] = None,
     keepalived_whitelist: Optional[Sequence[str]] = None,
+    elasticsearch_whitelist: Optional[Sequence[str]] = None,
 ) -> RunPlan:
     """allow-list 校验 → 生成 playbook 与 argv → RunPlan（不执行不连接）。
 
@@ -1281,6 +1520,7 @@ def prepare_run(
         selection_kind=str(getattr(selection, "kind", "unknown")),
         nginx_whitelist=tuple(nginx_whitelist or ()),
         keepalived_whitelist=tuple(keepalived_whitelist or ()),
+        elasticsearch_whitelist=tuple(elasticsearch_whitelist or ()),
     )
     plan.argv = build_playbook_argv(
         plan.playbook_path, plan.inventory_file, plan.limit
@@ -1494,6 +1734,8 @@ NGINX_METRIC_PREFIX = "local.nginx."
 NGINX_PROCESS_METRIC = "local.nginx.process.present"
 KEEPALIVED_METRIC_PREFIX = "local.keepalived."
 KEEPALIVED_PROCESS_METRIC = "local.keepalived.process.present"
+ELASTICSEARCH_METRIC_PREFIX = "local.elasticsearch."
+ELASTICSEARCH_PROCESS_METRIC = "local.elasticsearch.process.present"
 
 
 def _nginx_process_present(metric_result: Dict[str, Any]) -> bool:
@@ -1570,6 +1812,38 @@ def select_keepalived_metrics(
         m for m in results if not m["metric_id"].startswith(KEEPALIVED_METRIC_PREFIX)
     ]
     if str(host_ip) in set(keepalived_whitelist or ()):
+        return other + [process]
+    return other
+
+
+def select_elasticsearch_metrics(
+    metric_results: Sequence[Dict[str, Any]],
+    *,
+    host_ip: str,
+    elasticsearch_whitelist: Optional[Sequence[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Skip hosts without ES, or retain only a whitelist CRIT process result."""
+    results = list(metric_results)
+    elasticsearch = [
+        m for m in results if m["metric_id"].startswith(ELASTICSEARCH_METRIC_PREFIX)
+    ]
+    if not elasticsearch:
+        return results
+    process = next(
+        (m for m in elasticsearch if m["metric_id"] == ELASTICSEARCH_PROCESS_METRIC), None
+    )
+    if process is None or process.get("error") is not None:
+        return results
+    if (
+        process.get("error") is None
+        and process.get("rc") == 0
+        and bool((process.get("stdout") or "").strip())
+    ):
+        return results
+    other = [
+        m for m in results if not m["metric_id"].startswith(ELASTICSEARCH_METRIC_PREFIX)
+    ]
+    if str(host_ip) in set(elasticsearch_whitelist or ()):
         return other + [process]
     return other
 
@@ -1674,6 +1948,11 @@ def _execute_fixture(plan: RunPlan, fixture_dir: Path) -> Dict[str, Any]:
             metric_results,
             host_ip=str(host.ip),
             keepalived_whitelist=plan.keepalived_whitelist,
+        )
+        metric_results = select_elasticsearch_metrics(
+            metric_results,
+            host_ip=str(host.ip),
+            elasticsearch_whitelist=plan.elasticsearch_whitelist,
         )
         host_results.append(
             build_host_result(
@@ -2139,6 +2418,11 @@ def _parse_callback_results(
             host_ip=str(state["host"].ip),
             keepalived_whitelist=plan.keepalived_whitelist,
         )
+        metrics = select_elasticsearch_metrics(
+            metrics,
+            host_ip=str(state["host"].ip),
+            elasticsearch_whitelist=plan.elasticsearch_whitelist,
+        )
         results.append(
             build_host_result(
                 state["host"],
@@ -2185,6 +2469,7 @@ def run(
     runtime_dir: Optional[Path] = None,
     nginx_whitelist: Optional[Sequence[str]] = None,
     keepalived_whitelist: Optional[Sequence[str]] = None,
+    elasticsearch_whitelist: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """prepare_run + execute_plan 便捷入口（cli 编排挂接点）。"""
     plan = prepare_run(
@@ -2193,6 +2478,7 @@ def run(
         runtime_dir=runtime_dir,
         nginx_whitelist=nginx_whitelist,
         keepalived_whitelist=keepalived_whitelist,
+        elasticsearch_whitelist=elasticsearch_whitelist,
     )
     return execute_plan(plan, fixture_dir=fixture_dir)
 
@@ -2226,6 +2512,8 @@ __all__ = [
     "NGINX_PROCESS_METRIC",
     "KEEPALIVED_METRIC_PREFIX",
     "KEEPALIVED_PROCESS_METRIC",
+    "ELASTICSEARCH_METRIC_PREFIX",
+    "ELASTICSEARCH_PROCESS_METRIC",
     "PROBE_TIMEOUT_SEC",
     "RunPlan",
     "STATUS_ERROR",
@@ -2245,5 +2533,6 @@ __all__ = [
     "run_status_for_hosts",
     "select_nginx_metrics",
     "select_keepalived_metrics",
+    "select_elasticsearch_metrics",
     "validate_command_specs",
 ]

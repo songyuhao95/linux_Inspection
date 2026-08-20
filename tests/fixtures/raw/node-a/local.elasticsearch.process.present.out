@@ -1,0 +1,1 @@
+1234 /opt/elasticsearch/jdk/bin/java -Des.path.home=/opt/elasticsearch -Des.path.conf=/opt/elasticsearch/config org.elasticsearch.bootstrap.Elasticsearch

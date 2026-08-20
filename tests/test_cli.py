@@ -48,6 +48,26 @@ ALL_METRIC_IDS = [
     "local.keepalived.healthcheck.script",
     "local.keepalived.error_log.key_evidence",
     "local.keepalived.capability.stability",
+    "local.elasticsearch.process.present",
+    "local.elasticsearch.version",
+    "local.elasticsearch.cluster.health",
+    "local.elasticsearch.nodes.online",
+    "local.elasticsearch.nodes.cpu",
+    "local.elasticsearch.nodes.memory",
+    "local.elasticsearch.nodes.disk",
+    "local.elasticsearch.disk.watermark",
+    "local.elasticsearch.shards.unassigned",
+    "local.elasticsearch.service.port",
+    "local.elasticsearch.heap.gc",
+    "local.elasticsearch.thread_pool.rejected",
+    "local.elasticsearch.cluster.settings",
+    "local.elasticsearch.discovery.config",
+    "local.elasticsearch.indices.health",
+    "local.elasticsearch.slowlog.key_evidence",
+    "local.elasticsearch.security.accounts",
+    "local.elasticsearch.certificate.validity",
+    "local.elasticsearch.snapshot.repository",
+    "local.elasticsearch.system.parameters",
 ]
 
 EXIT_CODE_TABLE_LINE = "退出码: 0 成功 / 2 用法错误 / 10 执行失败 / 20 业务告警"
@@ -86,8 +106,8 @@ def test_help_contains_exit_code_table_exact_line():
     assert EXIT_CODE_TABLE_LINE in r.stdout
 
 
-def test_list_metrics_lists_all_27_ids():
-    """--list-metrics 退出码 0，输出全部 27 个指标 ID（Linux + Nginx + Keepalived）。"""
+def test_list_metrics_lists_all_47_ids():
+    """--list-metrics 退出码 0，输出全部 47 个指标 ID。"""
     r = run_cli("--list-metrics")
     assert r.returncode == 0
     for mid in ALL_METRIC_IDS:

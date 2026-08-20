@@ -59,8 +59,9 @@ SHEET_OVERVIEW = "Overview"
 SHEET_LOCAL = "Local"
 SHEET_NGINX = "nginx"
 SHEET_KEEPALIVED = "keepalived"
+SHEET_ELASTICSEARCH = "elasticsearch"
 SHEET_ERRORS = "Errors-Evidence"
-SHEET_NAMES = (SHEET_OVERVIEW, SHEET_LOCAL, SHEET_NGINX, SHEET_KEEPALIVED, SHEET_ERRORS)
+SHEET_NAMES = (SHEET_OVERVIEW, SHEET_LOCAL, SHEET_NGINX, SHEET_KEEPALIVED, SHEET_ELASTICSEARCH, SHEET_ERRORS)
 
 # Local 列：以主机/IP 开始；详情指标逐行展开；只保留可读阈值解释和
 # 事实源提供的复现命令，不把来源/证据摘要/provenance 冗余复制到报表。
@@ -71,6 +72,8 @@ LOCAL_HEADERS = (
 
 # nginx 明细 Sheet 复用的列（与 Local 一致；只筛选 Nginx 中间件指标）
 NGINX_HEADERS = LOCAL_HEADERS
+KEEPALIVED_HEADERS = LOCAL_HEADERS
+ELASTICSEARCH_HEADERS = LOCAL_HEADERS
 
 # RR §3 Errors-Evidence 列：error.code/message/command/output_summary；
 # UNKNOWN（文档冲突/缺失）清单行 error_code 为空，note 注明原因
@@ -371,7 +374,7 @@ def _metric_prefix_filter(prefix: str):
     return _keep
 
 
-_MIDDLEWARE_METRIC_PREFIXES = ("local.nginx.", "local.keepalived.")
+_MIDDLEWARE_METRIC_PREFIXES = ("local.nginx.", "local.keepalived.", "local.elasticsearch.")
 
 
 def _local_metric_filter(metric: Mapping[str, Any]) -> bool:
@@ -552,6 +555,13 @@ def _write_workbook(
         metric_filter=_metric_prefix_filter("local.keepalived."),
     )
 
+    # ============ elasticsearch（Elasticsearch 中间件明细） ============
+    _write_detail_sheet(
+        workbook, SHEET_ELASTICSEARCH, ELASTICSEARCH_HEADERS, local_widths,
+        docs, host_ips, header_fmt, cell_fmt, status_fmts, crit_value_fmt,
+        metric_filter=_metric_prefix_filter("local.elasticsearch."),
+    )
+
     # ============ Errors-Evidence（RR §3：error 非空指标与主机 +
     # 文档冲突/缺失 UNKNOWN 清单） ============
     ws = workbook.add_worksheet(SHEET_ERRORS)
@@ -690,6 +700,7 @@ __all__ = [
     "COLOR_UNKNOWN",
     "COLOR_WARN",
     "ERRORS_HEADERS",
+    "ELASTICSEARCH_HEADERS",
     "EXIT_RENDER_ERROR",
     "LOCAL_HEADERS",
     "NGINX_HEADERS",

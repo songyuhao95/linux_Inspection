@@ -1,0 +1,5 @@
+name heap.percent ram.percent
+es-01 35 55
+es-02 32 52
+es-03 31 50
+INSPECT_ELASTICSEARCH_HTTP_STATUS=200

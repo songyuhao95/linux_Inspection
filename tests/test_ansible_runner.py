@@ -49,6 +49,27 @@ _FULL_PROFILE = {
     "keepalived_log": "/opt/keepalived/logs/keepalived.log",
     "keepalived_vip": "192.0.2.253",
     "keepalived_port": 8010,
+    # Elasticsearch inspect.conf profile (list-shaped, as production config
+    # loading supplies it).  The fixture command set exercises the complete
+    # middleware catalog without depending on a real target host.
+    "elasticsearch_bin": ["/opt/elasticsearch/bin/elasticsearch"],
+    "elasticsearch_conf": ["/opt/elasticsearch/config/elasticsearch.yml"],
+    "elasticsearch_log": ["/opt/elasticsearch/logs/es-prod-cluster.log"],
+    "elasticsearch_gc_log": ["/opt/elasticsearch/logs/gc.log"],
+    "elasticsearch_data": ["/opt/elasticsearch/data"],
+    "elasticsearch_backup": ["/opt/elasticsearch/backup"],
+    "elasticsearch_endpoint": ["https://127.0.0.1:9200"],
+    "elasticsearch_http_port": ["9200"],
+    "elasticsearch_transport_port": ["9300"],
+    "elasticsearch_version": ["8.17.0"],
+    "elasticsearch_expected_nodes": ["3"],
+    "elasticsearch_seed_hosts": [
+        "192.0.2.101:9300", "192.0.2.102:9300", "192.0.2.103:9300",
+    ],
+    "elasticsearch_system_user": ["es"],
+    "elasticsearch_auth_file": [],
+    "elasticsearch_cert": ["/opt/elasticsearch/config/certs/http_ca.crt"],
+    "elasticsearch_snapshot_repo": ["backup"],
 }
 
 # --- 包加载：worktree 中无 inspect/__init__.py（stdlib 同名吸收，
@@ -104,7 +125,7 @@ def _spec(metric_id, command, timeout=10, become=False, error_code=None, error_m
 def test_registry_covers_all_metrics():
     ids = [s.metric_id for s in _specs(_PROFILE)]
     assert set(ids) == set(metrics.ALL_METRIC_IDS)
-    assert len(ids) == len(metrics.ALL_METRIC_IDS) == 27
+    assert len(ids) == len(metrics.ALL_METRIC_IDS) == 47
 
 
 def test_registry_timeouts_match_metrics_registry():
@@ -147,9 +168,9 @@ def test_playbook_contract_markers():
 def test_playbook_minimal_become_only_declared_metrics():
     pb = ar.generate_playbook(_specs(_PROFILE))
     assert pb.count("become: true") == 2  # 仅 port.listening + logs.key_evidence
-    # probe + 8 个 linux 基础 false + nginx.process.present（无 profile 占位、
-    # 无 become）；其余 nginx 指标缺 profile 不进 playbook
-    assert pb.count("become: false") == 11
+    # probe + 8 个 linux 基础 false + nginx.process.present +
+    # keepalived.process.present + elasticsearch.process.present
+    assert pb.count("become: false") == 12
 
 
 def test_playbook_no_retries():
@@ -199,8 +220,8 @@ def test_playbook_no_unsupported_profile_tasks():
     specs = _specs({})
     unsupported = [s for s in specs if s.error_code == ar.ERROR_UNSUPPORTED_PROFILE]
     supported = [s for s in specs if s.error_code is None]
-    assert len(unsupported) == 19  # linux + nginx + keepalived 的 profile 依赖指标
-    assert len(supported) == 8  # 6 linux + nginx/keepalived process.present
+    assert len(unsupported) == 38  # common + three middleware profile metrics
+    assert len(supported) == 9  # 6 linux + three middleware process.present
     pb = ar.generate_playbook(specs)
     for s in unsupported:
         assert s.metric_id not in pb
@@ -358,6 +379,25 @@ def test_profile_missing_marks_unsupported():
         "local.keepalived.healthcheck.script",
         "local.keepalived.error_log.key_evidence",
         "local.keepalived.capability.stability",
+        "local.elasticsearch.version",
+        "local.elasticsearch.cluster.health",
+        "local.elasticsearch.nodes.online",
+        "local.elasticsearch.nodes.cpu",
+        "local.elasticsearch.nodes.memory",
+        "local.elasticsearch.nodes.disk",
+        "local.elasticsearch.disk.watermark",
+        "local.elasticsearch.shards.unassigned",
+        "local.elasticsearch.service.port",
+        "local.elasticsearch.heap.gc",
+        "local.elasticsearch.thread_pool.rejected",
+        "local.elasticsearch.cluster.settings",
+        "local.elasticsearch.discovery.config",
+        "local.elasticsearch.indices.health",
+        "local.elasticsearch.slowlog.key_evidence",
+        "local.elasticsearch.security.accounts",
+        "local.elasticsearch.certificate.validity",
+        "local.elasticsearch.snapshot.repository",
+        "local.elasticsearch.system.parameters",
     }
     for s in specs:
         if s.metric_id in need_profile:
@@ -628,7 +668,7 @@ def test_fixture_full_success_host(capsys, tmp_path):
     assert result["execution_status"] == ar.STATUS_SUCCESS
     host = result["hosts"][0]
     assert host["probe_status"] == probe.PROBE_OK
-    assert host["summary"]["total"] == 27  # 10 linux + 9 nginx + 8 keepalived
+    assert host["summary"]["total"] == 47  # 10 linux + 9 nginx + 8 keepalived + 20 Elasticsearch
     assert host["summary"]["failed"] == 0
     # 预录输出（剥离 # 头）原样回传
     m = next(x for x in host["metrics"] if x["metric_id"] == "local.process.present")

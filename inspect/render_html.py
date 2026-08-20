@@ -229,6 +229,7 @@ def _as_strings(value: Any) -> List[str]:
 _MIDDLEWARE_PREFIXES: tuple = (
     ("local.nginx.", "nginx"),
     ("local.keepalived.", "keepalived"),
+    ("local.elasticsearch.", "elasticsearch"),
 )
 
 
