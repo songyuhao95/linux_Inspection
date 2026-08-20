@@ -1384,7 +1384,7 @@ def generate_playbook(
     """生成采集 playbook 文本（YAML）。
 
     契约（AE §1-§7 文本断言）：
-      - play 级：hosts: all、gather_facts: false、serial: 1；
+      - play 级：hosts: all、gather_facts: false、serial: 1、ignore_unreachable: true；
       - 每任务：ansible.builtin.raw + `timeout N /bin/bash -lc '…'`
         （N=15 探测 / 10 指标 / 15 日志，AE §7 超时注入）；
       - become：仅注册表声明需要特权的单条命令 become: true（AE §5
@@ -1403,6 +1403,7 @@ def generate_playbook(
         "  hosts: all",
         "  gather_facts: false",
         "  serial: 1",
+        "  ignore_unreachable: true",
         "  tasks:",
     ]
     lines.append(f'    - name: "probe: 能力探测（{PROBE_TIMEOUT_SEC}s）"')
@@ -2068,6 +2069,14 @@ def _callback_error_for_failed_connection() -> Dict[str, str]:
     return _error(ERROR_CONNECTION_FAILED, "Ansible 连接前置检查失败（无业务结论）")
 
 
+def _callback_error_for_probe_not_executed() -> Dict[str, str]:
+    """分类 callback 未出现 probe 任务的主机，避免误报为 bash 缺失。"""
+    return _error(
+        ERROR_CONNECTION_FAILED,
+        "Ansible 未收到该主机的能力探测回调（主机未执行或连接失败，无业务结论）",
+    )
+
+
 def _cleanup_plan_files(plan: RunPlan) -> List[str]:
     """Remove generated files without Python 3.8-only APIs."""
     failures: List[str] = []
@@ -2359,6 +2368,14 @@ def _parse_callback_results(
             state = states.get(str(host_name))
             if state is not None and isinstance(stat, dict) and stat.get("unreachable", 0):
                 state["host_error"] = _callback_error_for_unreachable()
+
+    # With serial execution, an unreachable first batch can leave later hosts
+    # without any task callback. Those hosts must not be reported as if their
+    # bash probe actually ran and failed; classify the missing callback as a
+    # host-level connection/execution failure and continue rendering others.
+    for state in states.values():
+        if state["host_error"] is None and not state["probe_seen"]:
+            state["host_error"] = _callback_error_for_probe_not_executed()
 
     results: List[Dict[str, Any]] = []
     for state in states.values():

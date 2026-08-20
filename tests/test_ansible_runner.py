@@ -157,6 +157,7 @@ def test_playbook_contract_markers():
     assert "gather_facts: false" in pb
     assert "serial: 1" in pb
     assert "hosts: all" in pb
+    assert "ignore_unreachable: true" in pb
     assert "ansible.builtin.raw:" in pb
     assert "/bin/bash -lc" in pb
     assert f"timeout {ar.PROBE_TIMEOUT_SEC} /bin/bash -lc" in pb
@@ -576,6 +577,25 @@ def test_parse_callback_classifies_host_key_preflight_as_connection_failure():
     result = ar._parse_callback_results(plan, payload, 0.1)
     assert result[0]["execution_status"] == ar.STATUS_ERROR
     assert result[0]["host_error"]["code"] == ar.ERROR_CONNECTION_FAILED
+    assert result[0]["metrics"] == []
+
+
+def test_parse_callback_missing_probe_is_connection_failure():
+    class H:
+        name, ip = "node-x", "10.0.0.9"
+
+    plan = ar.RunPlan(
+        playbook_path=Path("playbook.yml"),
+        inventory_file=Path("hosts.ini"),
+        hosts=[H()],
+        limit=None,
+        metric_specs=[_spec("local.cpu.load_1m", "cat /proc/loadavg; nproc")],
+        probe_command="probe",
+    )
+    result = ar._parse_callback_results(plan, {"plays": [], "stats": {}}, 0.1)
+    assert result[0]["execution_status"] == ar.STATUS_ERROR
+    assert result[0]["host_error"]["code"] == ar.ERROR_CONNECTION_FAILED
+    assert "未收到该主机的能力探测回调" in result[0]["host_error"]["message"]
     assert result[0]["metrics"] == []
 
 
