@@ -22,7 +22,7 @@
 - 已完成项目内 Python 3.12 和 bundled Ansible runtime 的强制执行路径；
 - Linux x86_64/CPython 3.12 的报表依赖已随项目 runtime 提交（`pandas`、`numpy`、`xlsxwriter` 及其依赖），新 Linux 环境无需重复安装；精确版本见 `runtime/report-requirements.lock`；
 - 已完成 `--local` 本地 Linux 基础指标采集，以及远程 `-H` 的统一 JSON 事实源；
-- 已完成第一个中间件模块 **Nginx**（`inspect/modules/nginx.py`）：进程发现 + 白名单、8 个指标、Excel `nginx` Sheet、HTML 中间件卡片/筛选/分组、`--nginx` 只巡检 Nginx；
+- 已完成第一个中间件模块 **Nginx**（`inspect/modules/nginx.py`）：进程发现 + 白名单、9 个指标（含运行版本基线）、Excel `nginx` Sheet、HTML 中间件卡片/筛选/分组、`--nginx` 只巡检 Nginx；
 - 当前远程认证以项目 inventory 为配置入口，公开模板不包含可用主机或真实凭据；
 - 远程真实 VM 验证按 `docs/g0-real-vm.md` 执行，部署到 VM 按 `docs/local-vm-deploy.md` 执行；
 - 新增中间件时只扩展 `inspect/modules/`，并同步更新 `docs/specs/`、测试和本 README 的交接状态。
@@ -88,9 +88,10 @@ Nginx 中间件（仍保留 Linux 主机基础指标）。未选择的模块不�
 ### Nginx 中间件监控（nginx-p0-v1）
 
 `inspect/modules/nginx.py` 是第一个中间件适配器，指标按《安徽农金Nginx、Keepalived
-运维巡检手册v1.0》P0/P1 指标表转写，共 8 个：
+运维巡检手册v1.0》P0/P1 指标表转写，并增加运行版本基线，共 9 个：
 
 - `local.nginx.process.present`：Nginx 进程存在性（进程发现 + 白名单 CRIT）；
+- `local.nginx.version`：Nginx 版本（从运行中的 master 对应可执行文件执行 `nginx -v`，与 `inspect.conf` 的 `nginx_version` 比较）；
 - `local.nginx.config.valid`：配置有效性（`nginx -t`）；
 - `local.nginx.port.listening`：端口监听与本地访问（`ss` + `curl 127.0.0.1`）；
 - `local.nginx.error_log.key_evidence`：关键日志（error.log 扫描）；
@@ -108,7 +109,8 @@ Nginx 指标为 UNKNOWN（不伪装结论）。
 
 **Nginx 配置**：仓库根 `inspect.conf` 使用 `参数 = 候选值1|候选值2` 配置
 `nginx_bin` / `nginx_conf` / `nginx_error_log` / `nginx_access_log` / `nginx_port` /
-`nginx_baseline` / `nginx_whitelist`。采集优先从 Nginx master 进程参数和实际配置
+`nginx_version` / `nginx_baseline` / `nginx_whitelist`。版本检查只使用正在运行的
+Nginx master 对应二进制，不会仅执行一个未运行的备用二进制；采集优先从 Nginx master 进程参数和实际配置
 发现路径，再按这些候选值兜底；两处都找不到时指标为 UNKNOWN。`inspect.conf` 在 Linux
 首次读取时自动收紧为 700。SSH 账号、密码和连接参数不在此文件中，继续由
 `inventory/hosts.local.ini` 或 `inventory/hosts.ini` 交给 Ansible。

@@ -32,6 +32,7 @@ ALL_METRIC_IDS = [
     "local.filesystem.inode_used_percent",
     "local.logs.key_evidence",
     "local.nginx.process.present",
+    "local.nginx.version",
     "local.nginx.config.valid",
     "local.nginx.port.listening",
     "local.nginx.error_log.key_evidence",
@@ -77,8 +78,8 @@ def test_help_contains_exit_code_table_exact_line():
     assert EXIT_CODE_TABLE_LINE in r.stdout
 
 
-def test_list_metrics_lists_all_18_ids():
-    """--list-metrics 退出码 0，输出全部 18 个指标 ID（10 共同 P0 + 8 Nginx）。"""
+def test_list_metrics_lists_all_19_ids():
+    """--list-metrics 退出码 0，输出全部 19 个指标 ID（10 共同 P0 + 9 Nginx）。"""
     r = run_cli("--list-metrics")
     assert r.returncode == 0
     for mid in ALL_METRIC_IDS:

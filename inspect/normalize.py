@@ -586,6 +586,23 @@ def parse_nginx_config_valid(output: str) -> Dict[str, Any]:
     }
 
 
+_NGINX_VERSION_RE = re.compile(r"\b(nginx/[0-9][A-Za-z0-9._-]*)\b", re.IGNORECASE)
+
+
+def parse_nginx_version(output: str) -> Dict[str, Any]:
+    """从运行中的 Nginx 二进制 ``-v`` 输出提取版本标识。"""
+    if _has_nginx_missing_marker(output, "INSPECT_NGINX_RUNNING_NOT_FOUND"):
+        raise ParseError("未发现运行中的 Nginx master 或其可执行文件")
+    lines = _content_lines(output)
+    match = _NGINX_VERSION_RE.search(output)
+    if not match:
+        raise ParseError("nginx -v 未返回可识别的 nginx/版本号")
+    return {
+        "version": match.group(1),
+        "summary": [mask_output(ln) for ln in lines[:3]],
+    }
+
+
 _NGINX_HTTP_STATUS_RE = re.compile(r"\bHTTP/[0-9.]+[ \t]+(?P<status>[1-5][0-9]{2})")
 
 
@@ -722,6 +739,7 @@ PARSERS: Dict[str, Any] = {
     "local.filesystem.inode_used_percent": parse_filesystem_inode_used_percent,
     "local.logs.key_evidence": parse_logs_key_evidence,
     "local.nginx.process.present": parse_process_present,
+    "local.nginx.version": parse_nginx_version,
     "local.nginx.config.valid": parse_nginx_config_valid,
     "local.nginx.port.listening": parse_nginx_port_listening,
     "local.nginx.error_log.key_evidence": parse_nginx_error_log,
@@ -986,6 +1004,24 @@ def _judge_nginx_config_valid(
     return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
 
 
+def _judge_nginx_version(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """实际运行版本必须命中 inspect.conf nginx_version 候选值。"""
+    expected = [
+        str(item).strip()
+        for item in (profile or {}).get("nginx_version", [])
+        if str(item).strip()
+    ]
+    actual = str(parsed.get("version") or "")
+    if not expected:
+        return _unknown_decision(resolved, extra_note="inspect.conf 未配置 nginx_version 版本基线")
+    note = f"实际版本={actual}；允许版本={'、'.join(expected)}"
+    if actual in expected:
+        return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK), "note": note}
+    return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT), "note": note}
+
+
 def _judge_nginx_port_listening(
     parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -1084,6 +1120,7 @@ JUDGERS: Dict[str, Any] = {
     "local.filesystem.inode_used_percent": _judge_filesystem_inode_used_percent,
     "local.logs.key_evidence": _judge_logs_key_evidence,
     "local.nginx.process.present": _judge_process_present,
+    "local.nginx.version": _judge_nginx_version,
     "local.nginx.config.valid": _judge_nginx_config_valid,
     "local.nginx.port.listening": _judge_nginx_port_listening,
     "local.nginx.error_log.key_evidence": _judge_nginx_error_log,
@@ -1164,6 +1201,8 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
         return str(parsed["hit_count"])
     if metric_id == "local.nginx.process.present":
         return "present" if parsed["present"] else "absent"
+    if metric_id == "local.nginx.version":
+        return parsed["version"]
     if metric_id == "local.nginx.config.valid":
         return "valid" if parsed["valid"] else "invalid"
     if metric_id == "local.nginx.port.listening":
@@ -1324,6 +1363,8 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
         if not parsed["present"]:
             return "未匹配到 Nginx 进程（absent）"
         return "；".join(parsed["summary"])
+    if metric_id == "local.nginx.version":
+        return parsed["version"]
     if metric_id == "local.nginx.config.valid":
         if parsed["valid"]:
             return "nginx -t：syntax is ok + test is successful"
@@ -2227,6 +2268,7 @@ __all__ = [
     "parse_nginx_error_log",
     "parse_nginx_port_listening",
     "parse_nginx_security_baseline",
+    "parse_nginx_version",
     "parse_process_present",
     "parse_service_active",
     "parse_swap_used_percent",

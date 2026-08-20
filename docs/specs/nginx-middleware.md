@@ -6,11 +6,12 @@ Nginx 中间件模块是第一个中间件适配器，指标按《安徽农金Ng
 巡检手册v1.0.docx》（Nginx 手册 sha256[:8]=72b0834d）P0/P1 指标表转写。
 模块文件：`inspect/modules/nginx.py`；阈值基线：`inspect/data/thresholds/nginx-p0-v1.yaml`。
 
-## 指标清单（8 个）
+## 指标清单（9 个）
 
 | metric_id | 名称 | 命令 | 文档来源 |
 | --- | --- | --- | --- |
-| `local.nginx.process.present` | Nginx 进程存在性 | `pgrep -fa 'nginx: master\|nginx: worker\|/usr/sbin/nginx\|/opt/nginx/sbin/nginx'` | P0「Nginx本节点服务」 |
+| `local.nginx.process.present` | Nginx 进程存在性 | `pgrep -fa '[n]ginx: (master|worker) process'`（`[n]` 防止 shell 自匹配） | P0「Nginx本节点服务」 |
+| `local.nginx.version` | Nginx 版本 | 从运行中的 master 进程解析可执行文件，执行 `nginx -v`；与 `inspect.conf` 的 `nginx_version` 比较 | P0「Nginx版本」 |
 | `local.nginx.config.valid` | 配置有效性 | 自动从 master 进程解析 `-c/-e`，无可用值时按 `inspect.conf` 候选，执行 `nginx -t` | P0「Nginx配置有效性」 |
 | `local.nginx.port.listening` | 端口监听与本地访问 | 从实际配置 `listen` 指令提取端口；无端口时使用 `inspect.conf` 的 `nginx_port`，再执行 `ss` + `curl` | P0「Nginx端口与本地访问」 |
 | `local.nginx.error_log.key_evidence` | 关键日志 | 从进程/配置解析 `error_log`，无可用值时按 `inspect.conf` 候选，读取末尾 1000 行 | P0「关键日志」 |
@@ -27,7 +28,7 @@ Nginx 内部命令允许固定生成的 shell 变量；候选路径先经过安�
 
 默认巡检先执行 `local.nginx.process.present`（进程发现）：
 
-- **运行中**：采集全部 8 个 Nginx 指标；
+- **运行中**：采集全部 9 个 Nginx 指标；
 - **未运行且不在白名单**：丢弃该主机全部 Nginx 指标（该主机不是 Nginx 节点，跳过）；
 - **未运行且在白名单**：只保留 `local.nginx.process.present`，判定 **CRIT 未运行**
   （normalize 复用进程存在性判定：absent → CRIT）；
@@ -41,7 +42,7 @@ Nginx 内部命令允许固定生成的 shell 变量；候选路径先经过安�
 
 格式为 `参数 = 候选值1|候选值2|...`，当前字段：`nginx_bin`、`nginx_conf`、
 `nginx_error_log`、`nginx_access_log`、`nginx_port`、`nginx_baseline`、
-`nginx_whitelist`。实际取值优先级为：运行中的 master 进程参数 → `nginx -T`/实际
+`nginx_version`、`nginx_whitelist`。实际路径取值优先级为：运行中的 master 进程参数 → `nginx -T`/实际
 配置 → `inspect.conf` 候选。两处都没有可用路径时，相关指标为 UNKNOWN；不会再把
 文档中的固定路径当作隐式现场事实。inspect.conf 在 Linux 首次读取时设为 700。
 Ansible 账号、密码和连接参数继续只放在 `inventory/hosts.local.ini` 或
@@ -56,6 +57,10 @@ Ansible 账号、密码和连接参数继续只放在 `inventory/hosts.local.ini
   路径显式指定为配置中的日志文件，避免测试账号因默认 `/var/log/nginx/error.log`
   无权限而无法完成配置测试。Nginx 的成功信息通常写到 stderr，因此 stdout 和 stderr
   都会检查；同时出现 `syntax is ok` 与 `test is successful` 才是 OK。
+- **版本**：先从运行中的 `nginx: master process` 命令行取得实际二进制，再执行该二进制
+  的 `nginx -v`；版本输出中的 `nginx/x.y.z` 与 `inspect.conf` 的 `nginx_version` 候选值
+  逐一精确比较。一致为 OK，不一致为 CRIT；没有运行中的 master、没有版本输出或没有
+  配置版本基线为 UNKNOWN。不会因为候选路径下存在一个未运行的 Nginx 二进制而判定版本正常。
 - **端口监听与本地访问**：先从实际 Nginx 配置的 `listen` 指令提取端口；无法提取时
   使用 inspect.conf 的 `nginx_port` 候选。逐端口用 `ss -tlnp` 检查 LISTEN，再用 curl
   访问 `127.0.0.1:<端口>/`；连接失败、未监听或 HTTP 5xx 为 CRIT。

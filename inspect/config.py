@@ -906,6 +906,7 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "nginx_error_log": [],
     "nginx_access_log": [],
     "nginx_port": [],
+    "nginx_version": [],
     "nginx_baseline": [],
     "nginx_whitelist": [],
 }
@@ -1011,6 +1012,7 @@ def load_nginx_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]
         "nginx_error_log": list(data.get("nginx_error_log", [])),
         "nginx_access_log": list(data.get("nginx_access_log", [])),
         "nginx_port": list(data.get("nginx_port", [])),
+        "nginx_version": list(data.get("nginx_version", [])),
         "nginx_baseline": list(data.get("nginx_baseline", [])),
         "whitelist": list(data.get("nginx_whitelist", [])),
     }

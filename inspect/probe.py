@@ -145,6 +145,7 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     "local.filesystem.inode_used_percent": ("bash", "df"),
     "local.logs.key_evidence": ("bash", "tail", "grep"),
     "local.nginx.process.present": ("bash", "pgrep"),
+    "local.nginx.version": ("bash", "pgrep", "head"),
     # sed is used by the fixed internal discovery command.  It remains
     # outside the required-command gate for fixture backward compatibility;
     # a real target without sed emits the explicit UNKNOWN marker instead of

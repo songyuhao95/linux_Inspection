@@ -265,6 +265,23 @@ NGINX_METRICS = [
         "unknown_conditions": "无权限或 pgrep 不可用 → UNKNOWN，继续其余指标",
     },
     {
+        "metric_id": "local.nginx.version",
+        "name": "Nginx 版本",
+        "command": "{nginx_bin} -v 2>&1",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_version",
+        "unit": "版本号",
+        "source_anchor": (
+            "P0 指标表「Nginx版本」行（从运行中 Nginx master 进程解析可执行文件，执行 nginx -v，"
+            "取得实际 nginx/x.y.z）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "inspect.conf nginx_version 版本白名单（实际版本一致=正常；不一致=CRIT）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.version"],
+        "conflicts": [],
+        "doc_baseline": "实际运行版本属于 inspect.conf 的 nginx_version 候选值 → OK；实际版本不在候选值内 → CRIT",
+        "unknown_conditions": "无法发现运行中的 Nginx 可执行文件、nginx -v 无版本输出或未配置 nginx_version → UNKNOWN",
+    },
+    {
         "metric_id": "local.nginx.config.valid",
         "name": "Nginx 配置有效性",
         "command": "{nginx_bin} -t -e {nginx_error_log} -c {nginx_conf}",

@@ -78,6 +78,7 @@ EXPECTED_METRIC_IDS = [
     "local.filesystem.inode_used_percent",
     "local.logs.key_evidence",
     "local.nginx.process.present",
+    "local.nginx.version",
     "local.nginx.config.valid",
     "local.nginx.port.listening",
     "local.nginx.error_log.key_evidence",

@@ -39,7 +39,8 @@ Nginx 进程发现只匹配真实 `nginx: master process`/`nginx: worker process
 `[n]` 写法避免 `pgrep` 匹配承载命令的 shell。未运行且不在 `inspect.conf` 白名单 → 跳过该主机 Nginx 指标；
 白名单内未运行 → CRIT「未运行」。Nginx 路径与白名单在仓库根 `inspect.conf` 配置
 （格式为 `参数 = 候选值1|候选值2`）。账号密码仍放在 inventory 文件中，不放入
-inspect.conf。详见 `docs/specs/nginx-middleware.md`。
+inspect.conf。版本基线使用 `nginx_version`；程序只从正在运行的 master 进程对应二进制
+执行 `nginx -v`，版本不在允许值内为 CRIT。详见 `docs/specs/nginx-middleware.md`。
 
 
 ### 2.1 --local 本机自巡检

@@ -309,6 +309,12 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx本节点服务」行",
     },
+    "local.nginx.version": {
+        "command": "{nginx_bin} -v 2>&1",
+        "profile_keys": ("nginx_bin",),
+        "become": False,
+        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx版本」行",
+    },
     "local.nginx.config.valid": {
         "command": "{nginx_bin} -t -e {nginx_error_log} -c {nginx_conf}",
         "profile_keys": ("nginx_bin", "nginx_error_log", "nginx_conf"),
@@ -534,7 +540,7 @@ def _is_runtime_nginx_profile(profile: Dict[str, Any]) -> bool:
     """
     keys = (
         "nginx_bin", "nginx_conf", "nginx_error_log", "nginx_access_log",
-        "nginx_port",
+        "nginx_port", "nginx_version",
     )
     return any(key in profile for key in keys) and all(
         key not in profile or isinstance(profile.get(key), list) for key in keys
@@ -592,6 +598,11 @@ def _build_nginx_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
         return (
             _nginx_discovery_prefix(profile, include_dump=False)
             + f"; : 'inspect.conf nginx_error_log candidates: {candidate_note}'; if test -z \"$nginx_bin\" || test -z \"$nginx_conf\"; then printf '%s\\n' INSPECT_NGINX_CONFIG_NOT_FOUND; elif test -n \"$nginx_error_log\"; then \"$nginx_bin\" -t -e \"$nginx_error_log\" -c \"$nginx_conf\"; else \"$nginx_bin\" -t -c \"$nginx_conf\"; fi"
+        )
+    if metric_id == "local.nginx.version":
+        return (
+            _nginx_discovery_prefix(profile, include_dump=False)
+            + "; if test -z \"$master_line\" || test -z \"$nginx_bin\"; then printf '%s\\n' INSPECT_NGINX_RUNNING_NOT_FOUND; else \"$nginx_bin\" -v 2>&1; fi"
         )
     if metric_id == "local.nginx.port.listening":
         ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))

@@ -99,7 +99,7 @@ def _spec(metric_id, command, timeout=10, become=False, error_code=None, error_m
 def test_registry_covers_all_metrics():
     ids = [s.metric_id for s in _specs(_PROFILE)]
     assert set(ids) == set(metrics.ALL_METRIC_IDS)
-    assert len(ids) == len(metrics.ALL_METRIC_IDS) == 18
+    assert len(ids) == len(metrics.ALL_METRIC_IDS) == 19
 
 
 def test_registry_timeouts_match_metrics_registry():
@@ -194,7 +194,7 @@ def test_playbook_no_unsupported_profile_tasks():
     specs = _specs({})
     unsupported = [s for s in specs if s.error_code == ar.ERROR_UNSUPPORTED_PROFILE]
     supported = [s for s in specs if s.error_code is None]
-    assert len(unsupported) == 11  # 4 linux + 7 nginx（process.present 无 profile 占位）
+    assert len(unsupported) == 12  # 4 linux + 8 nginx（process.present 无 profile 占位）
     assert len(supported) == 7  # 6 linux + nginx.process.present
     pb = ar.generate_playbook(specs)
     for s in unsupported:
@@ -339,6 +339,7 @@ def test_profile_missing_marks_unsupported():
         "local.port.listening",
         "local.logs.key_evidence",
         "local.nginx.config.valid",
+        "local.nginx.version",
         "local.nginx.port.listening",
         "local.nginx.error_log.key_evidence",
         "local.nginx.connections.status",
@@ -615,7 +616,7 @@ def test_fixture_full_success_host(capsys, tmp_path):
     assert result["execution_status"] == ar.STATUS_SUCCESS
     host = result["hosts"][0]
     assert host["probe_status"] == probe.PROBE_OK
-    assert host["summary"]["total"] == 18  # 10 linux + 8 nginx
+    assert host["summary"]["total"] == 19  # 10 linux + 9 nginx
     assert host["summary"]["failed"] == 0
     # 预录输出（剥离 # 头）原样回传
     m = next(x for x in host["metrics"] if x["metric_id"] == "local.process.present")

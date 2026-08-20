@@ -2,7 +2,7 @@
 
 覆盖：
   - 模块注册：nginx 进入默认注册表，middleware_module_ids() 只列中间件；
-  - 指标定义：8 个 Nginx 指标、来源锚点、超时约定；
+  - 指标定义：9 个 Nginx 指标、来源锚点、超时约定；
   - 进程发现选择（select_nginx_metrics）：运行中保留全部 / 未运行白名单外
     跳过 / 白名单内仅保留 process.present（CRIT 未运行）；
   - 解析器与判定（normalize）：config.valid / port.listening / error_log /
@@ -32,6 +32,7 @@ COLLECTED = "2026-08-19T10:00:00+08:00"
 
 NGINX_IDS = (
     "local.nginx.process.present",
+    "local.nginx.version",
     "local.nginx.config.valid",
     "local.nginx.port.listening",
     "local.nginx.error_log.key_evidence",
@@ -204,6 +205,30 @@ class TestParsersAndJudgment:
         )
         assert parsed["valid"] is True
 
+    def test_version_parser_and_expected_version_judgment(self):
+        parsed = n.parse_nginx_version("nginx version: nginx/1.28.0\n")
+        assert parsed["version"] == "nginx/1.28.0"
+        resolved = config_mod.build_resolved_thresholds()
+        ok = n.normalize_host_result(
+            _host_result("nginx-a", [_metric_result("local.nginx.version", "nginx version: nginx/1.28.0")]),
+            run_id=RUN_ID,
+            collected_at=COLLECTED,
+            profile={"nginx_version": ["nginx/1.28.0"]},
+            resolved_thresholds=resolved,
+        )["metrics"][0]
+        assert ok["status"] == "OK"
+        assert ok["raw_value"] == "nginx/1.28.0"
+
+        crit = n.normalize_host_result(
+            _host_result("nginx-a", [_metric_result("local.nginx.version", "nginx version: nginx/1.27.0")]),
+            run_id=RUN_ID,
+            collected_at=COLLECTED,
+            profile={"nginx_version": ["nginx/1.28.0"]},
+            resolved_thresholds=resolved,
+        )["metrics"][0]
+        assert crit["status"] == "CRIT"
+        assert "实际版本=nginx/1.27.0" in crit["threshold"]["notes"]
+
     def test_config_valid_invalid_crit(self):
         parsed = n.parse_nginx_config_valid(
             "nginx: [emerg] unknown directive \"foo\" in /opt/nginx/conf/nginx.conf:1\n"
@@ -341,7 +366,7 @@ class TestFixturePipeline:
         assert by_id["local.nginx.process.present"]["status"] == "OK"
         assert by_id["local.nginx.access_log.status_codes"]["status"] == "WARN"
         # nginx-a 夹具只有 nginx 输出，linux_basic 六项 DATA_MISSING → PARTIAL；
-        # 8 个 nginx 指标本身全部执行成功且无 error。
+        # 9 个 nginx 指标本身全部执行成功且无 error。
         assert doc["execution_status"] == "PARTIAL"
         for mid in NGINX_IDS:
             assert by_id[mid]["error"] is None, mid

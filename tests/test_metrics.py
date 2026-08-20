@@ -26,6 +26,7 @@ EXPECTED_IDS = [
     "local.filesystem.inode_used_percent",
     "local.logs.key_evidence",
     "local.nginx.process.present",
+    "local.nginx.version",
     "local.nginx.config.valid",
     "local.nginx.port.listening",
     "local.nginx.error_log.key_evidence",
@@ -44,10 +45,10 @@ LOG_IDS = {
 TIMEOUT_10S = set(EXPECTED_IDS) - LOG_IDS
 
 
-def test_registry_has_exactly_18_metrics():
-    """注册表共 18 条（10 个共同 P0 + 8 个 Nginx 中间件）。"""
-    assert reg.count_metrics() == 18
-    assert len(reg.METRICS) == 18
+def test_registry_has_exactly_19_metrics():
+    """注册表共 19 条（10 个共同 P0 + 9 个 Nginx 中间件）。"""
+    assert reg.count_metrics() == 19
+    assert len(reg.METRICS) == 19
 
 
 def test_metric_ids_are_exact_expected_set():
