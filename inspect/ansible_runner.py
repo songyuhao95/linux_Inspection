@@ -826,6 +826,9 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         f"if test -z \"$es_cert\"; then for p in {certs}; do if test -f \"$p\"; then es_cert=\"$p\"; break; fi; done; fi",
         "es_cacert=\"$es_cert\"",
         f"if test -z \"$es_cacert\"; then for p in {cacerts}; do if test -f \"$p\"; then es_cacert=\"$p\"; break; fi; done; fi",
+        # The API CA is also the HTTPS certificate evidence when the
+        # dedicated validity candidate list is not configured separately.
+        "if test -z \"$es_cert\" && test -n \"$es_cacert\"; then es_cert=\"$es_cacert\"; fi",
         "es_curl_args=()",
         "if test -n \"${INSPECT_ES_API_USER:-}\" && test -n \"${INSPECT_ES_API_PASSWORD:-}\"; then es_curl_args+=(-u \"${INSPECT_ES_API_USER}:${INSPECT_ES_API_PASSWORD}\"); elif test -n \"$es_auth_file\"; then es_curl_args+=(--netrc-file \"$es_auth_file\"); fi",
         "if test -n \"$es_cacert\" && test -f \"$es_cacert\"; then es_curl_args+=(--cacert \"$es_cacert\"); else es_curl_args+=(-k); fi",

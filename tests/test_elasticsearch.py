@@ -75,6 +75,7 @@ def test_elasticsearch_api_credentials_use_private_task_environment_and_cacert()
     profile["elasticsearch_cacert"] = ["/opt/elasticsearch/conf/certs/http_ca.crt"]
     profile["elasticsearch_api_user"] = ["elastic"]
     profile["elasticsearch_api_password"] = ["unit-test@password"]
+    profile["elasticsearch_cert"] = []
 
     specs = ar.build_metric_command_specs(
         module_ids=("elasticsearch",), profile=profile
@@ -90,6 +91,13 @@ def test_elasticsearch_api_credentials_use_private_task_environment_and_cacert()
         "INSPECT_ES_API_USER": "elastic",
         "INSPECT_ES_API_PASSWORD": "unit-test@password",
     }
+
+    certificate = next(
+        spec for spec in specs
+        if spec.metric_id == "local.elasticsearch.certificate.validity"
+    )
+    assert "es_cert" in certificate.command
+    assert "es_cacert" in certificate.command
 
     playbook = ar.generate_playbook([health])
     assert "INSPECT_ES_API_USER: 'elastic'" in playbook
