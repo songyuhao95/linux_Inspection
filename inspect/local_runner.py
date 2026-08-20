@@ -235,10 +235,7 @@ def run_local(
                 f"指标 {spec.metric_id} 未生成可执行命令: {spec.error_code or 'unknown'}"
             )
         metric_env = dict(env)
-        # Elasticsearch API credentials are supplied by inspect.conf through
-        # the same task-local environment contract used by remote Ansible.
-        # They never enter the shell command or the recorded metric result.
-        metric_env.update(spec.task_environment)
+        metric_env.update(getattr(spec, "task_environment", {}))
         rc, stdout, stderr = _run_shell(
             bash_path,
             spec.command,

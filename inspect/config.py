@@ -1136,7 +1136,8 @@ def load_elasticsearch_config(path: Optional[Union[str, Path]] = None) -> Dict[s
 
     ``elasticsearch_api_user``/``elasticsearch_api_password`` 是 Elasticsearch
     HTTP API 的认证参数，与 Ansible SSH 账号密码完全分离。密码只允许存在于
-    目标环境的私有 inspect.conf，不会被写入事实源、报表或指标 command 文本。
+    目标环境的私有 inspect.conf；远程 API 指标使用 Ansible shell 任务环境注入，
+    本地模式使用进程环境注入，规范化事实源、JSON 和报表会统一脱敏。
     ``elasticsearch_cacert`` 是 curl ``--cacert`` 的候选证书路径；
     ``elasticsearch_cert`` 继续用于证书有效期检查，并可作为 CA 路径兜底。
     """

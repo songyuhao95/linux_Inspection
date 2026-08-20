@@ -70,7 +70,7 @@ def test_elasticsearch_fixture_commands_are_generated_from_profile():
     assert "su -" not in system.command
 
 
-def test_elasticsearch_api_credentials_use_private_task_environment_and_cacert():
+def test_elasticsearch_api_credentials_use_private_config_and_cacert():
     profile = config.load_inspect_conf()
     profile["elasticsearch_cacert"] = ["/opt/elasticsearch/conf/certs/http_ca.crt"]
     profile["elasticsearch_api_user"] = ["elastic"]
@@ -87,6 +87,7 @@ def test_elasticsearch_api_credentials_use_private_task_environment_and_cacert()
     assert "INSPECT_ES_API_USER" in health.command
     assert "INSPECT_ES_API_PASSWORD" in health.command
     assert "unit-test@password" not in health.command
+    assert health.module == "ansible.builtin.shell"
     assert health.task_environment == {
         "INSPECT_ES_API_USER": "elastic",
         "INSPECT_ES_API_PASSWORD": "unit-test@password",
@@ -100,7 +101,8 @@ def test_elasticsearch_api_credentials_use_private_task_environment_and_cacert()
     assert "es_cacert" in certificate.command
 
     playbook = ar.generate_playbook([health])
-    assert "INSPECT_ES_API_USER: 'elastic'" in playbook
+    assert "ansible.builtin.shell:" in playbook
+    assert "environment:" in playbook
     assert "INSPECT_ES_API_PASSWORD: 'unit-test@password'" in playbook
 
 

@@ -127,9 +127,8 @@ _PERMISSION_PATTERNS = (
 _SAFE_WORD = re.compile(r"^[A-Za-z0-9_./:@%+,\- ]+$")
 _SAFE_UNIT = re.compile(r"^[A-Za-z0-9_@.\-]+$")
 _SAFE_PATH = re.compile(r"^/([A-Za-z0-9_./@:+\-*?]*)$")
-# API 密码通过 Ansible task environment 注入，不拼进 shell command。允许现场
-# 常见密码字符，拒绝控制字符与 inspect.conf 的候选分隔符；YAML 单引号转义
-# 负责剩余的展示安全，shell 只读取环境变量。
+# API 密码只在一次性生成的 raw shell command 中使用；允许现场常见密码字符，
+# 拒绝控制字符与 inspect.conf 的候选分隔符；事实源/报表规范化阶段会统一脱敏。
 _SAFE_ELASTICSEARCH_CREDENTIAL = re.compile(r"^[^\x00-\x1f\x7f|]+$")
 
 # 默认运行期目录（<仓库根>/.runtime，TD §3；与 inventory.py 同名约定，
@@ -231,9 +230,9 @@ class CommandSpec:
     # it, and validate_command_specs still enforces the metric/timeout/become
     # registry boundary.
     trusted_generated_shell: bool = False
-    # Private values for Ansible task environment.  This is intentionally not
-    # part of the metric command: API passwords must not enter command text,
-    # callback evidence, facts, or reports.
+    # Some generated middleware commands need private environment values.  The
+    # shell module supports task environment injection; raw does not.
+    module: str = "ansible.builtin.raw"
     task_environment: Dict[str, str] = field(default_factory=dict)
 
 
@@ -819,8 +818,6 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         "if test -n \"$es_bind_host\"; then es_endpoint=\"https://$es_bind_host:$es_http_port\"; fi",
         f"if test -z \"$es_endpoint\"; then for p in {endpoints}; do es_endpoint=\"$p\"; break; done; fi",
         "if test -z \"$es_endpoint\"; then es_endpoint=\"https://127.0.0.1:$es_http_port\"; fi",
-        # The actual user/password are injected as task environment variables;
-        # they never appear in this generated command or in callback evidence.
         "es_auth_file=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth_file=\"$p\"; break; fi; done",
         "es_cert=\"\"; if test -n \"$es_conf\"; then es_cert=$(grep -Eo '/[^[:space:]]+\\.(crt|pem)' \"$es_conf\" | head -n 1); fi",
         f"if test -z \"$es_cert\"; then for p in {certs}; do if test -f \"$p\"; then es_cert=\"$p\"; break; fi; done; fi",
@@ -829,10 +826,25 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         # The API CA is also the HTTPS certificate evidence when the
         # dedicated validity candidate list is not configured separately.
         "if test -z \"$es_cert\" && test -n \"$es_cacert\"; then es_cert=\"$es_cacert\"; fi",
+        "es_api_user=\"${INSPECT_ES_API_USER:-}\"; es_api_password=\"${INSPECT_ES_API_PASSWORD:-}\"",
         "es_curl_args=()",
-        "if test -n \"${INSPECT_ES_API_USER:-}\" && test -n \"${INSPECT_ES_API_PASSWORD:-}\"; then es_curl_args+=(-u \"${INSPECT_ES_API_USER}:${INSPECT_ES_API_PASSWORD}\"); elif test -n \"$es_auth_file\"; then es_curl_args+=(--netrc-file \"$es_auth_file\"); fi",
+        "if test -n \"$es_api_user\" && test -n \"$es_api_password\"; then es_curl_args+=(-u \"$es_api_user:$es_api_password\"); elif test -n \"$es_auth_file\"; then es_curl_args+=(--netrc-file \"$es_auth_file\"); fi",
         "if test -n \"$es_cacert\" && test -f \"$es_cacert\"; then es_curl_args+=(--cacert \"$es_cacert\"); else es_curl_args+=(-k); fi",
     ])
+
+
+def _elasticsearch_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
+    """Return private ES API credentials for shell-task environment only."""
+    users = _elasticsearch_candidates(profile, "elasticsearch_api_user")
+    passwords = _elasticsearch_candidates(profile, "elasticsearch_api_password")
+    if not users or not passwords:
+        return {}
+    if passwords[0].strip().upper() in {"CHANGE_ME", "REPLACE_ME", "请填写"}:
+        return {}
+    return {
+        "INSPECT_ES_API_USER": users[0],
+        "INSPECT_ES_API_PASSWORD": passwords[0],
+    }
 
 
 def _es_curl(path: str, options: str = "") -> str:
@@ -842,21 +854,6 @@ def _es_curl(path: str, options: str = "") -> str:
         f"curl -sS --connect-timeout 3 --max-time 10 "
         f"\"${{es_curl_args[@]}}\"{extra} \"$es_endpoint{path}\""
     )
-
-
-def _elasticsearch_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
-    """Return private ES API credentials for Ansible task environment only."""
-    users = _elasticsearch_candidates(profile, "elasticsearch_api_user")
-    passwords = _elasticsearch_candidates(profile, "elasticsearch_api_password")
-    if not users or not passwords:
-        return {}
-    # CHANGE_ME is the tracked public template placeholder, not a credential.
-    if passwords[0].strip().upper() in {"CHANGE_ME", "REPLACE_ME", "请填写"}:
-        return {}
-    return {
-        "INSPECT_ES_API_USER": users[0],
-        "INSPECT_ES_API_PASSWORD": passwords[0],
-    }
 
 
 def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
@@ -1179,6 +1176,7 @@ def build_metric_command_specs(
             and _is_runtime_elasticsearch_profile(profile)
         ):
             command = _build_elasticsearch_metric_command(metric_id, profile)
+            task_environment = _elasticsearch_task_environment(profile)
             specs.append(
                 CommandSpec(
                     metric_id=metric_id,
@@ -1189,7 +1187,12 @@ def build_metric_command_specs(
                     source_anchor=entry["anchor"],
                     allowed_binaries=_ELASTICSEARCH_GENERATED_ALLOWED_BINARIES,
                     trusted_generated_shell=True,
-                    task_environment=_elasticsearch_task_environment(profile),
+                    module=(
+                        "ansible.builtin.shell"
+                        if task_environment
+                        else "ansible.builtin.raw"
+                    ),
+                    task_environment=task_environment,
                 )
             )
             continue
@@ -1365,6 +1368,21 @@ def validate_command_specs(specs: Sequence[CommandSpec]) -> None:
                 f"allow-list 拒绝：become 与注册表声明不一致（最小化 become）: "
                 f"{spec.metric_id}={spec.become!r}"
             )
+        if spec.module not in {"ansible.builtin.raw", "ansible.builtin.shell"}:
+            raise CommandNotAllowedError(
+                f"allow-list 拒绝：不支持的 Ansible 任务模块: {spec.module!r}"
+            )
+        if spec.task_environment and spec.module != "ansible.builtin.shell":
+            raise CommandNotAllowedError(
+                "allow-list 拒绝：任务环境变量只能交给 shell 模块，"
+                f"避免 raw 将其当作命令参数: {spec.metric_id}"
+            )
+        if spec.module == "ansible.builtin.shell" and not (
+            spec.metric_id.startswith("local.elasticsearch.") and spec.task_environment
+        ):
+            raise CommandNotAllowedError(
+                f"allow-list 拒绝：shell 模块仅允许 Elasticsearch 私有认证任务: {spec.metric_id}"
+            )
         if spec.command is None:
             if spec.error_code != ERROR_UNSUPPORTED_PROFILE:
                 raise CommandNotAllowedError(
@@ -1469,9 +1487,12 @@ def generate_playbook(
             f'    - name: "metric: {spec.metric_id}（{spec.timeout_sec}s）"'
         )
         lines.append(
-            f"      ansible.builtin.raw: '{_yaml_single_quote(raw_cmd)}'"
+            f"      {spec.module}: '{_yaml_single_quote(raw_cmd)}'"
         )
         lines.append(f"      become: {str(spec.become).lower()}")
+        if spec.module == "ansible.builtin.shell":
+            lines.append("      args:")
+            lines.append("        executable: /bin/bash")
         if spec.task_environment:
             lines.append("      environment:")
             for key, value in sorted(spec.task_environment.items()):
