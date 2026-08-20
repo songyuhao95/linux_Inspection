@@ -64,3 +64,21 @@ def test_elasticsearch_fixture_commands_are_generated_from_profile():
     assert any("_cluster/health" in (spec.command or "") for spec in specs)
     assert all(spec.trusted_generated_shell or spec.metric_id.endswith("process.present") for spec in specs)
     ar.validate_command_specs(specs)
+
+    system = next(x for x in specs if x.metric_id == "local.elasticsearch.system.parameters")
+    assert "/proc/$es_pid/limits" in system.command
+    assert "su -" not in system.command
+
+
+def test_elasticsearch_system_parameters_parse_process_limits():
+    parsed = normalize.parse_elasticsearch_system_parameters(
+        "ES_MAX_MAP_COUNT=262144\n"
+        "Swap: 8192 0 8192\n"
+        "ES_ULIMIT_NOFILE=65535\n"
+        "ES_ULIMIT_NPROC=4096\n"
+        "ES_ULIMIT_MEMLOCK=unlimited\n"
+    )
+    assert parsed["max_map_count"] == 262144
+    assert parsed["nofile"] == 65535
+    assert parsed["nproc"] == 4096
+    assert parsed["memlock"] == "unlimited"
