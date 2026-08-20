@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -891,73 +892,128 @@ def _resolve_one(
 
 
 # --------------------------------------------------------------------------
-# Nginx 中间件配置（nginx.yml 可选；缺省用巡检手册环境信息默认值）
+# inspect.conf（所有中间件的运行默认配置）
 # --------------------------------------------------------------------------
 
-# 默认 Nginx 配置来源：《安徽农金Nginx、Keepalived运维巡检手册v1.0》
-# 环境信息/巡检关注指标（NGINX_HOME=/opt/nginx、NGINX_PORT=8010、
-# VIP=192.168.0.253）。现场路径不同时在仓库根 nginx.yml 覆盖。
-NGINX_CONFIG_NAME = "nginx.yml"
+DEFAULT_RUNTIME_CONFIG_NAME = "inspect.conf"
 
-NGINX_DEFAULTS: Dict[str, Any] = {
-    "nginx_bin": "/usr/sbin/nginx",
-    "nginx_conf": "/opt/nginx/conf/nginx.conf",
-    "nginx_error_log": "/opt/nginx/logs/error.log",
-    "nginx_access_log": "/opt/nginx/logs/access.log",
-    "nginx_port": 8010,
-    "whitelist": [],
+# inspect.conf 使用一行一个参数、管道分隔候选值；这里的空字典表示“没有
+# 配置候选路径”，不是再回退到文档中的固定路径。这样能保证现场没有配置时
+# 的中间件指标进入 UNKNOWN，而不是误检另一套安装。
+INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
+    "nginx_bin": [],
+    "nginx_conf": [],
+    "nginx_error_log": [],
+    "nginx_access_log": [],
+    "nginx_port": [],
+    "nginx_baseline": [],
+    "nginx_whitelist": [],
 }
 
-# nginx.yml 允许字段（未知字段 → ConfigError，避免拼写错误静默丢失）
-_NGINX_CONFIG_ALLOWED = set(NGINX_DEFAULTS)
+_CONF_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _split_conf_values(value: str, *, source: str, lineno: int) -> List[str]:
+    """拆分 inspect.conf 的 `value1|value2`，支持每段用单/双引号包裹。"""
+    values: List[str] = []
+    current: List[str] = []
+    quote: Optional[str] = None
+    escaped = False
+    for char in value.strip():
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\" and quote == '"':
+            escaped = True
+            continue
+        if quote is not None:
+            if char == quote:
+                quote = None
+            else:
+                current.append(char)
+            continue
+        if char in ('"', "'"):
+            quote = char
+        elif char == "|":
+            item = "".join(current).strip()
+            if not item:
+                raise ConfigError(f"inspect.conf 第 {lineno} 行存在空候选值: {source}")
+            values.append(item)
+            current = []
+        else:
+            current.append(char)
+    if escaped or quote is not None:
+        raise ConfigError(f"inspect.conf 第 {lineno} 行引号/转义未闭合: {source}")
+    item = "".join(current).strip()
+    if not item:
+        raise ConfigError(f"inspect.conf 第 {lineno} 行值为空: {source}")
+    values.append(item)
+    return values
+
+
+def _ensure_private_runtime_config(path: Path) -> None:
+    """确保现场运行配置不是组/其他用户可读写（Linux 要求 700）。"""
+    if os.name == "nt":
+        return
+    try:
+        mode = path.stat().st_mode & 0o777
+        if mode != 0o700:
+            path.chmod(0o700)
+        if path.stat().st_mode & 0o077:
+            raise ConfigError(f"inspect.conf 权限必须为 700: {path}")
+    except OSError as exc:
+        raise ConfigError(f"inspect.conf 权限无法设置为 700: {path}（{exc}）") from exc
+
+
+def load_inspect_conf(path: Optional[Union[str, Path]] = None) -> Dict[str, List[str]]:
+    """加载仓库根 inspect.conf，返回通用的参数候选值映射。
+
+    格式：`参数名 = 值1|值2|...`；整行 `#` 注释和空行忽略。未知参数不拒绝，
+    以便未来中间件直接扩展 `middleware_parameter`，但参数名必须是安全标识符。
+    inspect.conf 缺失时返回空候选集，由具体中间件把无法发现的指标判为 UNKNOWN。
+    """
+    source = Path(path) if path is not None else _repo_root() / DEFAULT_RUNTIME_CONFIG_NAME
+    if not source.is_file():
+        return {key: list(values) for key, values in INSPECT_CONF_EMPTY_DEFAULTS.items()}
+    _ensure_private_runtime_config(source)
+    try:
+        text = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ConfigError(f"inspect.conf 无法读取: {source}（{exc}）") from exc
+
+    result: Dict[str, List[str]] = {
+        key: list(values) for key, values in INSPECT_CONF_EMPTY_DEFAULTS.items()
+    }
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ConfigError(f"inspect.conf 第 {lineno} 行缺少 '=': {source}")
+        key, value = (part.strip() for part in line.split("=", 1))
+        if not _CONF_KEY_RE.fullmatch(key):
+            raise ConfigError(f"inspect.conf 第 {lineno} 行参数名非法: {key!r}")
+        result[key] = _split_conf_values(value, source=str(source), lineno=lineno)
+    return result
 
 
 def load_nginx_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
-    """加载 nginx.yml（可选；仓库根 <root>/nginx.yml）。
+    """从 inspect.conf 读取 Nginx 候选路径、端口、基线和白名单。
 
-    - 文件不存在 → 返回 NGINX_DEFAULTS（巡检手册默认值）；
-    - path 显式给出：文件必须存在且可解析；
-    - 未知字段、类型错误 → ConfigError（退出码 10）。
-
-    返回 {"nginx_bin", "nginx_conf", "nginx_error_log", "nginx_access_log",
-          "nginx_port", "whitelist"}。whitelist 为 Nginx 白名单 IP 列表：
-    白名单内的主机上 Nginx 未运行 → CRIT「未运行」；白名单外未运行 →
-    跳过该主机 Nginx 指标。
+    账号/密码不在这里读取，远程认证继续由 inventory/hosts*.ini 交给 Ansible。
+    返回的路径与端口均为候选列表，实际首选项由目标主机进程/配置自动发现逻辑决定。
     """
-    if path is None:
-        candidate = _repo_root() / NGINX_CONFIG_NAME
-        if not candidate.is_file():
-            return dict(NGINX_DEFAULTS)
-        path = candidate
-
-    data = _read_yaml_file(path)
-    if not isinstance(data, dict):
-        raise ConfigError(f"nginx.yml 顶层应为映射: {path}")
-
-    unknown = set(data) - _NGINX_CONFIG_ALLOWED
-    if unknown:
-        raise ConfigError(f"nginx.yml 未知字段: {sorted(unknown)}: {path}")
-
-    result: Dict[str, Any] = dict(NGINX_DEFAULTS)
-    for key in NGINX_DEFAULTS:
-        if key not in data:
-            continue
-        value = data[key]
-        if key == "nginx_port":
-            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
-                raise ConfigError(f"nginx.yml {key} 必须为 1..65535 整数: {path}")
-            result[key] = int(value)
-        elif key == "whitelist":
-            if not isinstance(value, list) or not all(
-                isinstance(item, str) and item.strip() for item in value
-            ):
-                raise ConfigError(f"nginx.yml whitelist 必须为非空字符串 IP 列表: {path}")
-            result[key] = [str(item) for item in value]
-        else:
-            if not isinstance(value, str) or not value.strip():
-                raise ConfigError(f"nginx.yml {key} 必须为非空字符串: {path}")
-            result[key] = str(value)
-    return result
+    data = load_inspect_conf(path)
+    return {
+        "nginx_bin": list(data.get("nginx_bin", [])),
+        "nginx_conf": list(data.get("nginx_conf", [])),
+        "nginx_error_log": list(data.get("nginx_error_log", [])),
+        "nginx_access_log": list(data.get("nginx_access_log", [])),
+        "nginx_port": list(data.get("nginx_port", [])),
+        "nginx_baseline": list(data.get("nginx_baseline", [])),
+        "whitelist": list(data.get("nginx_whitelist", [])),
+    }
 
 
 __all__ = [
@@ -968,9 +1024,10 @@ __all__ = [
     "LAYER_EXTERNAL_CONFIG",
     "LAYER_UNRESOLVED",
     "NGINX_BASELINE_VERSION",
-    "NGINX_DEFAULTS",
+    "DEFAULT_RUNTIME_CONFIG_NAME",
     "build_resolved_thresholds",
     "load_document_baseline",
+    "load_inspect_conf",
     "load_inspect_config",
     "load_nginx_baseline",
     "load_nginx_config",

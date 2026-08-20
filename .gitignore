@@ -27,6 +27,3 @@ inventory/*.local.ini
 # Checked-in Linux runtime may generate bytecode during local probing; never commit it.
 runtime/lib/python3.12/site-packages/**/__pycache__/
 runtime/lib/python3.12/site-packages/**/*.py[cod]
-
-# Nginx 现场配置（白名单 IP 等）不入库；使用 nginx.yml.example 模板
-nginx.yml

@@ -47,6 +47,7 @@ PROBE_COMMANDS = (
     "curl",
     "head",
     "ls",
+    "sed",
 )
 
 # 探测结果取值
@@ -144,13 +145,17 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     "local.filesystem.inode_used_percent": ("bash", "df"),
     "local.logs.key_evidence": ("bash", "tail", "grep"),
     "local.nginx.process.present": ("bash", "pgrep"),
-    "local.nginx.config.valid": ("bash",),
-    "local.nginx.port.listening": ("bash", "ss", "grep", "curl", "head"),
-    "local.nginx.error_log.key_evidence": ("bash", "ls", "tail", "grep"),
-    "local.nginx.connections.status": ("bash", "curl"),
-    "local.nginx.access_log.status_codes": ("bash", "ls", "tail", "grep"),
-    "local.nginx.config.baseline": ("bash", "ls", "grep"),
-    "local.nginx.security.baseline": ("bash", "ls", "grep"),
+    # sed is used by the fixed internal discovery command.  It remains
+    # outside the required-command gate for fixture backward compatibility;
+    # a real target without sed emits the explicit UNKNOWN marker instead of
+    # being silently treated as healthy.
+    "local.nginx.config.valid": ("bash", "pgrep", "head"),
+    "local.nginx.port.listening": ("bash", "pgrep", "ss", "grep", "curl", "head"),
+    "local.nginx.error_log.key_evidence": ("bash", "pgrep", "tail", "grep", "head"),
+    "local.nginx.connections.status": ("bash", "pgrep", "curl", "head"),
+    "local.nginx.access_log.status_codes": ("bash", "pgrep", "tail", "grep", "head"),
+    "local.nginx.config.baseline": ("bash", "pgrep", "grep", "head"),
+    "local.nginx.security.baseline": ("bash", "pgrep", "grep", "head"),
 }
 
 

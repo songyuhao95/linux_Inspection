@@ -204,8 +204,7 @@ def run_local(
     metric_results = []
     for spec in specs:
         if spec.command is None and spec.error_code == runner_mod.ERROR_UNSUPPORTED_PROFILE:
-            metric_results.append(
-                runner_mod.classify_metric_result(
+            result = runner_mod.classify_metric_result(
                     spec.metric_id,
                     None,
                     "",
@@ -217,7 +216,8 @@ def run_local(
                         "message": spec.error_message or "",
                     },
                 )
-            )
+            result["command"] = spec.command or ""
+            metric_results.append(result)
             continue
         if spec.command is None:
             raise LocalExecutionError(
@@ -230,8 +230,7 @@ def run_local(
             env=env,
             cwd=repo_root,
         )
-        metric_results.append(
-            runner_mod.classify_metric_result(
+        result = runner_mod.classify_metric_result(
                 spec.metric_id,
                 rc,
                 stdout,
@@ -239,7 +238,8 @@ def run_local(
                 spec.required_commands,
                 probe_matrix,
             )
-        )
+        result["command"] = spec.command
+        metric_results.append(result)
 
     metric_results = runner_mod.select_nginx_metrics(
         metric_results,

@@ -34,15 +34,15 @@ metrics:
     name: Nginx 端口监听与本地访问
     source_anchor: "P0 指标表「Nginx端口与本地访问」行（ss -tlnp | grep ':8010'；curl -sS -I --connect-timeout 3 http://127.0.0.1:8010/）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
-      OK: { rule: "测试端口来自 nginx.yml 的 nginx_port，未配置时默认 8010；ss -tlnp 确认该端口处于 LISTEN，且 curl 访问 http://127.0.0.1:端口/ 返回 200/302/401/403 等可解释的 HTTP 状态", rule_id: "nginx-p0-v1.nginx.port.listening.ok", reason: null, note: null }
+      OK: { rule: "优先从实际 Nginx 配置的 listen 指令提取端口；无法提取时按 inspect.conf 的 nginx_port 候选；ss -tlnp 确认每个端口处于 LISTEN，且 curl 访问 http://127.0.0.1:端口/ 返回可解释的 HTTP 状态", rule_id: "nginx-p0-v1.nginx.port.listening.ok", reason: null, note: null }
       WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
-      CRIT: { rule: "对 nginx.yml 的 nginx_port（默认 8010）检查；端口未 LISTEN、curl 连接超时/拒绝，或本地 HTTP 返回 5xx 时为 CRIT", rule_id: "nginx-p0-v1.nginx.port.listening.crit", reason: null, note: null }
+      CRIT: { rule: "对实际配置 listen 端口（无法解析时为 inspect.conf nginx_port 候选）检查；端口未 LISTEN、curl 连接超时/拒绝，或本地 HTTP 返回 5xx 时为 CRIT", rule_id: "nginx-p0-v1.nginx.port.listening.crit", reason: null, note: null }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "ss/curl 不可用" }
   local.nginx.error_log.key_evidence:
     name: Nginx 关键日志
     source_anchor: "P0 指标表「关键日志」行（tail -n 100 error.log；egrep -i 'emerg|alert|crit|error|permission denied|bind(|connect() failed|upstream timed out'）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
-      OK: { rule: "检查 nginx.yml 的 nginx_error_log，未配置时默认 /opt/nginx/logs/error.log；读取末尾 1000 行，未命中 emerg、alert、crit、error、permission denied、bind()、connect() failed、upstream timed out 等关键字", rule_id: "nginx-p0-v1.nginx.error_log.key_evidence.ok", reason: null, note: null }
+      OK: { rule: "优先从 Nginx master 的 -e 参数和配置 error_log 指令解析日志；均无结果时按 inspect.conf nginx_error_log 候选；读取末尾 1000 行，未命中 emerg、alert、crit、error、permission denied、bind()、connect() failed、upstream timed out 等关键字", rule_id: "nginx-p0-v1.nginx.error_log.key_evidence.ok", reason: null, note: null }
       WARN: { rule: "同一日志文件末尾 1000 行命中上述关键错误关键字；报告保留命中数量和最近命中内容，运维需结合时间、上游和端口继续处理", rule_id: "nginx-p0-v1.nginx.error_log.key_evidence.warn", reason: null, note: null }
       CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "日志不可读" }
@@ -58,7 +58,7 @@ metrics:
     name: 访问日志状态码
     source_anchor: "P1 指标表「访问日志状态码」行（tail -n 1000 access.log；5xx 无持续增长）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
-      OK: { rule: "检查 nginx.yml 的 nginx_access_log，未配置时默认 /opt/nginx/logs/access.log；读取末尾 1000 行，5xx=0，且请求状态以 2xx/3xx 为主", rule_id: "nginx-p0-v1.nginx.access_log.status_codes.ok", reason: null, note: null }
+      OK: { rule: "优先从 nginx -T 输出解析 access_log；无结果时按 inspect.conf nginx_access_log 候选；读取末尾 1000 行并逐行统计状态码，normalized_value 为 5xx 命中行数；5xx=0 且请求状态以 2xx/3xx 为主", rule_id: "nginx-p0-v1.nginx.access_log.status_codes.ok", reason: null, note: null }
       WARN: { rule: "上述访问日志末尾 1000 行出现一个或多个 5xx；报告统计状态码分布和最近命中，运维需按 URL、来源 IP、状态码、时间段关联 error.log 判断是否持续", rule_id: "nginx-p0-v1.nginx.access_log.status_codes.warn", reason: null, note: null }
       CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "访问日志不可读" }
@@ -66,7 +66,7 @@ metrics:
     name: Nginx 配置基线
     source_anchor: "P1 指标表「Nginx配置基线」行（grep -E 'worker_processes|worker_rlimit_nofile|worker_connections|use epoll|multi_accept|keepalive_timeout|client_max_body_size|limit_req|limit_conn' nginx.conf）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
-      OK: { rule: "检查 nginx.yml 的 nginx_conf，未配置时默认 /opt/nginx/conf/nginx.conf；配置中同时找到 worker_processes、worker_connections、keepalive_timeout 三项核心指令，并采集 worker_rlimit_nofile、use epoll、multi_accept、client_max_body_size、limit_req、limit_conn 等关注项", rule_id: "nginx-p0-v1.nginx.config.baseline.ok", reason: null, note: null }
+      OK: { rule: "优先从 Nginx master 的 -c 参数解析配置文件；文件无效时按 inspect.conf nginx_conf 候选；配置中同时找到 worker_processes、worker_connections、keepalive_timeout 三项核心指令，并采集 worker_rlimit_nofile、use epoll、multi_accept、client_max_body_size、limit_req、limit_conn 等关注项", rule_id: "nginx-p0-v1.nginx.config.baseline.ok", reason: null, note: null }
       WARN: { rule: "上述 Nginx 配置文件缺少任一核心指令，或与已批准基线存在漂移；报告列出实际命中的指令，运维需结合变更单判断是否需要修正", rule_id: "nginx-p0-v1.nginx.config.baseline.warn", reason: null, note: null }
       CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置文件不可读" }
@@ -74,7 +74,7 @@ metrics:
     name: 安全配置基线
     source_anchor: "P1 指标表「安全配置基线」行（grep -E 'server_tokens|autoindex|X-Frame-Options|X-Content-Type-Options|Content-Security-Policy|request_method' nginx.conf）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
-      OK: { rule: "检查 nginx.yml 的 nginx_conf，未配置时默认 /opt/nginx/conf/nginx.conf；server_tokens off 且 autoindex off，分别避免暴露版本信息和目录索引", rule_id: "nginx-p0-v1.nginx.security.baseline.ok", reason: null, note: null }
+      OK: { rule: "优先从 Nginx master 的 -c 参数解析配置文件；文件无效时按 inspect.conf nginx_conf 候选；按 inspect.conf nginx_baseline（默认 server_tokens_off=True、autoindex_off=True）检查安全指令，分别避免暴露版本信息和目录索引", rule_id: "nginx-p0-v1.nginx.security.baseline.ok", reason: null, note: null }
       WARN: { rule: "上述配置文件缺少 server_tokens off 或 autoindex off；同时采集安全响应头和 request_method 相关配置供复核，缺失项按安全加固要求补齐", rule_id: "nginx-p0-v1.nginx.security.baseline.warn", reason: null, note: null }
       CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置文件不可读" }

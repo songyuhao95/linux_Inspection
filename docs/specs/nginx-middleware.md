@@ -11,16 +11,17 @@ Nginx 中间件模块是第一个中间件适配器，指标按《安徽农金Ng
 | metric_id | 名称 | 命令 | 文档来源 |
 | --- | --- | --- | --- |
 | `local.nginx.process.present` | Nginx 进程存在性 | `pgrep -fa 'nginx: master\|nginx: worker\|/usr/sbin/nginx\|/opt/nginx/sbin/nginx'` | P0「Nginx本节点服务」 |
-| `local.nginx.config.valid` | 配置有效性 | `{nginx_bin} -t -c {nginx_conf}` | P0「Nginx配置有效性」 |
-| `local.nginx.port.listening` | 端口监听与本地访问 | `ss -tlnp \| grep ':{nginx_port}'; curl -sS -I http://127.0.0.1:{nginx_port}/` | P0「Nginx端口与本地访问」 |
-| `local.nginx.error_log.key_evidence` | 关键日志 | `ls -1 {nginx_error_log}; tail -n 1000 {nginx_error_log} \| egrep -i 'emerg\|alert\|crit\|error\|...'` | P0「关键日志」 |
-| `local.nginx.connections.status` | 连接状态（stub_status） | `curl -sS http://127.0.0.1:{nginx_port}/nginx_status` | P1「Nginx连接状态」 |
-| `local.nginx.access_log.status_codes` | 访问日志状态码 | `ls -1 {nginx_access_log}; tail -n 1000 {nginx_access_log} \| grep -E ' [1-5][0-9][0-9] '` | P1「访问日志状态码」 |
-| `local.nginx.config.baseline` | 配置基线 | `ls -1 {nginx_conf}; grep -E 'worker_processes\|...\|limit_conn' {nginx_conf}` | P1「Nginx配置基线」 |
-| `local.nginx.security.baseline` | 安全配置基线 | `ls -1 {nginx_conf}; grep -E 'server_tokens\|autoindex\|...' {nginx_conf}` | P1「安全配置基线」 |
+| `local.nginx.config.valid` | 配置有效性 | 自动从 master 进程解析 `-c/-e`，无可用值时按 `inspect.conf` 候选，执行 `nginx -t` | P0「Nginx配置有效性」 |
+| `local.nginx.port.listening` | 端口监听与本地访问 | 从实际配置 `listen` 指令提取端口；无端口时使用 `inspect.conf` 的 `nginx_port`，再执行 `ss` + `curl` | P0「Nginx端口与本地访问」 |
+| `local.nginx.error_log.key_evidence` | 关键日志 | 从进程/配置解析 `error_log`，无可用值时按 `inspect.conf` 候选，读取末尾 1000 行 | P0「关键日志」 |
+| `local.nginx.connections.status` | 连接状态（stub_status） | 对实际 `listen` 端口（或 `inspect.conf` 候选）访问 `/nginx_status` | P1「Nginx连接状态」 |
+| `local.nginx.access_log.status_codes` | 访问日志状态码 | 从 `nginx -T` 解析 `access_log`，无可用值时按 `inspect.conf` 候选，读取末尾 1000 行 | P1「访问日志状态码」 |
+| `local.nginx.config.baseline` | 配置基线 | 自动解析配置文件后 grep `worker_processes` 等核心/关注指令 | P1「Nginx配置基线」 |
+| `local.nginx.security.baseline` | 安全配置基线 | 自动解析配置文件后 grep `server_tokens`、`autoindex` 等安全指令 | P1「安全配置基线」 |
 
-所有命令均为只读、无 `$`/反引号，通过 `inspect/ansible_runner.py` 的 allow-list 校验；
-HTTP 探测使用 `curl`（手册要求），仅限 `local.nginx.*` 指标模板。
+命令由 `inspect/ansible_runner.py` 固定生成。为把进程/配置发现结果传递给后续只读检查，
+Nginx 内部命令允许固定生成的 shell 变量；候选路径先经过安全字符集校验，用户配置不能
+直接注入任意命令。HTTP 探测使用 `curl`（手册要求），仅限 `local.nginx.*` 指标模板。
 
 ## 进程发现与白名单
 
@@ -32,15 +33,19 @@ HTTP 探测使用 `curl`（手册要求），仅限 `local.nginx.*` 指标模板
   （normalize 复用进程存在性判定：absent → CRIT）；
 - **进程发现采集失败**（无权限等）：保留全部 Nginx 指标为 UNKNOWN+error（不伪装结论）。
 
-白名单来自仓库根 `nginx.yml` 的 `whitelist` 列表（模板 `nginx.yml.example`）；
+白名单来自仓库根 `inspect.conf` 的 `nginx_whitelist` 候选列表；
 选择逻辑实现为 `ansible_runner.select_nginx_metrics`，在 local 与 Ansible 两条执行
 路径的结果组装阶段统一应用，host-result-v1 的 `host.product_profiles` 据此标记 `nginx`。
 
-## 配置（nginx.yml）
+## 配置（inspect.conf）
 
-字段：`nginx_bin`、`nginx_conf`、`nginx_error_log`、`nginx_access_log`、
-`nginx_port`、`whitelist`。缺省值来自手册环境信息（`/opt/nginx`、端口 `8010`）。
-`nginx.yml` 被 `.gitignore` 忽略；现场信息通过 `nginx.yml.example` 模板复制配置。
+格式为 `参数 = 候选值1|候选值2|...`，当前字段：`nginx_bin`、`nginx_conf`、
+`nginx_error_log`、`nginx_access_log`、`nginx_port`、`nginx_baseline`、
+`nginx_whitelist`。实际取值优先级为：运行中的 master 进程参数 → `nginx -T`/实际
+配置 → `inspect.conf` 候选。两处都没有可用路径时，相关指标为 UNKNOWN；不会再把
+文档中的固定路径当作隐式现场事实。inspect.conf 在 Linux 首次读取时设为 700。
+Ansible 账号、密码和连接参数继续只放在 `inventory/hosts.local.ini` 或
+`inventory/hosts.ini`，不放入 inspect.conf。
 
 ## 阈值判定说明
 
@@ -51,20 +56,23 @@ HTTP 探测使用 `curl`（手册要求），仅限 `local.nginx.*` 指标模板
   路径显式指定为配置中的日志文件，避免测试账号因默认 `/var/log/nginx/error.log`
   无权限而无法完成配置测试。Nginx 的成功信息通常写到 stderr，因此 stdout 和 stderr
   都会检查；同时出现 `syntax is ok` 与 `test is successful` 才是 OK。
-- **端口监听与本地访问**：端口来自 `nginx.yml` 的 `nginx_port`，默认 8010，先用
-  `ss -tlnp` 检查该端口是否 LISTEN，再用 curl 访问 `127.0.0.1:<端口>/`；连接失败、
-  未监听或 HTTP 5xx 为 CRIT。
-- **错误日志**：文件来自 `nginx_error_log`，默认 `/opt/nginx/logs/error.log`，读取
-  末尾 1000 行，扫描 emerg、alert、crit、error、permission denied、bind()、
-  connect() failed、upstream timed out 等关键字；命中为 WARN。
-- **访问日志**：文件来自 `nginx_access_log`，默认 `/opt/nginx/logs/access.log`，读取
-  末尾 1000 行并统计状态码；5xx 命中为 WARN。
-- **配置基线**：文件来自 `nginx_conf`，默认 `/opt/nginx/conf/nginx.conf`；检查
+- **端口监听与本地访问**：先从实际 Nginx 配置的 `listen` 指令提取端口；无法提取时
+  使用 inspect.conf 的 `nginx_port` 候选。逐端口用 `ss -tlnp` 检查 LISTEN，再用 curl
+  访问 `127.0.0.1:<端口>/`；连接失败、未监听或 HTTP 5xx 为 CRIT。
+- **错误日志**：先从 master 的 `-e` 和配置文件的 `error_log` 解析，最后使用
+  inspect.conf 的 `nginx_error_log` 候选；读取末尾 1000 行，扫描 emerg、alert、crit、
+  error、permission denied、bind()、connect() failed、upstream timed out 等关键字；
+  命中为 WARN，路径完全找不到为 UNKNOWN。
+- **访问日志**：先从 `nginx -T` 的 `access_log` 解析，最后使用 inspect.conf 的
+  `nginx_access_log` 候选；读取末尾 1000 行并逐行统计状态码，`normalized_value` 是
+  5xx 命中行数，不是命令原始输出行数；5xx 命中为 WARN，路径完全找不到为 UNKNOWN。
+- **配置基线**：文件来自自动发现的 `nginx_conf`，找不到时使用 inspect.conf 候选；检查
   `worker_processes`、`worker_connections`、`keepalive_timeout` 三项核心指令，
   同时采集 `worker_rlimit_nofile`、`use epoll`、`multi_accept`、
   `client_max_body_size`、`limit_req`、`limit_conn` 关注项。
-- **安全基线**：同一 `nginx_conf` 检查 `server_tokens off` 和 `autoindex off`，
-  分别用于避免暴露版本信息和目录索引；缺任一项为 WARN。
+- **安全基线**：同一自动发现的配置文件检查 inspect.conf `nginx_baseline` 指定的
+  安全项（默认 `server_tokens_off=True`、`autoindex_off=True`），分别用于避免暴露
+  版本信息和目录索引；缺任一项为 WARN。
 
 ## 多实例行为与演进方案
 
@@ -72,7 +80,8 @@ HTTP 探测使用 `curl`（手册要求），仅限 `local.nginx.*` 指标模板
 
 - 进程发现会匹配主机上的 Nginx master/worker 进程；只要发现任一匹配进程，主机就
   进入运行态。
-- 配置、端口、日志和基线指标统一使用 `nginx.yml` 中的一组
+- 配置、端口、日志和基线指标优先使用每个 master 进程/实际配置发现的一组路径，
+  找不到时才使用 `inspect.conf` 中的
   `nginx_bin/nginx_conf/nginx_port/nginx_error_log/nginx_access_log`。因此同一主机有
   多个实例时，v1 不能逐实例给出结论，默认配置对应的实例是报告对象；进程存在性
   只能回答“是否有 Nginx 进程”，不能回答每个实例是否正常。

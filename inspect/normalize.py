@@ -565,6 +565,10 @@ def _has_file_marker(output: str) -> bool:
     return bool(_content_lines(output))
 
 
+def _has_nginx_missing_marker(output: str, marker: str) -> bool:
+    return marker in _content_lines(output)
+
+
 def parse_nginx_config_valid(output: str) -> Dict[str, Any]:
     """nginx -t 输出 → valid/invalid（syntax is ok + test is successful）。
 
@@ -572,6 +576,8 @@ def parse_nginx_config_valid(output: str) -> Dict[str, Any]:
       `nginx: configuration file /opt/nginx/conf/nginx.conf test is successful`
       （首行为 `nginx: the configuration file ... syntax is ok`）。
     """
+    if _has_nginx_missing_marker(output, "INSPECT_NGINX_CONFIG_NOT_FOUND"):
+        raise ParseError("未发现运行实例的 Nginx 配置文件（进程参数与 inspect.conf 候选均无可用路径）")
     text = output.lower()
     valid = "syntax is ok" in text and "test is successful" in text
     return {
@@ -588,6 +594,8 @@ def parse_nginx_port_listening(output: str) -> Dict[str, Any]:
 
     输入基准：ss LISTEN 行 + curl -I 的 `HTTP/1.1 200 OK` 状态行。
     """
+    if _has_nginx_missing_marker(output, "INSPECT_NGINX_PORT_NOT_FOUND"):
+        raise ParseError("未发现 Nginx 配置中的 listen 端口，且 inspect.conf 没有可用端口候选")
     lines = _content_lines(output)
     listening = any(ln.lstrip().startswith("LISTEN") for ln in lines)
     http_status: Optional[int] = None
@@ -609,8 +617,10 @@ def parse_nginx_error_log(output: str) -> Dict[str, Any]:
     前置 `ls -1` 标记：输出为空 → 文件缺失/不可读 → ParseError（UNKNOWN）；
     文件存在但无错误命中 → hit_count=0（OK）。
     """
+    if _has_nginx_missing_marker(output, "INSPECT_NGINX_ERROR_LOG_NOT_FOUND"):
+        raise ParseError("未发现 Nginx error.log（进程参数、配置文件与 inspect.conf 候选均无可用路径）")
     if not _has_file_marker(output):
-        raise ParseError("Nginx error.log 不可读（ls 无输出，文件缺失/无权限）")
+        raise ParseError("Nginx error.log 不可读（文件缺失/无权限）")
     return parse_logs_key_evidence(_strip_ls_marker(output))
 
 
@@ -642,8 +652,10 @@ def parse_nginx_access_log_status_codes(output: str) -> Dict[str, Any]:
 
     前置 `ls -1` 标记：输出为空 → 文件缺失 → ParseError（UNKNOWN）。
     """
+    if _has_nginx_missing_marker(output, "INSPECT_NGINX_ACCESS_LOG_NOT_FOUND"):
+        raise ParseError("未发现 Nginx access.log（nginx -T、进程参数与 inspect.conf 候选均无可用路径）")
     if not _has_file_marker(output):
-        raise ParseError("Nginx 访问日志不可读（ls 无输出，文件缺失/无权限）")
+        raise ParseError("Nginx 访问日志不可读（文件缺失/无权限）")
     lines = _content_lines(_strip_ls_marker(output))
     counts: Dict[str, int] = {}
     for ln in lines:
@@ -662,8 +674,10 @@ def parse_nginx_access_log_status_codes(output: str) -> Dict[str, Any]:
 
 def parse_nginx_config_baseline(output: str) -> Dict[str, Any]:
     """Nginx 配置基线 grep 输出 → 关键指令命中集合（P1 配置基线）。"""
+    if _has_nginx_missing_marker(output, "INSPECT_NGINX_CONFIG_NOT_FOUND"):
+        raise ParseError("未发现可读取的 Nginx 配置文件")
     if not _has_file_marker(output):
-        raise ParseError("Nginx 配置文件不可读（ls 无输出，文件缺失/无权限）")
+        raise ParseError("Nginx 配置文件不可读（文件缺失/无权限）")
     directives: List[str] = []
     seen: set = set()
     for ln in _content_lines(_strip_ls_marker(output)):
@@ -679,8 +693,10 @@ def parse_nginx_config_baseline(output: str) -> Dict[str, Any]:
 
 def parse_nginx_security_baseline(output: str) -> Dict[str, Any]:
     """Nginx 安全配置基线 grep 输出 → server_tokens/autoindex 状态（P1 安全基线）。"""
+    if _has_nginx_missing_marker(output, "INSPECT_NGINX_CONFIG_NOT_FOUND"):
+        raise ParseError("未发现可读取的 Nginx 配置文件")
     if not _has_file_marker(output):
-        raise ParseError("Nginx 配置文件不可读（ls 无输出，文件缺失/无权限）")
+        raise ParseError("Nginx 配置文件不可读（文件缺失/无权限）")
     lines = _content_lines(_strip_ls_marker(output))
     lower = "\n".join(lines).lower()
     return {
@@ -1033,13 +1049,25 @@ def _judge_nginx_config_baseline(
 def _judge_nginx_security_baseline(
     parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """server_tokens off 且 autoindex off → OK；安全配置缺失 → WARN。"""
-    if parsed["server_tokens_off"] and parsed["autoindex_off"]:
+    """按 inspect.conf nginx_baseline 检查安全指令；缺失项 → WARN。"""
+    requested = ["server_tokens_off", "autoindex_off"]
+    if profile and profile.get("nginx_baseline"):
+        configured: List[str] = []
+        for item in profile.get("nginx_baseline") or []:
+            match = re.fullmatch(r"([A-Za-z0-9_]+)=(True|False|true|false)", str(item))
+            if match and match.group(2).lower() == "true":
+                configured.append(match.group(1))
+        if configured:
+            requested = configured
+    missing = [name for name in requested if not parsed.get(name, False)]
+    if not missing:
         return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
     return {
         "status": STATUS_WARN,
         "rule": _baseline_rule(resolved, STATUS_WARN),
-        "note": "安全配置缺失（server_tokens/autoindex 未按基线关闭）",
+        "note": "安全配置缺失（未满足 inspect.conf nginx_baseline: "
+        + "、".join(missing)
+        + "）",
     }
 
 
@@ -1368,7 +1396,12 @@ def _build_metric_document(
 
 
 def _error_metric_document(
-    metric_id: str, error: Dict[str, str], *, inspection_id: str, collected_at: str
+    metric_id: str,
+    error: Dict[str, str],
+    *,
+    inspection_id: str,
+    collected_at: str,
+    command: Optional[str] = None,
 ) -> Dict[str, Any]:
     """采集层失败（error 已由 ansible_runner 分类）→ UNKNOWN + error（HR §3.2）。
 
@@ -1376,7 +1409,7 @@ def _error_metric_document(
     """
     m = _metric_definition(metric_id)
     evidence = {
-        "command": m["command"],
+        "command": command or m["command"],
         "output_summary": None,
         "raw_ref": f"raw/{metric_id}.out",
         "sampled_at": collected_at,
@@ -1411,6 +1444,7 @@ def _judged_metric_document(
     inspection_id: str,
     collected_at: str,
     profile: Optional[Dict[str, Any]] = None,
+    command: Optional[str] = None,
 ) -> Dict[str, Any]:
     """判定完成 → 组装 threshold/provenance（HR §3 字段语义，REQ-D-04 可追溯）。"""
     status = decision["status"]
@@ -1465,7 +1499,7 @@ def _judged_metric_document(
         }
 
     evidence = {
-        "command": _metric_definition(metric_id)["command"],
+        "command": command or _metric_definition(metric_id)["command"],
         "output_summary": mask_output(_output_summary(metric_id, parsed)),
         "raw_ref": f"raw/{metric_id}.out",
         "sampled_at": collected_at,
@@ -1693,7 +1727,11 @@ def normalize_host_result(
         if error is not None:
             metric_docs.append(
                 _error_metric_document(
-                    metric_id, error, inspection_id=inspection_id, collected_at=collected_at
+                    metric_id,
+                    error,
+                    inspection_id=inspection_id,
+                    collected_at=collected_at,
+                    command=mres.get("command"),
                 )
             )
             continue
@@ -1710,6 +1748,7 @@ def normalize_host_result(
                     },
                     inspection_id=inspection_id,
                     collected_at=collected_at,
+                    command=mres.get("command"),
                 )
             )
             continue
@@ -1723,8 +1762,9 @@ def normalize_host_result(
                         "message": f"无阈值解析结果（无文档基线/外部配置）: {metric_id}",
                         "metric_status": METRIC_ERROR_STATUS,
                     },
-                    inspection_id=inspection_id,
-                    collected_at=collected_at,
+                        inspection_id=inspection_id,
+                        collected_at=collected_at,
+                        command=mres.get("command"),
                 )
             )
             continue
@@ -1746,7 +1786,7 @@ def normalize_host_result(
                 "notes": rule.get("note"),
             }
             evidence = {
-                "command": _metric_definition(metric_id)["command"],
+                "command": mres.get("command") or _metric_definition(metric_id)["command"],
                 "output_summary": mask_output(_output_summary(metric_id, parsed)),
                 "raw_ref": f"raw/{metric_id}.out",
                 "sampled_at": collected_at,
@@ -1787,6 +1827,7 @@ def normalize_host_result(
                 inspection_id=inspection_id,
                 collected_at=collected_at,
                 profile=profile,
+                command=mres.get("command"),
             )
         )
 

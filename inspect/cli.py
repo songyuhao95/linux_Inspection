@@ -88,7 +88,7 @@ _HELP_EPILOG = """主机选择示例:
 中间件选择:
   默认巡检全部已注册中间件（当前：Nginx）+ Linux 主机基础指标；
   --nginx 只巡检 Nginx 中间件 + Linux 主机基础指标；
-  Nginx 进程发现：未运行且不在 nginx.yml 白名单 → 跳过该主机 Nginx 指标；
+  Nginx 进程发现：未运行且不在 inspect.conf 白名单 → 跳过该主机 Nginx 指标；
   白名单内未运行 → CRIT「未运行」。
 
 退出码: 0 成功 / 2 用法错误 / 10 执行失败 / 20 业务告警(--fail-on critical)
@@ -323,7 +323,10 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
         run_id=run_id,
         inspection_id=inspection_id,
         collected_at=collected_at,
-        profile=None,
+        # Nginx inspect.conf values are used only for metric explanation and
+        # baseline interpretation; SSH credentials remain exclusively in the
+        # selected inventory file.
+        profile=nginx_cfg,
         product_profiles=[],
         resolved_thresholds=resolved_thresholds,
         inventory_source=_inventory_source(host_selection),

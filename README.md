@@ -100,15 +100,17 @@ Nginx 中间件（仍保留 Linux 主机基础指标）。未选择的模块不�
 - `local.nginx.security.baseline`：安全配置基线（server_tokens/autoindex）。
 
 **进程发现与白名单**：默认巡检先执行 `local.nginx.process.present` 判断主机是否运行
-Nginx。运行中 → 采集全部 Nginx 指标；未运行且主机 IP **不在** `nginx.yml` 白名单 →
+Nginx。运行中 → 采集全部 Nginx 指标；未运行且主机 IP **不在** `inspect.conf` 白名单 →
 跳过该主机 Nginx 指标（该主机不是 Nginx 节点）；未运行且 **在** 白名单 → 标记
 `CRIT 未运行`（只保留进程存在性指标）。进程发现本身采集失败（无权限等）→ 保留全部
 Nginx 指标为 UNKNOWN（不伪装结论）。
 
-**Nginx 配置**：仓库根 `nginx.yml`（可选，模板见 `nginx.yml.example`）配置
+**Nginx 配置**：仓库根 `inspect.conf` 使用 `参数 = 候选值1|候选值2` 配置
 `nginx_bin` / `nginx_conf` / `nginx_error_log` / `nginx_access_log` / `nginx_port` /
-`whitelist`。缺省值采用手册环境信息（`/opt/nginx`、端口 `8010`）。`nginx.yml` 被
-`.gitignore` 忽略，白名单等现场信息不入库。
+`nginx_baseline` / `nginx_whitelist`。采集优先从 Nginx master 进程参数和实际配置
+发现路径，再按这些候选值兜底；两处都找不到时指标为 UNKNOWN。`inspect.conf` 在 Linux
+首次读取时自动收紧为 700。SSH 账号、密码和连接参数不在此文件中，继续由
+`inventory/hosts.local.ini` 或 `inventory/hosts.ini` 交给 Ansible。
 
 **报表**：Excel 新增 `nginx` Sheet（只列 `local.nginx.*` 指标，字段与 `Local` 一致）；
 `Local` Sheet 只保留 Linux 基础指标。HTML 指标卡片按 metric_id 前缀归入「nginx」
@@ -116,7 +118,7 @@ Nginx 指标为 UNKNOWN（不伪装结论）。
 inode 指标会按每个挂载点展开，与 Excel 行保持一致。
 
 **多实例说明**：当前 v1 按主机的一组 Nginx 配置、端口和日志路径巡检，进程发现只
-确认主机上是否存在任一 Nginx 进程，不能逐实例区分。后续可将 `nginx.yml` 扩展为
+确认主机上是否存在任一 Nginx 进程，不能逐实例区分。后续可将 `inspect.conf` 扩展为
 `instances` 列表，用稳定的 `instance_id` 配合配置文件、端口、日志路径和可选 master
 PID/process_pattern，按“主机 → 实例 → 指标”独立采集；详见
 `docs/specs/nginx-middleware.md`。
