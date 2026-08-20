@@ -945,6 +945,9 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "elasticsearch_seed_hosts": [],
     "elasticsearch_system_user": [],
     "elasticsearch_auth_file": [],
+    "elasticsearch_api_user": [],
+    "elasticsearch_api_password": [],
+    "elasticsearch_cacert": [],
     "elasticsearch_cert": [],
     "elasticsearch_snapshot_repo": [],
     "elasticsearch_whitelist": [],
@@ -1131,8 +1134,11 @@ def load_keepalived_config(path: Optional[Union[str, Path]] = None) -> Dict[str,
 def load_elasticsearch_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """读取 Elasticsearch 路径、API、基线和白名单配置。
 
-    ``elasticsearch_auth_file`` 只表示目标主机上的 curl netrc 文件路径，
-    不把用户名/密码写入 inspect.conf、命令行、事实源或报表。
+    ``elasticsearch_api_user``/``elasticsearch_api_password`` 是 Elasticsearch
+    HTTP API 的认证参数，与 Ansible SSH 账号密码完全分离。密码只允许存在于
+    目标环境的私有 inspect.conf，不会被写入事实源、报表或指标 command 文本。
+    ``elasticsearch_cacert`` 是 curl ``--cacert`` 的候选证书路径；
+    ``elasticsearch_cert`` 继续用于证书有效期检查，并可作为 CA 路径兜底。
     """
     data = load_inspect_conf(path)
     return {key: list(data.get(key, [])) for key in (
@@ -1141,7 +1147,9 @@ def load_elasticsearch_config(path: Optional[Union[str, Path]] = None) -> Dict[s
         "elasticsearch_endpoint", "elasticsearch_http_port",
         "elasticsearch_transport_port", "elasticsearch_version",
         "elasticsearch_expected_nodes", "elasticsearch_seed_hosts",
-        "elasticsearch_system_user", "elasticsearch_auth_file", "elasticsearch_cert",
+        "elasticsearch_system_user", "elasticsearch_auth_file",
+        "elasticsearch_api_user", "elasticsearch_api_password",
+        "elasticsearch_cacert", "elasticsearch_cert",
         "elasticsearch_snapshot_repo",
     )} | {"whitelist": list(data.get("elasticsearch_whitelist", []))}
 

@@ -157,8 +157,10 @@ bash inspect.sh -H inspection --keepalived
 `inspect/modules/elasticsearch.py` 按 Elasticsearch 巡检手册 P0/P1 指标表实现 20 个指标，
 包括集群健康、节点、分片、Heap/GC、线程池、动态设置、发现配置、索引、慢日志、安全、证书、
 快照和系统参数。路径优先从运行中的 JVM `-Des.path.*` 与配置文件发现，`inspect.conf` 的
-`elasticsearch_*` 只作兜底；白名单和未运行主机语义与 Nginx/Keepalived 一致。API 认证使用目标主机
-的 curl netrc 文件路径，不在项目配置、事实源或报表中保存密码。Excel 输出独立的 `elasticsearch`
+`elasticsearch_*` 只作兜底；白名单和未运行主机语义与 Nginx/Keepalived 一致。API 认证可使用私有
+`inspect.conf` 的 `elasticsearch_api_user`、`elasticsearch_api_password` 和
+`elasticsearch_cacert`，也可使用目标主机 curl netrc 文件。密码只通过 Ansible 任务环境使用，
+不进入指标 command、事实源或报表；GitHub 模板只保留 `CHANGE_ME` 占位符。Excel 输出独立的 `elasticsearch`
 Sheet，HTML 筛选/分组按 `local.elasticsearch.*` 自动适配。
 
 ```bash

@@ -127,6 +127,10 @@ _PERMISSION_PATTERNS = (
 _SAFE_WORD = re.compile(r"^[A-Za-z0-9_./:@%+,\- ]+$")
 _SAFE_UNIT = re.compile(r"^[A-Za-z0-9_@.\-]+$")
 _SAFE_PATH = re.compile(r"^/([A-Za-z0-9_./@:+\-*?]*)$")
+# API 密码通过 Ansible task environment 注入，不拼进 shell command。允许现场
+# 常见密码字符，拒绝控制字符与 inspect.conf 的候选分隔符；YAML 单引号转义
+# 负责剩余的展示安全，shell 只读取环境变量。
+_SAFE_ELASTICSEARCH_CREDENTIAL = re.compile(r"^[^\x00-\x1f\x7f|]+$")
 
 # 默认运行期目录（<仓库根>/.runtime，TD §3；与 inventory.py 同名约定，
 # 不导入 inventory 以保持 TD §4 依赖方向：ansible_runner → probe/metrics）
@@ -227,6 +231,10 @@ class CommandSpec:
     # it, and validate_command_specs still enforces the metric/timeout/become
     # registry boundary.
     trusted_generated_shell: bool = False
+    # Private values for Ansible task environment.  This is intentionally not
+    # part of the metric command: API passwords must not enter command text,
+    # callback evidence, facts, or reports.
+    task_environment: Dict[str, str] = field(default_factory=dict)
 
 
 # 每指标：命令模板（TD §5.2 数据源列逐字转写，{…} 为 profile 占位）、
@@ -719,7 +727,7 @@ def _elasticsearch_candidates(profile: Dict[str, Any], key: str) -> List[str]:
         elif key in {
             "elasticsearch_bin", "elasticsearch_conf", "elasticsearch_log",
             "elasticsearch_gc_log", "elasticsearch_data", "elasticsearch_backup",
-            "elasticsearch_auth_file", "elasticsearch_cert",
+            "elasticsearch_auth_file", "elasticsearch_cacert", "elasticsearch_cert",
         }:
             if not _SAFE_PATH.fullmatch(item):
                 raise CommandConfigError(f"inspect.conf {key} 路径非法: {item!r}")
@@ -729,6 +737,11 @@ def _elasticsearch_candidates(profile: Dict[str, Any], key: str) -> List[str]:
         elif key in {"elasticsearch_system_user", "elasticsearch_snapshot_repo"}:
             if not re.fullmatch(r"[A-Za-z0-9_.@+-]+", item):
                 raise CommandConfigError(f"inspect.conf {key} 值非法: {item!r}")
+        elif key in {"elasticsearch_api_user", "elasticsearch_api_password"}:
+            if not _SAFE_ELASTICSEARCH_CREDENTIAL.fullmatch(item):
+                raise CommandConfigError(
+                    f"inspect.conf {key} 含控制字符或候选分隔符: {item!r}"
+                )
         elif key == "elasticsearch_version":
             if not re.fullmatch(r"[A-Za-z0-9_.+\-/]+", item):
                 raise CommandConfigError(f"inspect.conf {key} 版本值非法: {item!r}")
@@ -754,7 +767,8 @@ def _is_runtime_elasticsearch_profile(profile: Dict[str, Any]) -> bool:
         "elasticsearch_transport_port", "elasticsearch_version",
         "elasticsearch_expected_nodes", "elasticsearch_seed_hosts",
         "elasticsearch_system_user", "elasticsearch_auth_file",
-        "elasticsearch_cert", "elasticsearch_snapshot_repo",
+        "elasticsearch_api_user", "elasticsearch_api_password",
+        "elasticsearch_cacert", "elasticsearch_cert", "elasticsearch_snapshot_repo",
     )
     return any(key in profile for key in keys) and all(
         key not in profile or isinstance(profile.get(key), list) for key in keys
@@ -768,6 +782,9 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
     logs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_log")) or ":"
     gc_logs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_gc_log")) or ":"
     certs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_cert")) or ":"
+    cacerts = _elasticsearch_shell_words(
+        _elasticsearch_candidates(profile, "elasticsearch_cacert")
+    ) or certs or ":"
     endpoints = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_endpoint")) or ":"
     auths = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_auth_file")) or ":"
     http_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_http_port")) or "9200"
@@ -802,14 +819,41 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         "if test -n \"$es_bind_host\"; then es_endpoint=\"https://$es_bind_host:$es_http_port\"; fi",
         f"if test -z \"$es_endpoint\"; then for p in {endpoints}; do es_endpoint=\"$p\"; break; done; fi",
         "if test -z \"$es_endpoint\"; then es_endpoint=\"https://127.0.0.1:$es_http_port\"; fi",
-        "es_auth=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth=\"--netrc-file $p\"; break; fi; done",
+        # The actual user/password are injected as task environment variables;
+        # they never appear in this generated command or in callback evidence.
+        "es_auth_file=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth_file=\"$p\"; break; fi; done",
         "es_cert=\"\"; if test -n \"$es_conf\"; then es_cert=$(grep -Eo '/[^[:space:]]+\\.(crt|pem)' \"$es_conf\" | head -n 1); fi",
         f"if test -z \"$es_cert\"; then for p in {certs}; do if test -f \"$p\"; then es_cert=\"$p\"; break; fi; done; fi",
+        "es_cacert=\"$es_cert\"",
+        f"if test -z \"$es_cacert\"; then for p in {cacerts}; do if test -f \"$p\"; then es_cacert=\"$p\"; break; fi; done; fi",
+        "es_curl_args=()",
+        "if test -n \"${INSPECT_ES_API_USER:-}\" && test -n \"${INSPECT_ES_API_PASSWORD:-}\"; then es_curl_args+=(-u \"${INSPECT_ES_API_USER}:${INSPECT_ES_API_PASSWORD}\"); elif test -n \"$es_auth_file\"; then es_curl_args+=(--netrc-file \"$es_auth_file\"); fi",
+        "if test -n \"$es_cacert\" && test -f \"$es_cacert\"; then es_curl_args+=(--cacert \"$es_cacert\"); else es_curl_args+=(-k); fi",
     ])
 
 
-def _es_curl(path: str) -> str:
-    return f"curl -k -sS --connect-timeout 3 --max-time 10 $es_auth \"$es_endpoint{path}\""
+def _es_curl(path: str, options: str = "") -> str:
+    """Build a curl call using task-local auth/TLS arrays, never literals."""
+    extra = f" {options}" if options else ""
+    return (
+        f"curl -sS --connect-timeout 3 --max-time 10 "
+        f"\"${{es_curl_args[@]}}\"{extra} \"$es_endpoint{path}\""
+    )
+
+
+def _elasticsearch_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
+    """Return private ES API credentials for Ansible task environment only."""
+    users = _elasticsearch_candidates(profile, "elasticsearch_api_user")
+    passwords = _elasticsearch_candidates(profile, "elasticsearch_api_password")
+    if not users or not passwords:
+        return {}
+    # CHANGE_ME is the tracked public template placeholder, not a credential.
+    if passwords[0].strip().upper() in {"CHANGE_ME", "REPLACE_ME", "请填写"}:
+        return {}
+    return {
+        "INSPECT_ES_API_USER": users[0],
+        "INSPECT_ES_API_PASSWORD": passwords[0],
+    }
 
 
 def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
@@ -853,7 +897,7 @@ def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any])
         repos = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_snapshot_repo")) or ""
         repo = repos.split()[0] if repos else ""
         status = " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
-        verify = f"curl -k -sS --connect-timeout 3 --max-time 10 $es_auth -X POST \"$es_endpoint/{repo}/_verify?pretty\"{status}"
+        verify = _es_curl(f"/{repo}/_verify?pretty", "-X POST") + status
         return prefix + f"; if test -z \"$es_endpoint\" || test -z \"{repos}\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND; else " + _es_curl("/_snapshot/_all?pretty") + status + "; " + verify + "; fi"
     if metric_id == "local.elasticsearch.system.parameters":
         return prefix + "; printf 'ES_MAX_MAP_COUNT=%s\\n' \"$(cat /proc/sys/vm/max_map_count 2>/dev/null)\"; free -m; if test -n \"$es_pid\" && test -r \"/proc/$es_pid/limits\"; then printf 'ES_ULIMIT_NOFILE=%s\\n' \"$(sed -nE 's/^Max open files[[:space:]]+([0-9]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; printf 'ES_ULIMIT_NPROC=%s\\n' \"$(sed -nE 's/^Max processes[[:space:]]+([0-9]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; printf 'ES_ULIMIT_MEMLOCK=%s\\n' \"$(sed -nE 's/^Max locked memory[[:space:]]+([^[:space:]]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; else printf 'ES_ULIMIT_NOFILE=\\nES_ULIMIT_NPROC=\\nES_ULIMIT_MEMLOCK=\\n'; fi"
@@ -1142,6 +1186,7 @@ def build_metric_command_specs(
                     source_anchor=entry["anchor"],
                     allowed_binaries=_ELASTICSEARCH_GENERATED_ALLOWED_BINARIES,
                     trusted_generated_shell=True,
+                    task_environment=_elasticsearch_task_environment(profile),
                 )
             )
             continue
@@ -1424,6 +1469,10 @@ def generate_playbook(
             f"      ansible.builtin.raw: '{_yaml_single_quote(raw_cmd)}'"
         )
         lines.append(f"      become: {str(spec.become).lower()}")
+        if spec.task_environment:
+            lines.append("      environment:")
+            for key, value in sorted(spec.task_environment.items()):
+                lines.append(f"        {key}: '{_yaml_single_quote(value)}'")
         lines.append(f"      register: inspect_metric_{idx}")
         lines.append("      ignore_errors: true")
     lines.append("")
