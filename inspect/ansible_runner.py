@@ -77,10 +77,6 @@ ANSIBLE_SSH_COMMON_ARGS = "-o StrictHostKeyChecking=accept-new"
 REAL_PROCESS_TIMEOUT_GRACE_SEC = 30
 MAX_CAPTURED_ERROR_CHARS = 1200
 
-# G0 真实路径的目标范围：只允许本次明确授权的两台 VM；本机/其他地址
-# 仍可通过 fixture 或后续另行批准的执行合同使用，但不能借此真实连接。
-REAL_ALLOWED_TARGETS = frozenset({"192.168.0.10", "192.168.0.101"})
-
 # 超时（AE §7 / TD §5.1-5.2）：probe 15s；指标 10s（日志类 15s）；
 # 单主机总时长上限 300s
 PROBE_TIMEOUT_SEC = probe_mod.PROBE_TIMEOUT_SEC
@@ -2084,18 +2080,6 @@ def _cleanup_plan_files(plan: RunPlan) -> List[str]:
             failures.append(path.name or "runtime-file")
     return failures
 
-def _validate_real_targets(plan: RunPlan) -> None:
-    """校验 G0 真实执行只能触达已授权的两台 VM。"""
-    targets = {str(getattr(host, "ip", "")) for host in plan.hosts}
-    invalid = sorted(targets - REAL_ALLOWED_TARGETS)
-    if not targets or invalid:
-        shown = ", ".join(invalid) if invalid else "<empty>"
-        raise RealExecutionError(
-            "真实执行目标不在 G0 授权范围（仅允许 192.168.0.10 和 "
-            f"192.168.0.101），已拒绝: {shown}"
-        )
-
-
 def _validate_local_selection(plan: RunPlan) -> None:
     """校验真实 local 模式只执行生成的 localhost inventory。"""
     if plan.selection_kind != "local":
@@ -2160,7 +2144,6 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
             remote_user = None
             ask_pass = False
         else:
-            _validate_real_targets(plan)
             remote_user = _validate_remote_user(os.environ.get(REMOTE_USER_ENV_VAR))
             # A user-provided inventory is allowed to carry ansible_user,
             # ansible_password, SSH key, or SSH-config based authentication.
@@ -2507,7 +2490,6 @@ __all__ = [
     "REMOTE_USER_ENV_VAR",
     "ASK_PASS_ENV_VAR",
     "LOCAL_REAL_ENV_VAR",
-    "REAL_ALLOWED_TARGETS",
     "RealExecutionError",
     "FIXTURE_ENV_VAR",
     "HOST_TIMEOUT_SEC",

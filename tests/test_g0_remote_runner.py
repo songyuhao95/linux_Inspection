@@ -246,17 +246,6 @@ def test_local_real_execution_rejects_remote_credentials(tmp_path, monkeypatch):
         ar._execute_real(plan)
 
 
-def test_local_gate_does_not_bypass_remote_allowlist(tmp_path, monkeypatch):
-    plan = _plan(tmp_path)
-    monkeypatch.setenv(ar.REAL_EXEC_ENV_VAR, "1")
-    monkeypatch.setenv(ar.LOCAL_REAL_ENV_VAR, "1")
-    monkeypatch.setenv(ar.REMOTE_USER_ENV_VAR, "aqwh")
-    monkeypatch.setenv("INSPECT_ALLOW_WINDOWS_REAL", "1")
-    plan.hosts = [type("BadHost", (), {"name": "other", "ip": "127.0.0.1"})()]
-    with pytest.raises(ar.RealExecutionError, match="授权范围"):
-        ar._execute_real(plan)
-
-
 def test_local_real_execution_rejects_forged_local_inventory(tmp_path, monkeypatch):
     plan = _local_plan(tmp_path)
     plan.inventory_file.write_text("[all]\nlocalhost\n", encoding="utf-8")
@@ -265,20 +254,6 @@ def test_local_real_execution_rejects_forged_local_inventory(tmp_path, monkeypat
     monkeypatch.setenv("INSPECT_ALLOW_WINDOWS_REAL", "1")
     with pytest.raises(ar.RealExecutionError, match="ansible_connection=local"):
         ar._execute_real(plan)
-
-
-    class BadHost:
-        name = "other"
-        ip = "192.168.0.200"
-
-    plan = _plan(tmp_path)
-    plan.hosts = [BadHost()]
-    monkeypatch.setenv(ar.REAL_EXEC_ENV_VAR, "1")
-    monkeypatch.setenv(ar.REMOTE_USER_ENV_VAR, "aqwh")
-    monkeypatch.setenv("INSPECT_ALLOW_WINDOWS_REAL", "1")
-    with pytest.raises(ar.RealExecutionError, match="授权范围"):
-        ar._execute_real(plan)
-
 
 def test_real_execution_requires_explicit_remote_user(tmp_path, monkeypatch):
     monkeypatch.setenv(ar.REAL_EXEC_ENV_VAR, "1")
@@ -293,6 +268,8 @@ def test_inventory_configured_auth_does_not_require_remote_env(
 ):
     plan = _plan(tmp_path)
     plan.selection_kind = "inventory"
+    # Inventory controls the remote target scope; there is no project IP whitelist.
+    plan.hosts[0].ip = "192.168.0.102"
     payload = json.dumps(_payload(), ensure_ascii=False)
     seen = {}
 

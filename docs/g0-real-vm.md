@@ -1,14 +1,10 @@
-# G0 两台虚拟机只读验证与使用说明
+# G0 真实远程只读验证与使用说明
 
 ## 1. 适用范围
 
-本说明用于在控制端 WSL/Linux 上，对已明确授权的两台虚拟机执行只读基础巡检：
+本说明用于在控制端 WSL/Linux 上，对 inventory 中由操作者确认并授权的目标主机执行只读基础巡检。远程账号和认证由项目 inventory 的本地配置提供。
 
-- `node01`：`192.168.0.10`
-- `kylin01`：`192.168.0.101`
-- 远程账号和认证：由项目 `inventory/hosts.ini` 的本地配置提供
-
-除上述两台主机外，不应把本说明中的真实执行门禁用于其他地址。该路径只执行项目 allow-list 中的只读命令，不执行安装、删除、停止服务、写入配置或修改业务数据的操作。
+项目不再内置固定的 IP 白名单。真实执行的目标范围由 `-H/--hosts`、`-i/--inventory` 以及 inventory 内容共同决定，执行前必须由操作者确认目标范围。该路径只执行项目 allow-list 中的只读命令，不执行安装、删除、停止服务、写入配置或修改业务数据的操作。
 
 ## 2. 控制端前置条件
 
@@ -28,7 +24,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=runtime/ansible/site-packages \
 
 1. `runtime/manifest.json` 为 `status=built`，Python/Ansible 哈希已校验；
 2. 项目 runtime 中的 `ansible.cli.playbook` 能由 `runtime/bin/python3.12` 导入；
-3. 控制端可以通过 SSH 访问两台主机；
+3. 控制端可以通过 SSH 访问 inventory 中的目标主机；
 4. 账号具备只读命令权限；
 5. 初次 smoke 不启用 `become`；
 6. 目标端具备 `/bin/bash` 和探测所需命令；
@@ -40,7 +36,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=runtime/ansible/site-packages \
 
 对于“在 VM 自身运行脚本”的单独部署流程，不使用 Windows/WSL 作为 Ansible 控制端。每台 VM 先部署到 `/data/inspect`，确认项目内 `runtime/bin/python3.12` 与 bundled Ansible 已通过哈希和导入校验，然后以本机作为控制端运行 `--local`。不得安装或选择系统 Ansible；该流程需要额外的 `INSPECT_ENABLE_LOCAL_REAL=1` 门禁，详见 [local-vm-deploy.md](local-vm-deploy.md)。
 
-真实远程分支使用项目 runtime 和有效的本地 inventory（优先 `inventory/hosts.local.ini`，其次 `inventory/hosts.ini`）；远程分支仍会拒绝未授权目标。本机 `--local` 分支不经过远程 Ansible，只接受生成的 `localhost ansible_connection=local` inventory；它不接受远程账号或 `INSPECT_ASK_PASS`。
+真实远程分支使用项目 runtime 和有效的本地 inventory（优先 `inventory/hosts.local.ini`，其次 `inventory/hosts.ini`）；程序不按 IP 硬编码限制目标，目标范围由 inventory 和 `-H/--hosts` 选择决定。本机 `--local` 分支不经过远程 Ansible，只接受生成的 `localhost ansible_connection=local` inventory；它不接受远程账号或 `INSPECT_ASK_PASS`。
 
 ## 3. 凭据安全
 
@@ -72,7 +68,7 @@ bash inspect.sh --list-metrics
 bash inspect.sh --info local.cpu.load_1m
 ```
 
-确认生成的 playbook 使用 `gather_facts: false`、`serial: 1`、`raw` 与 `/bin/bash -lc`，并且目标范围只有本次授权的两台主机。真实 smoke 初期建议只启用无 profile、无 become 的共同指标；端口和日志指标需要额外的权限与路径确认。
+确认生成的 playbook 使用 `gather_facts: false`、`serial: 1`、`raw` 与 `/bin/bash -lc`，并且目标范围与本次已确认的授权范围一致。真实 smoke 初期建议只启用无 profile、无 become 的共同指标；端口和日志指标需要额外的权限与路径确认。
 
 ### 4.2 单主机 smoke
 
@@ -141,7 +137,7 @@ fixture 模式只读取预录文件，不连接任何主机：
 INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local
 ```
 
-真实模式必须满足项目 runtime 校验和目标授权；默认认证来源是项目 inventory。只有在没有默认 inventory、需要兼容旧临时 inventory 路径时，才使用 `INSPECT_REMOTE_USER`，密码提示另加 `INSPECT_ASK_PASS=1`。未满足真实执行门禁时，程序返回 10 并明确说明真实 Ansible 未启用；这不是成功的 VM 测试。
+真实模式必须满足项目 runtime 校验和操作者对目标范围的授权确认；默认认证来源是项目 inventory。只有在没有默认 inventory、需要兼容旧临时 inventory 路径时，才使用 `INSPECT_REMOTE_USER`，密码提示另加 `INSPECT_ASK_PASS=1`。未满足真实执行门禁时，程序返回 10 并明确说明真实 Ansible 未启用；这不是成功的 VM 测试。
 
 ## 8. UNKNOWN 与故障判读
 
@@ -158,7 +154,7 @@ INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local
 
 - 控制端不是已审核的 WSL/Linux 环境；
 - 项目 runtime 缺失、Python/Ansible 导入失败或 callback 不是结构化 JSON；
-- 目标范围不能证明只有两台授权主机；
+- 目标范围与操作者授权范围不一致或无法证明；
 - 需要关闭 host-key 检查、写入密码文件或把密码放入 argv；
 - 生成命令出现写操作、网络探测、安装、删除或服务变更；
 - 目标 bash、SSH、账号权限或 become 行为未确认；

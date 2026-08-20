@@ -13,7 +13,7 @@
 | 真实 runner 模拟测试 | 通过 | `tests/test_g0_remote_runner.py` 与 `tests/test_ansible_runner.py` 全部通过 |
 | 全量 pytest | 通过 | `python -m pytest tests/ -q`，无失败；既有依赖缺失相关用例按测试标记跳过 |
 | fixture 端到端 | 通过 | `INSPECT_FIXTURE_DIR=tests/fixtures/e2e bash inspect.sh --local --html`；零连接、JSON 与 HTML 生成成功 |
-| 目标范围门禁 | 已实现并有测试 | 真实路径只接受两个授权 IP；其他地址在调用 Ansible 前拒绝 |
+| 目标范围控制 | 已移除固定 IP 白名单 | 真实路径使用 `-H/--hosts`、`-i/--inventory` 和 inventory 内容确定目标；执行前由操作者确认授权范围 |
 | 凭据门禁 | 已实现并有测试 | 真实路径要求显式远程账号；密码只允许 Ansible `--ask-pass` 交互输入，不进入 argv/结果 |
 | 运行期清理 | 已实现并有测试 | 真实路径在成功、解析失败或控制端异常后清理本次生成的临时文件 |
 
