@@ -1104,7 +1104,7 @@ def parse_elasticsearch_service_port(output: str) -> Dict[str, Any]:
     listen_lines = [line for line in lines if line.strip().startswith("LISTEN")]
     ports = sorted({int(x) for x in re.findall(r":(\d+)(?=\s|$)", "\n".join(listen_lines)) if int(x) > 0})
     expected_match = re.search(
-        r"^INSPECT_ELASTICSEARCH_EXPECTED_PORTS=([0-9]+),([0-9]+)$",
+        r"^INSPECT_ELASTICSEARCH_EXPECTED_PORTS=([0-9]+),([0-9]+)\r?$",
         output or "",
         re.MULTILINE,
     )
