@@ -138,6 +138,12 @@ class TestModuleRegistration:
         spec = next(s for s in specs if s.metric_id == "local.nginx.config.valid")
         assert "-e /opt/nginx/logs/error.log" in spec.command
 
+    def test_process_discovery_anchors_ps_comm_and_args(self):
+        spec = next(s for s in _nginx_specs() if s.metric_id == "local.nginx.process.present")
+        assert "ps -eo pid=,comm=,args=" in spec.command
+        assert "[[:space:]]+nginx[[:space:]]+nginx: (master|worker) process" in spec.command
+        assert "pgrep -fa" not in spec.command
+
 
 # --------------------------------------------------------------------------
 # 2. 进程发现选择（select_nginx_metrics）

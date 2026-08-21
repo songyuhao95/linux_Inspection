@@ -14,7 +14,8 @@
 
 其余边界：
 
-- 按目标顺序 `serial: 1` 执行，避免并发风暴并保证巡检顺序可复现。
+- 默认按目标顺序 `serial: 1` 执行；远程命令可通过 `--parallel 2` 或
+  `--parallel 3` 明确启用最多 2/3 台主机并行，参数上限为 3，避免并发风暴。
 - 普通账号 + **最小化 become**：仅对需要提升权限的单条命令使用 become，权限不足的指标记 `UNKNOWN` 并继续其余指标与主机。
 - SSH 仅作 Ansible transport 与诊断；不维护第二套采集逻辑。
 - 未验证的受控端命令能力在 G0 预检/能力探测时记录为待验证项。
@@ -34,7 +35,7 @@
 ```
 inspect.sh
   └─ Ansible（控制端）
-       └─ per-host（serial: 1）
+       └─ per-host（serial: 1..3；默认 1）
             ├─ capability probe（bash 可用性、/proc、free/df/ss 可用性、权限）
             ├─ 模块 bundle 采集（raw + /bin/bash -lc 的只读命令）
             ├─ normalize（控制端本地完成）
@@ -42,13 +43,14 @@ inspect.sh
 ```
 
 - `gather_facts: false`：不在收集 facts 上花费时间与权限。
-- `serial: 1`：play 级配置，逐台依次执行。
+- `serial: 1..3`：play 级配置，默认逐台依次执行；`--parallel N` 仅远程模式
+  改变该值，N 只能为 1、2、3。
 - probe 是主机级连接闸门：若 probe 已报告 SSH 不可达，后续指标任务通过
   `when: inspect_probe is not unreachable` 在控制端跳过，不会为每个指标重复等待一次
   SSH 超时；该主机最终只产生一个主机级 `CONNECTION_FAILED`，无业务结论。
 - 远程指标不会再为每个指标生成一个 Ansible 任务。可执行指标按
   `linux`、`nginx`、`keepalived`、`elasticsearch` 模块打包；不同 `become` 权限或
-  私有环境值会拆成独立 bundle。每台主机仍按 `serial: 1` 执行，但一个模块通常只
+  私有环境值会拆成独立 bundle。每台主机仍按 `serial: 1..3` 执行，但一个模块通常只
   产生一个 SSH/raw 远程任务。
 - bundle 内部为每个指标保留 `timeout N /bin/bash -lc '…'`，并输出受控的
   `INSPECT_METRIC_BEGIN/END` 标记。控制端 callback 按 `metric_id` 拆分回既有单指标
@@ -98,7 +100,7 @@ inspect.sh
   独立的执行上限，避免多个指标串行执行时把每条命令的 timeout 错当成整次巡检上限。
 - SSH 通过 `ConnectTimeout=<timeout>` 和 Ansible connection timeout 控制；curl 同时
   设置 `--connect-timeout <timeout>` 与 `--max-time <timeout>`。
-- 超时/连接失败不自动重试（serial:1 顺序下重复执行意义有限）；bundle 内某个指标超时后记录该指标 `UNKNOWN`，继续执行同 bundle 后续指标。G0 预检验证 ansible 连接参数（ssh 超时、ping 间隔）后确定。
+- 超时/连接失败不自动重试；bundle 内某个指标超时后记录该指标 `UNKNOWN`，继续执行同 bundle 后续指标。G0 预检验证 ansible 连接参数（ssh 超时、ping 间隔）后确定。
 
 ## 8. 未验证项（G0 预检清单）
 

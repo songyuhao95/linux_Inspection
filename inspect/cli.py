@@ -122,6 +122,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--local", action="store_true", help="显式巡检本机（默认）")
     parser.add_argument(
+        "--parallel", type=int, default=1, metavar="N",
+        help="远程最多同时巡检 N 台主机（1-3，默认 1；本地模式不适用）",
+    )
+    parser.add_argument(
         "--nginx", action="store_true",
         help="只巡检 Nginx 中间件（默认巡检全部已注册中间件）",
     )
@@ -165,6 +169,10 @@ def validate_args(ns: argparse.Namespace) -> List[str]:
         errors.append("--limit 仅可与 --inventory 一起使用")
     if ns.all and not ns.inventory:
         errors.append("--all 仅可与 --inventory 一起使用")
+    if not 1 <= ns.parallel <= 3:
+        errors.append("--parallel 只允许 1、2、3（远程最多同时巡检 3 台主机）")
+    if ns.local and ns.parallel != 1:
+        errors.append("--parallel 仅用于远程巡检，不能与 --local 搭配")
     middleware_flags = [
         flag for flag in (getattr(ns, "nginx", False), getattr(ns, "keepalived", False),
                           getattr(ns, "elasticsearch", False)) if flag
@@ -175,6 +183,7 @@ def validate_args(ns: argparse.Namespace) -> List[str]:
     if query and (
         ns.hosts or ns.inventory or ns.local or ns.limit or ns.all
         or ns.excel is not None or ns.html is not None or ns.fail_on
+        or ns.parallel != 1
     ):
         errors.append("--list-metrics/--info 为只读查询，不与其他巡检/报表参数共用")
     if ns.list_metrics and ns.info:
@@ -331,6 +340,7 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
                 keepalived_whitelist=keepalived_whitelist,
                 elasticsearch_whitelist=elasticsearch_whitelist,
                 timeout_sec=timeout_sec,
+                parallel=getattr(ns, "parallel", 1),
             )
     except (
         local_runner.LocalExecutionError,

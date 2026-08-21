@@ -10,7 +10,7 @@ Nginx 中间件模块是第一个中间件适配器，指标按《安徽农金Ng
 
 | metric_id | 名称 | 命令 | 文档来源 |
 | --- | --- | --- | --- |
-| `local.nginx.process.present` | Nginx 进程存在性 | `pgrep -fa '[n]ginx: (master|worker) process'`（`[n]` 防止 shell 自匹配） | P0「Nginx本节点服务」 |
+| `local.nginx.process.present` | Nginx 进程存在性 | `ps -eo pid=,comm=,args= \| grep -E '^[[:space:]]*[0-9]+[[:space:]]+nginx[[:space:]]+nginx: (master|worker) process'`；同时锚定 `comm=nginx` 和真实 master/worker 参数，命令回显不算运行 | P0「Nginx本节点服务」 |
 | `local.nginx.version` | Nginx 版本 | 从运行中的 master 进程解析可执行文件，执行 `nginx -v`；与 `inspect.conf` 的 `nginx_version` 比较 | P0「Nginx版本」 |
 | `local.nginx.config.valid` | 配置有效性 | 自动从 master 进程解析 `-c/-e`，无可用值时按 `inspect.conf` 候选，执行 `nginx -t` | P0「Nginx配置有效性」 |
 | `local.nginx.port.listening` | 端口监听与本地访问 | 从实际配置 `listen` 指令提取端口；无端口时使用 `inspect.conf` 的 `nginx_port`，再执行 `ss` + `curl` | P0「Nginx端口与本地访问」 |

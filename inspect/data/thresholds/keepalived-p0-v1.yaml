@@ -10,7 +10,7 @@ metrics:
     name: Keepalived 进程存在性
     source_anchor: "P0 Keepalived本节点服务：主进程和 VRRP 子进程存在；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
-      OK: { rule: "pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]' 至少发现一条真实 Keepalived 进程；命令行中出现参数文本但没有进程不算运行", rule_id: "keepalived-p0-v1.keepalived.process.present.ok", reason: null, note: null }
+      OK: { rule: "执行 ps -eo pid=,comm=,args= 并筛选 comm=keepalived，至少发现一条真实 Keepalived 进程；仅命令行中出现 keepalived 参数文本不算运行", rule_id: "keepalived-p0-v1.keepalived.process.present.ok", reason: null, note: null }
       WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
       CRIT: { rule: "未发现 Keepalived 主进程/VRRP 子进程；仅对 keepalived_whitelist 白名单内主机给出 CRIT，白名单外主机跳过该中间件", rule_id: "keepalived-p0-v1.keepalived.process.present.crit", reason: null, note: null }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无权限或 pgrep 不可用" }

@@ -6,7 +6,7 @@ source_doc: "安徽农金Elasticsearch运维巡检手册v1.0.docx（P0/P1 指标
 metrics:
   local.elasticsearch.process.present:
     name: Elasticsearch 进程存在性
-    source_anchor: "P0 服务/进程：pgrep -fa Elasticsearch；运行实例进程发现"
+    source_anchor: "P0 服务/进程：ps -eo pid=,comm=,args=；comm=java 且 args 含 org.elasticsearch.bootstrap.Elasticsearch，或 comm=elasticsearch；运行实例进程发现"
     boundaries:
       OK: { rule: "发现真实 Elasticsearch JVM/启动进程", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.process.present.ok", reason: null, note: null }
       WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }

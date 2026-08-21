@@ -230,7 +230,8 @@ bash inspect.sh -H <host-or-ip-list>
 CLI 会将它同时用于 Ansible SSH 连接、能力探测、每条 shell/raw/script 命令以及 curl
 的 `--connect-timeout`/`--max-time`；超时结果统一为 `UNKNOWN`，不会默认通过。
 主机能力探测是连接闸门：不可达主机不会对后续每个指标重复建立 SSH 连接，直接跳过指标任务并报告主机级技术失败。
-远程可执行指标按 Linux 基础、Nginx、Keepalived、Elasticsearch 模块打包：每台主机每个模块通常只生成一个 Ansible `raw`/SSH 任务；bundle 内仍为每个指标保留独立 timeout、返回码和 `metric_id` 标记，控制端拆分后继续使用原有单指标 JSON、错误分类和报表逻辑。不同 `become` 权限会拆成独立 bundle，避免扩大特权范围。这样减少远程任务启动开销，但不改变 `serial: 1` 的主机顺序。
+远程可执行指标按 Linux 基础、Nginx、Keepalived、Elasticsearch 模块打包：每台主机每个模块通常只生成一个 Ansible `raw`/SSH 任务；bundle 内仍为每个指标保留独立 timeout、返回码和 `metric_id` 标记，控制端拆分后继续使用原有单指标 JSON、错误分类和报表逻辑。不同 `become` 权限会拆成独立 bundle，避免扩大特权范围。默认 `serial: 1`；远程场景可使用 `--parallel 3`，最多同时巡检 3 台主机，`--parallel 1` 可恢复串行。
+Nginx、Keepalived、Elasticsearch 的进程发现使用 `ps` 的 `pid/comm/args` 结构化列锚定真实进程名，避免 SSH/Ansible 回显的巡检命令文本被误判为中间件正在运行。
 Elasticsearch、Nginx 和 Keepalived 的 curl 请求都在目标主机执行，并优先使用各自运行
 配置中的监听地址/VIP；不会访问控制端或 inventory 中的其他主机。解析不到具体监听地址
 时不伪造请求目标，相关指标为 `UNKNOWN`。

@@ -16,9 +16,9 @@ source_doc: "安徽农金Nginx、Keepalived运维巡检手册v1.0.docx（P0/P1 �
 metrics:
   local.nginx.process.present:
     name: Nginx 进程存在性
-    source_anchor: "P0 指标表「Nginx本节点服务」行（pgrep -fa '[n]ginx: (master|worker) process'；[n] 写法用于避免匹配执行该命令的 shell，只认真实 Nginx master/worker 进程）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    source_anchor: "P0 指标表「Nginx本节点服务」行（ps -eo pid=,comm=,args= 后要求 comm=nginx 且 args 含 nginx: master/worker process；命令文本回显不算运行，只认真实进程）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
-      OK: { rule: "执行 pgrep -fa '[n]ginx: (master|worker) process'，输出至少一行真实 Nginx master 或 worker 进程（仅命令行中出现 nginx 路径不算运行）", rule_id: "nginx-p0-v1.nginx.process.present.ok", reason: null, note: null }
+      OK: { rule: "执行 ps -eo pid=,comm=,args= 并筛选 comm=nginx 且 args 含 nginx: master/worker process，至少发现一条真实 Nginx 进程；仅命令行中出现 nginx 路径或巡检命令文本不算运行", rule_id: "nginx-p0-v1.nginx.process.present.ok", reason: null, note: null }
       WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
       CRIT: { rule: "没有发现匹配的 Nginx 进程，即 Nginx 未运行或已故障；仅对 nginx 白名单内主机给出此 CRIT，白名单外主机跳过 Nginx 指标", rule_id: "nginx-p0-v1.nginx.process.present.crit", reason: null, note: null }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无权限或 pgrep 不可用" }

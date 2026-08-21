@@ -250,13 +250,13 @@ NGINX_METRICS = [
     {
         "metric_id": "local.nginx.process.present",
         "name": "Nginx 进程存在性",
-        "command": "pgrep -fa '[n]ginx: (master|worker) process'",
+        "command": "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+nginx[[:space:]]+nginx: (master|worker) process'",
         "timeout_sec": 10,
         "parser": "parse_process_present",
         "unit": "布尔（present/absent）+ 匹配行数",
         "source_anchor": (
-            "P0 指标表「Nginx本节点服务」行（pgrep -fa '[n]ginx: (master|worker) "
-            "process'；使用 [n] 避免匹配承载该命令的 shell）；" + _NGINX_ANCHOR
+            "P0 指标表「Nginx本节点服务」行（ps 的 comm 列必须为 nginx，args 列必须为 "
+            "nginx master/worker process；命令文本中出现 nginx 不算运行）；" + _NGINX_ANCHOR
         ),
         "threshold_layer": "文档基线（进程存在=正常；未运行=CRIT）+ nginx 白名单（白名单内未运行 → CRIT 未运行）",
         "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.process.present"],
@@ -444,11 +444,11 @@ KEEPALIVED_METRICS = [
     {
         "metric_id": "local.keepalived.process.present",
         "name": "Keepalived 进程存在性",
-        "command": "pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]'",
+        "command": "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+keepalived[[:space:]]'",
         "timeout_sec": 10,
         "parser": "parse_process_present",
         "unit": "布尔（present/absent）+ 匹配行数",
-        "source_anchor": "P0 指标表「Keepalived本节点服务」行（pgrep -fa 'keepalived.*keepalived.conf'）；" + _KEEPALIVED_ANCHOR,
+        "source_anchor": "P0 指标表「Keepalived本节点服务」行（ps 的 comm 列必须为 keepalived；命令文本中出现 keepalived 不算运行）；" + _KEEPALIVED_ANCHOR,
         "threshold_layer": "文档基线（Keepalived 主进程/VRRP 子进程存在=正常；未运行=CRIT）+ keepalived 白名单",
         "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.process.present"],
         "conflicts": [],
@@ -590,7 +590,7 @@ def _es_metric(metric_id, name, command, parser, unit, baseline, unknown, *, tim
 
 ELASTICSEARCH_METRICS = [
     _es_metric("local.elasticsearch.process.present", "Elasticsearch 进程存在性",
-                "pgrep -fa '(^|[[:space:]/])elasticsearch[[:space:]]|org\\.elasticsearch\\.bootstrap\\.Elasticsearch'",
+                 "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+(java[[:space:]].*org\\.elasticsearch\\.bootstrap\\.Elasticsearch|elasticsearch[[:space:]])'",
                 "parse_process_present", "布尔（present/absent）+ 匹配行数",
                 "发现运行中的 Elasticsearch JVM/启动脚本 → OK；白名单主机未运行 → CRIT；非白名单主机跳过",
                 "pgrep 不可用或无权限 → UNKNOWN"),

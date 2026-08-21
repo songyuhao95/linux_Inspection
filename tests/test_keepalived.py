@@ -63,7 +63,7 @@ def test_keepalived_process_pattern_does_not_match_cli_flag():
     specs = ar.build_metric_command_specs(
         module_ids=("keepalived",), profile=cfg.load_inspect_conf()
     )
-    pattern = re.search(r"pgrep -fa '([^']+)'", specs[0].command).group(1)
+    pattern = re.search(r"grep -E '([^']+)'", specs[0].command).group(1)
     assert "keepalived[[:space:]]" in pattern
     python_pattern = r"(^|[\s/])keepalived\s"
     assert re.search(python_pattern, "bash inspect.sh --keepalived --html out/report.html") is None

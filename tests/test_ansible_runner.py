@@ -170,6 +170,15 @@ def test_playbook_contract_markers():
     assert pb.count("when: inspect_probe is not unreachable") == len(bundles)
 
 
+def test_playbook_parallel_is_explicit_and_bounded():
+    pb = ar.generate_playbook(_specs(_PROFILE), parallel=3)
+    assert "serial: 3" in pb
+    with pytest.raises(ar.CommandConfigError, match="并发主机数"):
+        ar.generate_playbook(_specs(_PROFILE), parallel=4)
+    with pytest.raises(ar.CommandConfigError, match="并发主机数"):
+        ar.generate_playbook(_specs(_PROFILE), parallel=0)
+
+
 def test_playbook_minimal_become_only_declared_metrics():
     pb = ar.generate_playbook(_specs(_PROFILE))
     bundles = ar._metric_bundle_groups(

@@ -83,6 +83,9 @@ PROBE_TIMEOUT_SEC = probe_mod.PROBE_TIMEOUT_SEC
 METRIC_TIMEOUT_SEC = 10
 LOG_METRIC_TIMEOUT_SEC = 15
 HOST_TIMEOUT_SEC = 300
+DEFAULT_PARALLEL_HOSTS = 1
+MIN_PARALLEL_HOSTS = 1
+MAX_PARALLEL_HOSTS = 3
 MIN_COMMAND_TIMEOUT_SEC = 1
 MAX_COMMAND_TIMEOUT_SEC = 60
 
@@ -244,6 +247,25 @@ class CommandSpec:
     task_environment: Dict[str, str] = field(default_factory=dict)
 
 
+# 进程发现不能只用 pgrep -fa：Ansible raw 在某些 SSH/TTY 组合下会把
+# 远端命令文本回显到进程列表，命令文本中的 ``local.nginx`` 等字符串
+# 会造成自匹配。这里同时锚定 ps 的 comm 列和 args 列，只认真实进程。
+_NGINX_PROCESS_COMMAND = (
+    "ps -eo pid=,comm=,args= | grep -E "
+    "'^[[:space:]]*[0-9]+[[:space:]]+nginx[[:space:]]+nginx: (master|worker) process'"
+)
+_KEEPALIVED_PROCESS_COMMAND = (
+    "ps -eo pid=,comm=,args= | grep -E "
+    "'^[[:space:]]*[0-9]+[[:space:]]+keepalived[[:space:]]'"
+)
+_ELASTICSEARCH_PROCESS_COMMAND = (
+    "ps -eo pid=,comm=,args= | grep -E "
+    "'^[[:space:]]*[0-9]+[[:space:]]+"
+    "(java[[:space:]].*org\\.elasticsearch\\.bootstrap\\.Elasticsearch|"
+    "elasticsearch[[:space:]])'"
+)
+
+
 # 每指标：命令模板（TD §5.2 数据源列逐字转写，{…} 为 profile 占位）、
 # 超时（metrics.py timeout_sec）、become（MR §5 unknown_conditions 中
 # "无权限→UNKNOWN" 的指标才声明最小化 become，AE §5）、所需命令（probe.py）。
@@ -311,11 +333,8 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
     },
     # ---- Nginx 中间件（nginx-p0-v1；安徽农金Nginx、Keepalived运维巡检手册）----
     "local.nginx.process.present": {
-        # The bracket expression prevents pgrep from matching the shell that
-        # contains this command.  Only the actual Nginx master/worker process
-        # names count; a command line mentioning an nginx path is not proof
-        # that Nginx is running.
-        "command": "pgrep -fa '[n]ginx: (master|worker) process'",
+        # ps 的 comm 列必须是 nginx，避免匹配 inspect/Ansible 命令自身。
+        "command": _NGINX_PROCESS_COMMAND,
         "profile_keys": (),
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Nginx本节点服务」行",
@@ -390,7 +409,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
     },
     # ---- Keepalived 中间件（keepalived-p0-v1） ----
     "local.keepalived.process.present": {
-        "command": "pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]'",
+        "command": _KEEPALIVED_PROCESS_COMMAND,
         "profile_keys": (),
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「Keepalived本节点服务」行",
@@ -439,7 +458,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
     },
     # ---- Elasticsearch 中间件（elasticsearch-p0-p1-v1） ----
     "local.elasticsearch.process.present": {
-        "command": "pgrep -fa '(^|[[:space:]/])elasticsearch[[:space:]]|org\\.elasticsearch\\.bootstrap\\.Elasticsearch'",
+        "command": _ELASTICSEARCH_PROCESS_COMMAND,
         "profile_keys": (), "become": False,
         "anchor": "安徽农金Elasticsearch运维巡检手册 P0「服务/进程」行",
     },
@@ -806,7 +825,7 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
     transport_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_transport_port")) or "9300"
     system_users = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_system_user")) or "es"
     return "; ".join([
-        "es_process_line=$(pgrep -fa '(^|[[:space:]/])elasticsearch[[:space:]]|org\\.elasticsearch\\.bootstrap\\.Elasticsearch' | head -n 1)",
+        f"es_process_line=$({_ELASTICSEARCH_PROCESS_COMMAND} | head -n 1)",
         "es_home=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.home=([^[:space:]]+).*/\\1/p')",
         "es_conf_dir=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.conf=([^[:space:]]+).*/\\1/p')",
         "es_bin=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*[[:space:]]([^[:space:]]*\\/bin\\/elasticsearch)([[:space:]]|$).*/\\1/p')",
@@ -956,8 +975,8 @@ def _nginx_discovery_prefix(profile: Dict[str, Any], *, include_dump: bool) -> s
     errors_loop = errors or ":"
     accesses_loop = accesses or ":"
     parts = [
-        # Use the same self-match-safe expression as the process metric.
-        "master_line=$(pgrep -fa '[n]ginx: master process' | head -n 1)",
+        # Use the same comm/args anchored expression as the process metric.
+        f"master_line=$({_NGINX_PROCESS_COMMAND} | grep -E 'nginx: master process' | head -n 1)",
         "nginx_bin=$(printf '%s\\n' \"$master_line\" | sed -nE 's/.*nginx: master process[[:space:]]+([^[:space:]]+).*/\\1/p')",
         "nginx_conf=$(printf '%s\\n' \"$master_line\" | sed -nE 's/.*[[:space:]]-c[[:space:]]*=?[[:space:]]*([^[:space:]]+).*/\\1/p')",
         "nginx_error_log=$(printf '%s\\n' \"$master_line\" | sed -nE 's/.*[[:space:]]-e[[:space:]]*=?[[:space:]]*([^[:space:]]+).*/\\1/p')",
@@ -1041,7 +1060,7 @@ def _keepalived_discovery_prefix(profile: Dict[str, Any], *, include_log: bool =
     confs_loop = confs or ":"
     logs_loop = logs or ":"
     parts = [
-        "process_line=$(pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]' | head -n 1)",
+        f"process_line=$({_KEEPALIVED_PROCESS_COMMAND} | head -n 1)",
         "keepalived_bin=$(printf '%s\\n' \"$process_line\" | sed -nE 's/^[0-9]+[[:space:]]+([^[:space:]]+).*/\\1/p')",
         "keepalived_conf=$(printf '%s\\n' \"$process_line\" | sed -nE 's/.*[[:space:]]-f[[:space:]]*=?[[:space:]]*([^[:space:]]+).*/\\1/p')",
         "if test -n \"$keepalived_bin\" && ! test -x \"$keepalived_bin\"; then keepalived_bin=''; fi",
@@ -1606,11 +1625,12 @@ def generate_playbook(
     specs: Sequence[CommandSpec],
     probe_command: Optional[str] = None,
     timeout_sec: Optional[int] = None,
+    parallel: int = DEFAULT_PARALLEL_HOSTS,
 ) -> str:
     """生成采集 playbook 文本（YAML）。
 
     契约（AE §1-§7 文本断言）：
-      - play 级：hosts: all、gather_facts: false、serial: 1、ignore_unreachable: true；
+      - play 级：hosts: all、gather_facts: false、serial: 1..3、ignore_unreachable: true；
       - 探测任务与按模块/权限分组的 metric-bundle 任务均使用
         ansible.builtin.raw；bundle 内每个指标保留自己的
         `timeout N /bin/bash -lc '…'`（AE §7 超时注入）；
@@ -1628,19 +1648,23 @@ def generate_playbook(
             f"{MIN_COMMAND_TIMEOUT_SEC}-{MAX_COMMAND_TIMEOUT_SEC}s）: "
             f"{collection_timeout_sec}"
         )
+    if not MIN_PARALLEL_HOSTS <= parallel <= MAX_PARALLEL_HOSTS:
+        raise CommandConfigError(
+            f"远程并发主机数超出范围（允许 {MIN_PARALLEL_HOSTS}-{MAX_PARALLEL_HOSTS}）: {parallel}"
+        )
     probe_command = probe_command or probe_mod.build_probe_command(
         timeout_sec=collection_timeout_sec
     )
     lines = [
         "---",
         "# inspect 采集 playbook（T-103 ansible_runner 生成；ansible-execution v1）",
-        "# 契约：gather_facts:false / serial:1 / raw|script + /bin/bash -lc / 最小化 become /",
+        f"# 契约：gather_facts:false / serial:{parallel} / raw|script + /bin/bash -lc / 最小化 become /",
         "#       只读命令 allow-list / 每命令超时注入（由 inspect.conf timeout 统一控制、",
         "#       单主机 300s）/ 无重试（AE §1-§7；超时与连接失败不自动重试）",
         '- name: "inspect collection"',
         "  hosts: all",
         "  gather_facts: false",
-        "  serial: 1",
+        f"  serial: {parallel}",
         "  ignore_unreachable: true",
         "  tasks:",
     ]
@@ -1726,6 +1750,7 @@ class RunPlan:
     keepalived_whitelist: Tuple[str, ...] = ()
     elasticsearch_whitelist: Tuple[str, ...] = ()
     timeout_sec: int = PROBE_TIMEOUT_SEC
+    parallel: int = DEFAULT_PARALLEL_HOSTS
 
 
 def _default_runtime_dir() -> Path:
@@ -1740,6 +1765,7 @@ def prepare_run(
     keepalived_whitelist: Optional[Sequence[str]] = None,
     elasticsearch_whitelist: Optional[Sequence[str]] = None,
     timeout_sec: Optional[int] = None,
+    parallel: int = DEFAULT_PARALLEL_HOSTS,
 ) -> RunPlan:
     """allow-list 校验 → 生成 playbook 与 argv → RunPlan（不执行不连接）。
 
@@ -1752,6 +1778,10 @@ def prepare_run(
     # runtime file.  All managed-host tasks remain raw, so no controller-side
     # script upload or target-side Python interpreter is required.
     validate_command_specs(specs, require_script_path=False)
+    if not MIN_PARALLEL_HOSTS <= parallel <= MAX_PARALLEL_HOSTS:
+        raise CommandConfigError(
+            f"远程并发主机数超出范围（允许 {MIN_PARALLEL_HOSTS}-{MAX_PARALLEL_HOSTS}）: {parallel}"
+        )
     runtime_dir = Path(runtime_dir) if runtime_dir is not None else _default_runtime_dir()
     runtime_dir.mkdir(parents=True, exist_ok=True)
     playbook_path = runtime_dir / f"playbook-{uuid.uuid4().hex[:8]}.yml"
@@ -1762,7 +1792,7 @@ def prepare_run(
     try:
         validate_command_specs(prepared_specs)
         text = generate_playbook(
-            prepared_specs, timeout_sec=collection_timeout_sec
+            prepared_specs, timeout_sec=collection_timeout_sec, parallel=parallel
         )
         playbook_path.write_text(text, encoding="utf-8", newline="\n")
         playbook_path.chmod(0o600)
@@ -1805,6 +1835,7 @@ def prepare_run(
         keepalived_whitelist=tuple(keepalived_whitelist or ()),
         elasticsearch_whitelist=tuple(elasticsearch_whitelist or ()),
         timeout_sec=collection_timeout_sec,
+        parallel=parallel,
     )
     plan.argv = build_playbook_argv(
         plan.playbook_path, plan.inventory_file, plan.limit
@@ -2818,6 +2849,7 @@ def run(
     keepalived_whitelist: Optional[Sequence[str]] = None,
     elasticsearch_whitelist: Optional[Sequence[str]] = None,
     timeout_sec: Optional[int] = None,
+    parallel: int = DEFAULT_PARALLEL_HOSTS,
 ) -> Dict[str, Any]:
     """prepare_run + execute_plan 便捷入口（cli 编排挂接点）。"""
     plan = prepare_run(
@@ -2828,6 +2860,7 @@ def run(
         keepalived_whitelist=keepalived_whitelist,
         elasticsearch_whitelist=elasticsearch_whitelist,
         timeout_sec=timeout_sec,
+        parallel=parallel,
     )
     return execute_plan(plan, fixture_dir=fixture_dir)
 
@@ -2853,6 +2886,9 @@ __all__ = [
     "RealExecutionError",
     "FIXTURE_ENV_VAR",
     "HOST_TIMEOUT_SEC",
+    "DEFAULT_PARALLEL_HOSTS",
+    "MIN_PARALLEL_HOSTS",
+    "MAX_PARALLEL_HOSTS",
     "LOG_METRIC_TIMEOUT_SEC",
     "METRIC_ERROR_STATUS",
     "METRIC_TIMEOUT_SEC",
