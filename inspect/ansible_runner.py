@@ -2638,9 +2638,14 @@ def _parse_callback_results(
                     bundle_specs = bundle_specs_by_task.get(task_name, ())
                     if not bundle_specs:
                         continue
-                    bundled = _parse_metric_bundle_output(
-                        _callback_text(raw.get("stdout"))
-                    )
+                    # Do not apply the per-task diagnostic cap before
+                    # splitting.  A legitimate log/JSON body in an early
+                    # metric must not hide markers for later metrics in the
+                    # same bundle.  Each extracted metric is capped below.
+                    bundle_stdout = raw.get("stdout")
+                    if not isinstance(bundle_stdout, str):
+                        bundle_stdout = ""
+                    bundled = _parse_metric_bundle_output(bundle_stdout)
                     for spec in bundle_specs:
                         part = bundled.get(spec.metric_id)
                         if part is None:
@@ -2660,8 +2665,8 @@ def _parse_callback_results(
                             metric_result = classify_metric_result(
                                 spec.metric_id,
                                 part["rc"],
-                                part["stdout"],
-                                part["stderr"],
+                                _callback_text(part["stdout"]),
+                                _callback_text(part["stderr"]),
                                 spec.required_commands,
                                 state["probe_matrix"],
                             )

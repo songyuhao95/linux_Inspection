@@ -250,6 +250,56 @@ def test_callback_bundle_missing_marker_is_data_missing(tmp_path):
     assert by_id["local.memory.available_percent"]["error"]["code"] == ar.ERROR_DATA_MISSING
 
 
+def test_callback_bundle_splits_later_markers_after_large_earlier_output(tmp_path):
+    specs = [
+        ar.CommandSpec(
+            metric_id="local.process.present",
+            command="pgrep -fa nginx",
+            timeout_sec=10,
+            become=False,
+            required_commands=("bash", "pgrep"),
+            source_anchor="test",
+        ),
+        ar.CommandSpec(
+            metric_id="local.memory.available_percent",
+            command="free -m",
+            timeout_sec=10,
+            become=False,
+            required_commands=("bash", "free"),
+            source_anchor="test",
+        ),
+    ]
+    plan = _plan(tmp_path, specs)
+    key, _bundle_specs = ar._metric_bundle_groups(specs)[0]
+    large_output = "nginx: master process\n" + ("evidence\n" * (128 * 1024))
+    bundle_stdout = (
+        "INSPECT_METRIC_BEGIN\tlocal.process.present\n"
+        + large_output
+        + "INSPECT_METRIC_END\tlocal.process.present\t0\n"
+        "INSPECT_METRIC_BEGIN\tlocal.memory.available_percent\n"
+        "Mem: 100 20 10 0 80 90\n"
+        "INSPECT_METRIC_END\tlocal.memory.available_percent\t0\n"
+    )
+    payload = {
+        "plays": [{
+            "tasks": [
+                {
+                    "task": {"name": "probe: 能力探测（15s）"},
+                    "hosts": {"node01": {"stdout": _probe_stdout(), "rc": 0}},
+                },
+                {
+                    "task": {"name": ar._metric_bundle_task_name(0, key)},
+                    "hosts": {"node01": {"stdout": bundle_stdout, "rc": 0}},
+                },
+            ]
+        }],
+        "stats": {"node01": {"unreachable": 0}},
+    }
+    result = ar._parse_callback_results(plan, payload, 0.25)
+    by_id = {m["metric_id"]: m for m in result[0]["metrics"]}
+    assert by_id["local.memory.available_percent"]["error"] is None
+
+
 def test_callback_unreachable_is_connection_error_without_metrics(tmp_path):
     result = ar._parse_callback_results(
         _plan(tmp_path), _payload(unreachable=True), 0.25
