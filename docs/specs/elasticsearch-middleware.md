@@ -4,15 +4,20 @@
 
 ## 进程发现与路径
 
-进程模式同时识别 Elasticsearch 启动脚本和 `org.elasticsearch.bootstrap.Elasticsearch` JVM。运行中的实例优先提供 `-Des.path.home`、`-Des.path.conf`、`-Des.path.logs`，并从配置推导 HTTP/Transport 端口、证书和日志目录。只有进程参数无法得到路径时才按 `inspect.conf` 的 `elasticsearch_*` 候选值顺序查找；全部没有时相关指标为 UNKNOWN，不把固定路径误当成真实实例。
+进程模式把 `org.elasticsearch.bootstrap.Elasticsearch` server JVM 用于进程存在性/PID，另把
+`org.elasticsearch.launcher.CliToolLauncher` 用于补充 `-Des.path.home`、`-Des.path.conf` 等启动参数。
+路径优先级固定为：运行进程显式参数 > 已发现配置文件中的 `path.logs`/端口/监听地址 >
+`inspect.conf` 的 `elasticsearch_*` 候选值。`path.logs` 不会被 `$ES_HOME/logs` 的猜测值抢先覆盖；
+全部没有时相关指标为 UNKNOWN，不把固定路径误当成真实实例。
 
 没有 Elasticsearch 进程的主机默认跳过 ES 指标。`elasticsearch_whitelist` 中的主机如果没有进程，只保留 `local.elasticsearch.process.present` 并判定 CRIT“未运行”。当前 v1 以一台主机一个运行中实例为默认模型；多实例时选择首个匹配实例并报告实际发现路径，后续可按 `-Des.path.data`/`-Des.path.conf` 扩展实例维度。
 
 ## API 认证与判定
 
 API 使用运行中 Elasticsearch 配置文件的监听地址和 `http.port`：优先读取
-`http.host`、`http.bind_host`、`network.bind_host`、`network.host`、
-`network.publish_host`，再按 `inspect.conf` 的路径候选查找配置文件。`elasticsearch_endpoint`
+`http.host`、`http.bind_host`、`network.publish_host`、`network.host`，按此顺序选择第一个
+可连接地址，再按 `inspect.conf` 的路径候选查找配置文件。`network.bind_host` 仅作为绑定选择器，
+不直接覆盖 HTTP 发布地址；`elasticsearch_endpoint`
 仅作为兼容配置，不覆盖运行配置中的监听地址。`0.0.0.0`、`::`、`_site_` 等绑定选择器不是可连接地址，
 解析不到具体地址时指标为 UNKNOWN，不再偷偷改连 127.0.0.1。证书候选路径由
 `elasticsearch_cacert` 配置，实际请求优先使用 `curl --cacert`；没有可读 CA 时才回退
@@ -23,7 +28,9 @@ API 使用运行中 Elasticsearch 配置文件的监听地址和 `http.port`：�
 明文密码。本地模式使用进程环境，curl 使用 `-u "$INSPECT_ES_API_USER:$INSPECT_ES_API_PASSWORD"`；
 规范化事实源和报表会对 command 脱敏，不保留明文密码。GitHub 中跟踪的 `inspect.conf` 只能保留 `CHANGE_ME` 占位符，
 真实密码不得提交；也可以继续使用目标机 `elasticsearch_auth_file` netrc 作为认证兜底。
-未授权 401/403、连接失败、配置/日志/证书不可读均为 UNKNOWN，绝不会默认通过。
+每个 Elasticsearch API 解析器都必须消费命令追加的
+`INSPECT_ELASTICSEARCH_HTTP_STATUS=<code>` 标记；没有状态标记、401/403、连接失败、配置/日志/证书
+不可读均为 UNKNOWN，绝不会从错误文本中的版本号、CAT 行或 curl 诊断默认通过。
 
 端口优先从运行配置的 `http.port`/`transport.port` 读取，随后使用 `inspect.conf` 9200/9300 候选；HTTP 请求组合为运行配置解析出的监听地址和 `http.port`。集群 `green`、期望节点数达到、活跃分片 100% 为正常；`yellow` 为 WARN，`red` 或节点严重缺失为 CRIT。未分配主分片为 CRIT，未分配副本或初始化中为 WARN。慢日志未启用时显示“未配置”，不默认判定为故障。
 

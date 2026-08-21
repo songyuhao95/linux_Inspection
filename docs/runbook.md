@@ -69,7 +69,8 @@ bash inspect.sh -H inspection --elasticsearch
 ```
 
 模块先从运行中的 Elasticsearch JVM 解析 `-Des.path.home`、`-Des.path.conf`、
-`-Des.path.logs`、配置中的 HTTP/Transport 端口、监听地址和证书；解析不到时按
+launcher/server 双进程信息和配置中的 `path.logs`、HTTP/Transport 端口、监听地址和证书；
+解析不到时按
 `inspect.conf` 中的 `elasticsearch_*` 候选路径顺序兜底。未运行且不在
 `elasticsearch_whitelist` 的主机跳过 ES 指标；白名单主机未运行保留进程指标并为
 CRIT。API 使用目标机配置文件中的监听地址，并使用 `elasticsearch_auth_file` 指向的 curl netrc 文件，不把密码写入
@@ -82,6 +83,12 @@ CRIT。API 使用目标机配置文件中的监听地址，并使用 `elasticsea
 GitHub 模板中的密码必须保持 `CHANGE_ME`。401/403、连接失败、路径不可读均为 UNKNOWN，不默认通过。Excel 结果写入
 独立 `elasticsearch` Sheet，HTML 自动纳入中间件/指标筛选与分组。详细指标和阈值见
 `docs/specs/elasticsearch-middleware.md`。
+
+远程并发与失败边界：每台主机由一个控制端线程启动一个单主机 Ansible playbook，
+playbook 固定 `serial: 1`；`--parallel N` 只控制线程池（1-10，默认 10）。probe
+确认 SSH 不可达后，该主机不再执行任何指标 bundle，报告为主机级
+`CONNECTION_FAILED`/ERROR、无业务结论；其他主机线程不受影响。使用 `-H ip1,ip2`
+生成的临时 inventory 由父级运行在所有线程结束后统一清理。
 
 ### 2.3 --local 本机自巡检
 

@@ -25,8 +25,9 @@
 - 已完成 `--local` 本地 Linux 基础指标采集，以及远程 `-H` 的统一 JSON 事实源；
 - 已完成第一个中间件模块 **Nginx**（`inspect/modules/nginx.py`）：进程发现 + 白名单、9 个指标（含运行版本基线）、Excel `nginx` Sheet、HTML 中间件卡片/筛选/分组、`--nginx` 只巡检 Nginx；
 - 已完成 **Keepalived**（`inspect/modules/keepalived.py`）：进程发现 + 白名单、版本、VIP 绑定/访问、配置基线、健康检查脚本、关键日志和能力稳定性共 8 个指标，Excel `keepalived` Sheet、HTML 筛选/分组、`--keepalived` 只巡检 Keepalived；
+- 已完成 **Elasticsearch**（`inspect/modules/elasticsearch.py`）：运行进程/launcher 双路径发现、配置监听地址与 CA/认证、20 个 API/系统指标、Excel `elasticsearch` Sheet、HTML 筛选/分组和 `--elasticsearch` 只巡检 Elasticsearch；API HTTP 状态、curl 传输错误和空结果均显式解析，不默认通过；
 - 当前远程认证以项目 inventory 为配置入口，公开模板不包含可用主机或真实凭据；
-- 已完成远程采集性能优化（T-130）：Ansible 按主机/模块/权限组生成 metric bundle，控制端按标记拆回单指标结果；三台可达测试主机实测采集时长由约 35.4 秒降至约 31.0 秒，包含不可达主机时不会重复执行其全部指标；
+- 已完成远程采集执行重构：每台主机独立生成一个 `serial: 1` Ansible playbook，由控制端 `ThreadPoolExecutor` 按 `--parallel` 并发，默认最多 10 台（上限 10）；probe 不可达时立即跳过该主机后续 bundle，不重复建立每指标 SSH；直接 IP 临时 inventory 由父级线程统一清理；
 - 远程真实 VM 验证按 `docs/g0-real-vm.md` 执行，部署到 VM 按 `docs/local-vm-deploy.md` 执行；
 - 新增中间件时只扩展 `inspect/modules/`，并同步更新 `docs/specs/`、测试和本 README 的交接状态。
 
@@ -230,7 +231,7 @@ bash inspect.sh -H <host-or-ip-list>
 CLI 会将它同时用于 Ansible SSH 连接、能力探测、每条 shell/raw/script 命令以及 curl
 的 `--connect-timeout`/`--max-time`；超时结果统一为 `UNKNOWN`，不会默认通过。
 主机能力探测是连接闸门：不可达主机不会对后续每个指标重复建立 SSH 连接，直接跳过指标任务并报告主机级技术失败。
-远程可执行指标按 Linux 基础、Nginx、Keepalived、Elasticsearch 模块打包：每台主机每个模块通常只生成一个 Ansible `raw`/SSH 任务；bundle 内仍为每个指标保留独立 timeout、返回码和 `metric_id` 标记，控制端拆分后继续使用原有单指标 JSON、错误分类和报表逻辑。不同 `become` 权限会拆成独立 bundle，避免扩大特权范围。默认 `serial: 1`；远程场景可使用 `--parallel 3`，最多同时巡检 3 台主机，`--parallel 1` 可恢复串行。
+远程可执行指标按 Linux 基础、Nginx、Keepalived、Elasticsearch 模块打包：每台主机每个模块通常只生成一个 Ansible `raw`/SSH 任务；bundle 内仍为每个指标保留独立 timeout、返回码和 `metric_id` 标记，控制端拆分后继续使用原有单指标 JSON、错误分类和报表逻辑。不同 `become` 权限会拆成独立 bundle，避免扩大特权范围。每个 worker playbook 固定 `serial: 1`；远程场景可使用 `--parallel N` 控制控制端线程数（1-10，默认 10），`--parallel 1` 可恢复串行。线程池不使用旧的多进程或 Ansible 多主机 serial 批次模型。
 Nginx、Keepalived、Elasticsearch 的进程发现使用 `ps` 的 `pid/comm/args` 结构化列锚定真实进程名，避免 SSH/Ansible 回显的巡检命令文本被误判为中间件正在运行。
 Elasticsearch、Nginx 和 Keepalived 的 curl 请求都在目标主机执行，并优先使用各自运行
 配置中的监听地址/VIP；不会访问控制端或 inventory 中的其他主机。解析不到具体监听地址

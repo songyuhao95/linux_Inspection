@@ -404,7 +404,7 @@ profiles:                          # 产品 profile：进程/unit/端口/路径/
 | G2 冻结项 | G1 依据 | 一致性要点 |
 | --- | --- | --- |
 | 目录/模块边界 | AE §2 执行模型、HR §5 文件约定 | 采集→normalize→JSON→报表单向流；渲染只读 JSON |
-| 采集执行 | AE §1-§7、MR §5 | raw/script+/bin/bash -lc、gather_facts:false、serial:1、最小化 become、超时 15s/10s/15s/300s、allow-list、不重试 |
+| 采集执行 | AE §1-§7、MR §5 | 控制端每主机一个线程/一个 Ansible playbook；playbook 固定 raw/script+/bin/bash -lc、gather_facts:false、serial:1、最小化 become、统一 timeout、allow-list、不重试；线程上限 10 |
 | 阈值 | MR §3/§6、DC C1-C13 | 文档基线转写+外部覆盖+UNKNOWN；未锚定边界不发明 |
 | CLI | CC §2-§5 | 选项表冻结；退出码 0/2/10/20；--list-metrics/--info 只读 |
 | 数据契约 | HR §1-§6 | 双状态分离、metric 字段、error 枚举、原子写 |

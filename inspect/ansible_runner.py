@@ -33,6 +33,8 @@ import subprocess
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -83,9 +85,13 @@ PROBE_TIMEOUT_SEC = probe_mod.PROBE_TIMEOUT_SEC
 METRIC_TIMEOUT_SEC = 10
 LOG_METRIC_TIMEOUT_SEC = 15
 HOST_TIMEOUT_SEC = 300
-DEFAULT_PARALLEL_HOSTS = 1
+# Remote execution is host-scoped: one Ansible process/playbook per host,
+# coordinated by controller threads.  ``parallel`` is the worker count, not
+# Ansible's multi-host serial setting.  A playbook itself always targets one
+# host and therefore remains ``serial: 1``.
+DEFAULT_PARALLEL_HOSTS = 10
 MIN_PARALLEL_HOSTS = 1
-MAX_PARALLEL_HOSTS = 3
+MAX_PARALLEL_HOSTS = 10
 MIN_COMMAND_TIMEOUT_SEC = 1
 MAX_COMMAND_TIMEOUT_SEC = 60
 
@@ -262,6 +268,12 @@ _ELASTICSEARCH_PROCESS_COMMAND = (
     "ps -eo pid=,comm=,args= | grep -E "
     "'^[[:space:]]*[0-9]+[[:space:]]+"
     "(java[[:space:]].*org\\.elasticsearch\\.bootstrap\\.Elasticsearch|"
+    "elasticsearch[[:space:]])'"
+)
+_ELASTICSEARCH_DISCOVERY_COMMAND = (
+    "ps -eo pid=,comm=,args= | grep -E "
+    "'^[[:space:]]*[0-9]+[[:space:]]+"
+    "(java[[:space:]].*org\\.elasticsearch\\.(bootstrap\\.Elasticsearch|launcher\\.CliToolLauncher)|"
     "elasticsearch[[:space:]])'"
 )
 
@@ -825,10 +837,17 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
     transport_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_transport_port")) or "9300"
     system_users = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_system_user")) or "es"
     return "; ".join([
-        f"es_process_line=$({_ELASTICSEARCH_PROCESS_COMMAND} | head -n 1)",
-        "es_home=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.home=([^[:space:]]+).*/\\1/p')",
-        "es_conf_dir=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.conf=([^[:space:]]+).*/\\1/p')",
-        "es_bin=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*[[:space:]]([^[:space:]]*\\/bin\\/elasticsearch)([[:space:]]|$).*/\\1/p')",
+        # The server JVM and the launcher do not carry the same arguments on
+        # tar installations.  The server line is authoritative for process
+        # presence/PID, while the launcher line commonly carries
+        # -Des.path.home/-Des.path.conf.  Looking at only one line was the
+        # reason real Kylin nodes produced a large block of false UNKNOWNs.
+        f"es_process_line=$({_ELASTICSEARCH_PROCESS_COMMAND} | grep -E 'org\\.elasticsearch\\.(bootstrap\\.Elasticsearch|launcher\\.CliToolLauncher)' | grep -E 'bootstrap\\.Elasticsearch' | head -n 1)",
+        f"es_path_line=$({_ELASTICSEARCH_DISCOVERY_COMMAND} | grep -E 'org\\.elasticsearch\\.(bootstrap\\.Elasticsearch|launcher\\.CliToolLauncher)' | grep -E -- '-Des\\.path\\.(home|conf)=' | head -n 1)",
+        "if test -z \"$es_path_line\"; then es_path_line=\"$es_process_line\"; fi",
+        "es_home=$(printf '%s\\n' \"$es_path_line\" | sed -nE 's/.*-Des.path.home=([^[:space:]]+).*/\\1/p')",
+        "es_conf_dir=$(printf '%s\\n' \"$es_path_line\" | sed -nE 's/.*-Des.path.conf=([^[:space:]]+).*/\\1/p')",
+        "es_bin=$(printf '%s\\n' \"$es_path_line\" | sed -nE 's/.*[[:space:]]([^[:space:]]*\\/bin\\/elasticsearch)([[:space:]]|$).*/\\1/p')",
         "if test -n \"$es_home\" && test -x \"$es_home/bin/elasticsearch\"; then es_bin=\"$es_home/bin/elasticsearch\"; fi",
         f"if test -z \"$es_bin\" || ! test -x \"$es_bin\"; then for p in {bins}; do if test -x \"$p\"; then es_bin=\"$p\"; break; fi; done; fi",
         "if test -z \"$es_conf_dir\" && test -n \"$es_home\"; then es_conf_dir=\"$es_home/config\"; fi",
@@ -837,7 +856,12 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         "es_pid=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/^([0-9]+).*/\\1/p')",
         "es_user=\"\"; if test -n \"$es_pid\"; then es_user=$(ps -o user= -p \"$es_pid\" | sed -n 's/[[:space:]]//gp'); fi",
         f"if test -z \"$es_user\"; then for p in {system_users}; do es_user=\"$p\"; break; done; fi",
-        "es_log_dir=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/.*-Des.path.logs=([^[:space:]]+).*/\\1/p')",
+        "es_log_dir=$(printf '%s\\n' \"$es_path_line\" | sed -nE 's/.*-Des.path.logs=([^[:space:]]+).*/\\1/p')",
+        # Most Elasticsearch tar deployments configure path.logs/path.data
+        # in elasticsearch.yml instead of JVM properties.  The effective
+        # config is authoritative: do not prefer the home-directory fallback
+        # when path.logs points elsewhere.
+        "if test -z \"$es_log_dir\" && test -n \"$es_conf\"; then es_log_dir=$(sed -nE 's/^[[:space:]]*path.logs:[[:space:]]*([^#]+).*/\\1/p' \"$es_conf\" | tr -d '[\\\"]' | sed -E 's/[[:space:]]+$//' | head -n 1); fi",
         "if test -z \"$es_log_dir\" && test -n \"$es_home\"; then es_log_dir=\"$es_home/logs\"; fi",
         "es_log=\"\"; if test -n \"$es_log_dir\"; then for p in \"$es_log_dir\"/*; do if test -f \"$p\"; then es_log=\"$p\"; break; fi; done; fi",
         f"if test -z \"$es_log\"; then for p in {logs}; do if test -f \"$p\"; then es_log=\"$p\"; break; fi; done; fi",
@@ -851,7 +875,13 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         # inventory address and do not force 127.0.0.1: some deployments bind
         # only to their service IP.  Values such as 0.0.0.0/_site_ are
         # filtered because they are bind selectors, not connectable addresses.
-        "es_listen_host=\"\"; if test -n \"$es_conf\"; then es_listen_host=$(sed -nE -e 's/^[[:space:]]*http\\.host:[[:space:]]*//p' -e 's/^[[:space:]]*http\\.bind_host:[[:space:]]*//p' -e 's/^[[:space:]]*network\\.bind_host:[[:space:]]*//p' -e 's/^[[:space:]]*network\\.host:[[:space:]]*//p' -e 's/^[[:space:]]*network\\.publish_host:[[:space:]]*//p' \"$es_conf\" | tr -d '[]\"' | tr ',' '\\n' | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' | grep -Ev '^(_|0\\.0\\.0\\.0$|::|0:0:0:0:0:0:0:0$)' | head -n 1); fi",
+        # Choose a connectable address by key precedence, not by the order in
+        # which settings happen to appear in elasticsearch.yml.
+        "es_listen_host=\"\"; if test -n \"$es_conf\"; then for host_key in http.host http.bind_host network.publish_host network.host; do candidate=$(sed -nE \"s/^[[:space:]]*$host_key:[[:space:]]*//p\" \"$es_conf\" | tr -d '[]\"' | tr ',' '\\n' | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' | grep -Ev '^(_|0\\.0\\.0\\.0$|::|0:0:0:0:0:0:0:0$)' | head -n 1); if test -n \"$candidate\"; then es_listen_host=\"$candidate\"; break; fi; done; fi",
+        # If the effective config binds to a wildcard, use the concrete
+        # address reported by the local listener.  Never silently substitute
+        # 127.0.0.1 or an inventory address.
+        "if test -z \"$es_listen_host\" && command -v ss >/dev/null 2>&1; then es_listen_host=$(ss -H -ltn \"sport = :$es_http_port\" 2>/dev/null | sed -nE 's/^[[:space:]]*[A-Z]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+([^[:space:]]+):[0-9]+.*/\\1/p' | sed -E 's/^\\[::ffff:(.*)\\]$/\\1/; s/^\\[(.*)\\]$/\\1/' | grep -Ev '^(0\\.0\\.0\\.0|\\*|::)$' | head -n 1); fi",
         "es_endpoint=\"\"; if test -n \"$es_listen_host\"; then case \"$es_listen_host\" in *:*) es_endpoint=\"https://[$es_listen_host]:$es_http_port\";; *) es_endpoint=\"https://$es_listen_host:$es_http_port\";; esac; fi",
         "es_auth_file=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth_file=\"$p\"; break; fi; done",
         "es_cert=\"\"; if test -n \"$es_conf\"; then es_cert=$(grep -Eo '/[^[:space:]]+\\.(crt|pem)' \"$es_conf\" | head -n 1); fi",
@@ -937,7 +967,7 @@ def _build_elasticsearch_metric_command(
     if metric_id == "local.elasticsearch.indices.health":
         return prefix + "; " + api("/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.slowlog.key_evidence":
-        return prefix + "; if test -z \"$es_log_dir\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_LOG_NOT_FOUND; else ls -1 \"$es_log_dir\"/*slowlog* 2>/dev/null; tail -n 100 \"$es_log_dir\"/*slowlog* 2>/dev/null; fi"
+        return prefix + "; if test -z \"$es_log_dir\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_LOG_NOT_FOUND; elif ls -1 \"$es_log_dir\"/*slowlog* >/dev/null 2>&1; then ls -1 \"$es_log_dir\"/*slowlog* 2>/dev/null; tail -n 100 \"$es_log_dir\"/*slowlog* 2>/dev/null; else printf '%s\\n' INSPECT_ELASTICSEARCH_SLOWLOG_NOT_CONFIGURED; fi"
     if metric_id == "local.elasticsearch.security.accounts":
         status = " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
         return prefix + "; " + api("/_security/user?pretty") + status + "; " + api("/_security/role?pretty") + status
@@ -1625,12 +1655,12 @@ def generate_playbook(
     specs: Sequence[CommandSpec],
     probe_command: Optional[str] = None,
     timeout_sec: Optional[int] = None,
-    parallel: int = DEFAULT_PARALLEL_HOSTS,
+    parallel: int = 1,
 ) -> str:
     """生成采集 playbook 文本（YAML）。
 
     契约（AE §1-§7 文本断言）：
-      - play 级：hosts: all、gather_facts: false、serial: 1..3、ignore_unreachable: true；
+      - play 级：hosts: all、gather_facts: false、serial: 1、ignore_unreachable: true；
       - 探测任务与按模块/权限分组的 metric-bundle 任务均使用
         ansible.builtin.raw；bundle 内每个指标保留自己的
         `timeout N /bin/bash -lc '…'`（AE §7 超时注入）；
@@ -1648,9 +1678,10 @@ def generate_playbook(
             f"{MIN_COMMAND_TIMEOUT_SEC}-{MAX_COMMAND_TIMEOUT_SEC}s）: "
             f"{collection_timeout_sec}"
         )
-    if not MIN_PARALLEL_HOSTS <= parallel <= MAX_PARALLEL_HOSTS:
+    if parallel != 1:
         raise CommandConfigError(
-            f"远程并发主机数超出范围（允许 {MIN_PARALLEL_HOSTS}-{MAX_PARALLEL_HOSTS}）: {parallel}"
+            f"单主机 playbook 必须使用 serial: 1，不能设置为 {parallel}；"
+            "主机并发由控制端线程池负责"
         )
     probe_command = probe_command or probe_mod.build_probe_command(
         timeout_sec=collection_timeout_sec
@@ -1658,13 +1689,13 @@ def generate_playbook(
     lines = [
         "---",
         "# inspect 采集 playbook（T-103 ansible_runner 生成；ansible-execution v1）",
-        f"# 契约：gather_facts:false / serial:{parallel} / raw|script + /bin/bash -lc / 最小化 become /",
+        "# 契约：gather_facts:false / serial:1 / raw|script + /bin/bash -lc / 最小化 become /",
         "#       只读命令 allow-list / 每命令超时注入（由 inspect.conf timeout 统一控制、",
         "#       单主机 300s）/ 无重试（AE §1-§7；超时与连接失败不自动重试）",
         '- name: "inspect collection"',
         "  hosts: all",
         "  gather_facts: false",
-        f"  serial: {parallel}",
+        "  serial: 1",
         "  ignore_unreachable: true",
         "  tasks:",
     ]
@@ -1766,6 +1797,7 @@ def prepare_run(
     elasticsearch_whitelist: Optional[Sequence[str]] = None,
     timeout_sec: Optional[int] = None,
     parallel: int = DEFAULT_PARALLEL_HOSTS,
+    cleanup_inventory: bool = True,
 ) -> RunPlan:
     """allow-list 校验 → 生成 playbook 与 argv → RunPlan（不执行不连接）。
 
@@ -1792,7 +1824,7 @@ def prepare_run(
     try:
         validate_command_specs(prepared_specs)
         text = generate_playbook(
-            prepared_specs, timeout_sec=collection_timeout_sec, parallel=parallel
+            prepared_specs, timeout_sec=collection_timeout_sec, parallel=1
         )
         playbook_path.write_text(text, encoding="utf-8", newline="\n")
         playbook_path.chmod(0o600)
@@ -1827,7 +1859,7 @@ def prepare_run(
         ),
         cleanup_paths=(
             (playbook_path, Path(selection.inventory_file))
-            if getattr(selection, "kind", None) in {"local", "hosts"}
+            if cleanup_inventory and getattr(selection, "kind", None) in {"local", "hosts"}
             else (playbook_path,)
         ),
         selection_kind=str(getattr(selection, "kind", "unknown")),
@@ -2394,8 +2426,13 @@ def _callback_error_for_probe_not_executed() -> Dict[str, str]:
 
 def _cleanup_plan_files(plan: RunPlan) -> List[str]:
     """Remove generated files without Python 3.8-only APIs."""
+    return _cleanup_paths(plan.cleanup_paths)
+
+
+def _cleanup_paths(paths: Sequence[Path]) -> List[str]:
+    """Remove generated files and return only sanitized failure names."""
     failures: List[str] = []
-    for path in plan.cleanup_paths:
+    for path in paths:
         try:
             if path.exists():
                 path.unlink()
@@ -2840,6 +2877,49 @@ def execute_plan(
     return _execute_real(plan)
 
 
+def _single_host_selection(selection: Any, host: Any) -> Any:
+    """Clone a resolved selection for exactly one worker/Ansible play."""
+    selected = copy(selection)
+    selected.hosts = [host]
+    # The inventory remains unchanged; --limit makes Ansible target only this
+    # host.  This also prevents an unreachable first host from suppressing
+    # callbacks for later hosts.
+    selected.limit = str(host.name)
+    return selected
+
+
+def _run_one_host(
+    selection: Any,
+    host: Any,
+    specs: Sequence[CommandSpec],
+    *,
+    fixture_dir: Optional[Path],
+    runtime_dir: Optional[Path],
+    nginx_whitelist: Optional[Sequence[str]],
+    keepalived_whitelist: Optional[Sequence[str]],
+    elasticsearch_whitelist: Optional[Sequence[str]],
+    timeout_sec: Optional[int],
+) -> Dict[str, Any]:
+    """Worker entry point: one thread owns one host and one Ansible run."""
+    plan = prepare_run(
+        _single_host_selection(selection, host),
+        specs,
+        runtime_dir=runtime_dir,
+        nginx_whitelist=nginx_whitelist,
+        keepalived_whitelist=keepalived_whitelist,
+        elasticsearch_whitelist=elasticsearch_whitelist,
+        timeout_sec=timeout_sec,
+        # A worker playbook must never fan out to another host.
+        parallel=1,
+        # A -H IP list can point every worker at the same temporary inventory.
+        # The parent run owns that shared file and removes it after all workers
+        # finish; deleting it inside a worker would race with other Ansible
+        # processes.
+        cleanup_inventory=False,
+    )
+    return execute_plan(plan, fixture_dir=fixture_dir)
+
+
 def run(
     selection: Any,
     specs: Sequence[CommandSpec],
@@ -2851,18 +2931,91 @@ def run(
     timeout_sec: Optional[int] = None,
     parallel: int = DEFAULT_PARALLEL_HOSTS,
 ) -> Dict[str, Any]:
-    """prepare_run + execute_plan 便捷入口（cli 编排挂接点）。"""
-    plan = prepare_run(
-        selection,
-        specs,
-        runtime_dir=runtime_dir,
-        nginx_whitelist=nginx_whitelist,
-        keepalived_whitelist=keepalived_whitelist,
-        elasticsearch_whitelist=elasticsearch_whitelist,
-        timeout_sec=timeout_sec,
-        parallel=parallel,
-    )
-    return execute_plan(plan, fixture_dir=fixture_dir)
+    """Collect hosts concurrently with bounded controller threads.
+
+    The old design submitted one multi-host playbook and relied on Ansible's
+    serial/parallel batches.  That made an unreachable host affect callback
+    visibility for subsequent hosts and repeated the remote wait in a long
+    batch.  The new contract is deliberately explicit: one host, one thread,
+    one playbook, with at most ``parallel`` threads (maximum 10).
+    """
+    if not MIN_PARALLEL_HOSTS <= parallel <= MAX_PARALLEL_HOSTS:
+        raise CommandConfigError(
+            f"远程线程数超出范围（允许 {MIN_PARALLEL_HOSTS}-{MAX_PARALLEL_HOSTS}）: {parallel}"
+        )
+    hosts = list(getattr(selection, "hosts", ()))
+    if getattr(selection, "kind", None) == "local" or len(hosts) <= 1:
+        plan = prepare_run(
+            selection,
+            specs,
+            runtime_dir=runtime_dir,
+            nginx_whitelist=nginx_whitelist,
+            keepalived_whitelist=keepalived_whitelist,
+            elasticsearch_whitelist=elasticsearch_whitelist,
+            timeout_sec=timeout_sec,
+            parallel=1,
+        )
+        return execute_plan(plan, fixture_dir=fixture_dir)
+
+    started = time.monotonic()
+    worker_count = min(parallel, len(hosts), MAX_PARALLEL_HOSTS)
+    by_name: Dict[str, Dict[str, Any]] = {}
+    failures: List[BaseException] = []
+    shared_cleanup_failures: List[str] = []
+    try:
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="inspect-host",
+        ) as pool:
+            future_to_host = {
+                pool.submit(
+                    _run_one_host,
+                    selection,
+                    host,
+                    specs,
+                    fixture_dir=fixture_dir,
+                    runtime_dir=runtime_dir,
+                    nginx_whitelist=nginx_whitelist,
+                    keepalived_whitelist=keepalived_whitelist,
+                    elasticsearch_whitelist=elasticsearch_whitelist,
+                    timeout_sec=timeout_sec,
+                ): host
+                for host in hosts
+            }
+            for future in as_completed(future_to_host):
+                host = future_to_host[future]
+                try:
+                    result = future.result()
+                except BaseException as exc:  # propagate the first typed runner error
+                    failures.append(exc)
+                    continue
+                for host_result in result.get("hosts", []):
+                    by_name[str(host_result.get("host"))] = host_result
+    finally:
+        # ``-H`` without a configured inventory creates one shared temporary
+        # inventory.  It must outlive every worker's Ansible process.
+        if getattr(selection, "kind", None) == "hosts":
+            shared_cleanup_failures = _cleanup_paths((Path(selection.inventory_file),))
+
+    if failures:
+        raise failures[0]
+
+    ordered = [by_name[str(host.name)] for host in hosts if str(host.name) in by_name]
+    result = {
+        "execution_status": run_status_for_hosts(ordered),
+        "hosts": ordered,
+        "real_mode": True if not _resolve_fixture_dir(fixture_dir) else False,
+        "fixture_mode": bool(_resolve_fixture_dir(fixture_dir)),
+        "duration_sec": round(time.monotonic() - started, 3),
+    }
+    if shared_cleanup_failures:
+        result["cleanup_diagnostic"] = {
+            "category": "runtime_cleanup_failed",
+            "return_code": None,
+            "check": "remove generated runtime files manually",
+            "files": shared_cleanup_failures,
+        }
+    return result
 
 
 __all__ = [

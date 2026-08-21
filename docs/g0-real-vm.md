@@ -68,7 +68,8 @@ bash inspect.sh --list-metrics
 bash inspect.sh --info local.cpu.load_1m
 ```
 
-确认生成的 playbook 使用 `gather_facts: false`、`serial: 1`、`raw` 与 `/bin/bash -lc`，并且目标范围与本次已确认的授权范围一致。真实 smoke 初期建议只启用无 profile、无 become 的共同指标；端口和日志指标需要额外的权限与路径确认。
+确认每个 worker 生成的 playbook 使用 `gather_facts: false`、固定 `serial: 1`、`raw` 与
+`/bin/bash -lc`，控制端通过 `--parallel 1-10` 的线程池控制同时主机数，并且目标范围与本次已确认的授权范围一致。真实 smoke 初期建议只启用无 profile、无 become 的共同指标；端口和日志指标需要额外的权限与路径确认。
 
 ### 4.2 单主机 smoke
 

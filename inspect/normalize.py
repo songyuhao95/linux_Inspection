@@ -918,8 +918,23 @@ def _es_http_statuses(output: str) -> List[int]:
     )]
 
 
+def _reject_es_transport_diagnostics(output: str) -> None:
+    """Do not turn curl diagnostics into valid CAT rows or business values."""
+    for line in _content_lines(output):
+        if re.match(
+            r"(?:curl:|Failed to connect|Could not resolve host|URL rejected|"
+            r"Connection refused|Empty reply from server)",
+            line.strip(),
+            re.IGNORECASE,
+        ):
+            raise ParseError("Elasticsearch API/连接命令未返回可解析数据")
+
+
 def _es_json(output: str) -> Any:
+    _reject_es_transport_diagnostics(output)
     status = _es_http_status(output)
+    if status is None:
+        raise ParseError("Elasticsearch API 缺少 HTTP 状态标记")
     if status is not None and status >= 400:
         raise ParseError(f"Elasticsearch API HTTP {status}（认证/权限或服务错误）")
     text = "\n".join(_es_lines(output)).strip()
@@ -937,9 +952,17 @@ def _es_json(output: str) -> Any:
 def parse_elasticsearch_version(output: str) -> Dict[str, Any]:
     if "INSPECT_ELASTICSEARCH_RUNNING_NOT_FOUND" in _content_lines(output):
         raise ParseError("未发现运行中的 Elasticsearch 或其 API 端点")
-    try:
+    status = _es_http_status(output)
+    if status is not None:
+        # A real API response always carries the status marker.  Once it is
+        # present, an HTTP error or malformed JSON must remain UNKNOWN; never
+        # fall through to a version-looking string in an error message.
         data = _es_json(output)
-    except ParseError:
+    else:
+        # Keep the explicit ``Version:`` fixture compatibility path, but reject
+        # transport diagnostics and do not accept arbitrary semver text as a
+        # successful API response with a missing status marker.
+        _reject_es_transport_diagnostics(output)
         data = None
     if isinstance(data, dict):
         version = data.get("version")
@@ -951,9 +974,9 @@ def parse_elasticsearch_version(output: str) -> Dict[str, Any]:
             }
     match = re.search(r"(?:Version|version)\s*[:=]\s*([0-9][A-Za-z0-9._+-]*)", output or "")
     if not match:
-        match = re.search(r"\b([0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9._-]+)?)\b", output or "")
-    if not match:
-        raise ParseError("Elasticsearch 根 API 未返回可识别 version.number")
+        if status is not None:
+            raise ParseError("Elasticsearch 根 API 未返回可识别 version.number")
+        raise ParseError("Elasticsearch 版本输出缺少明确 Version 字段")
     return {"version": match.group(1), "summary": [mask_output(x) for x in _content_lines(output)[:3]]}
 
 
@@ -971,7 +994,10 @@ def parse_elasticsearch_cluster_health(output: str) -> Dict[str, Any]:
 
 
 def _es_cat_rows(output: str, *, allow_empty: bool = False) -> List[List[str]]:
+    _reject_es_transport_diagnostics(output)
     status = _es_http_status(output)
+    if status is None:
+        raise ParseError("Elasticsearch CAT API 缺少 HTTP 状态标记")
     if status is not None and status >= 400:
         raise ParseError(f"Elasticsearch API HTTP {status}")
     lines = _es_lines(output)
@@ -1065,7 +1091,7 @@ def parse_elasticsearch_service_port(output: str) -> Dict[str, Any]:
     lines = _content_lines(output)
     process = any("elasticsearch" in line.lower() for line in lines if "LISTEN" not in line)
     listen_lines = [line for line in lines if "LISTEN" in line]
-    ports = sorted({int(x) for x in re.findall(r"[^\s]+:(\d+)(?=\s|$)", "\n".join(listen_lines)) if int(x) > 0})
+    ports = sorted({int(x) for x in re.findall(r":(\d+)(?=\s|$)", "\n".join(listen_lines)) if int(x) > 0})
     return {"process": process, "ports": ports, "summary": [mask_output(x) for x in lines[:10]]}
 
 
@@ -1125,13 +1151,18 @@ def parse_elasticsearch_slowlog(output: str) -> Dict[str, Any]:
     lines = _es_lines(output)
     if "INSPECT_ELASTICSEARCH_LOG_NOT_FOUND" in _content_lines(output):
         raise ParseError("未发现 Elasticsearch 日志目录")
+    if "INSPECT_ELASTICSEARCH_SLOWLOG_NOT_CONFIGURED" in _content_lines(output):
+        return {"files": 0, "hit_count": 0, "rows": []}
     files = [line for line in lines if "slowlog" in line]
     hits = [line for line in lines if line not in files]
     return {"files": len(files), "hit_count": len(hits), "rows": [mask_output(x) for x in hits[-10:]]}
 
 
 def parse_elasticsearch_security(output: str) -> Dict[str, Any]:
+    _reject_es_transport_diagnostics(output)
     statuses = _es_http_statuses(output)
+    if not statuses:
+        raise ParseError("Elasticsearch security API 缺少 HTTP 状态标记")
     if any(status >= 400 for status in statuses):
         raise ParseError(
             "Elasticsearch security API HTTP "
@@ -1165,6 +1196,9 @@ def parse_elasticsearch_snapshot(output: str) -> Dict[str, Any]:
     if "INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND" in _content_lines(output):
         raise ParseError("未配置 Elasticsearch 快照仓库")
     statuses = _es_http_statuses(output)
+    _reject_es_transport_diagnostics(output)
+    if not statuses:
+        raise ParseError("Elasticsearch snapshot API 缺少 HTTP 状态标记")
     if any(status >= 400 for status in statuses):
         # A configured repository name may simply not exist on the target.
         # Elasticsearch reports that business condition as a JSON 404/400;

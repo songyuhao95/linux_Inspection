@@ -45,6 +45,47 @@ def test_elasticsearch_api_auth_failure_is_not_default_pass():
         raise AssertionError("401 must not be interpreted as a healthy cluster")
 
 
+def test_elasticsearch_version_http_failure_cannot_fall_back_to_text():
+    try:
+        normalize.parse_elasticsearch_version(
+            "{\"error\":\"unauthorized\",\"version\":\"8.17.0\"}\n"
+            "INSPECT_ELASTICSEARCH_HTTP_STATUS=401"
+        )
+    except normalize.ParseError as exc:
+        assert "HTTP 401" in str(exc)
+    else:
+        raise AssertionError("version HTTP 401 must remain UNKNOWN")
+
+
+def test_elasticsearch_api_without_status_marker_is_not_a_business_value():
+    for parser, output in (
+        (normalize.parse_elasticsearch_nodes, "name ip cpu\nes-01 192.0.2.1 1"),
+        (normalize.parse_elasticsearch_security, '{"elastic": {}}'),
+        (normalize.parse_elasticsearch_snapshot, '{"repositories": []}'),
+    ):
+        try:
+            parser(output)
+        except normalize.ParseError as exc:
+            assert "状态标记" in str(exc)
+        else:
+            raise AssertionError(f"{parser.__name__} accepted an unstamped response")
+
+
+def test_elasticsearch_discovery_prioritizes_explicit_http_host_key():
+    profile = config.load_inspect_conf()
+    profile["elasticsearch_conf"] = ["/etc/elasticsearch/elasticsearch.yml"]
+    command = next(
+        spec.command
+        for spec in ar.build_metric_command_specs(
+            module_ids=("elasticsearch",), profile=profile
+        )
+        if spec.metric_id == "local.elasticsearch.cluster.health"
+    )
+    assert command is not None
+    assert "for host_key in http.host http.bind_host network.publish_host network.host" in command
+    assert "path.logs" in command
+
+
 def test_elasticsearch_process_selection_skips_non_whitelisted_host():
     results = [
         {"metric_id": "local.elasticsearch.process.present", "error": None, "rc": 1, "stdout": ""},

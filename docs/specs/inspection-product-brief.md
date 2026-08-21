@@ -21,7 +21,7 @@
 | --- | --- |
 | 控制端 | Linux / WSL；**仅控制端假定 Python 3** |
 | 受控端 | **不假定 Python**；`gather_facts: false`，`raw`/`script` + `/bin/bash -lc` 执行 Bash |
-| 执行顺序 | 按目标顺序 `serial: 1` |
+| 执行顺序 | 远程每主机一个线程/一个 playbook（playbook 固定 `serial: 1`，线程上限 10）；本地不走 Ansible |
 | 权限 | 普通账号**最小化 become**；单指标权限不足记 `UNKNOWN` 并继续其余指标与主机 |
 | SSH | 仅作 Ansible transport 与诊断，不维护第二套采集逻辑 |
 | 目标 OS | 麒麟 Kylin V10（9 份巡检手册环境信息一致声明） |

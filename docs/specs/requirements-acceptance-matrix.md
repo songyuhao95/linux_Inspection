@@ -64,13 +64,13 @@
 | ID | 需求 | G1 来源 | 验收方法 | 可执行验证命令 | 负责任务 |
 | --- | --- | --- | --- | --- | --- |
 | REQ-E-01 | 控制端 Linux/WSL 假定 Python 3；受控端不假定 Python：gather_facts:false，raw/script + `/bin/bash -lc` 执行 Bash | AE §1/§2；PB §2 | 生成的 playbook 文本断言（gather_facts:false、serial:1、raw/script、/bin/bash -lc） | `python -m pytest tests/test_ansible_runner.py -q`（test_playbook_generation） | T-103 |
-| REQ-E-02 | 按目标顺序 serial:1 执行；普通账号最小化 become；禁止 root 全程运行 | AE §1/§5；PB §2 | playbook 文本断言 + become 最小化结构审查 | 同上（test_playbook_serial_become） | T-103 |
+| REQ-E-02 | 每个主机独立线程启动单主机 playbook，playbook 固定 serial:1；控制端 `--parallel` 允许 1-10（默认 10）；普通账号最小化 become；禁止 root 全程运行 | AE §1/§5；PB §2 | playbook 文本断言 + 线程上限/结果顺序测试 + become 最小化结构审查 | `python -m pytest tests/test_ansible_runner.py -q`（test_run_uses_bounded_threads_per_host、test_playbook_minimal_become_only_declared_metrics） | T-130 |
 | REQ-E-03 | 能力探测：probe 命令集合（bash/pgrep/ss/free/df/...）；命令缺失→相关指标 UNKNOWN（COMMAND_NOT_FOUND）；bash 不可用→主机 ERROR | AE §3 | fixture 探针输出→能力矩阵映射单元测试 | `python -m pytest tests/test_ansible_runner.py -q`（test_capability_probe） | T-103 |
 | REQ-E-04 | 超时：probe 15s；指标命令 10s（日志 15s）；单主机总时长上限 300s；超时按 TIMEOUT→UNKNOWN，不得当业务正常 | AE §3/§7；MR §5 各指标超时列 | 超时参数注入断言 + 超时路径单元测试 | 同上（test_timeouts） | T-103 |
 | REQ-E-05 | 命令 allow-list：采集命令必须来自指标定义（文档锚点），禁止任意命令注入 | AE §4.1 | 未登记命令拒绝单元测试 | 同上（test_allow_list） | T-103 |
 | REQ-E-06 | 输出只读：无 kill/rm/systemctl stop/写操作 | AE §4.4 | 命令集合只读性结构审查（每个命令对照 MR 数据源列） | `python -m pytest tests/test_metrics.py -q` + 结构审查 | T-101/T-103 |
 | REQ-E-07 | 失败/业务分离：部分指标失败→execution PARTIAL 失败指标 UNKNOWN+error；单主机连接失败→该主机无业务结论退出码 10；全部失败/控制端失败→ERROR 退出码 10 | AE §6；CC §4 | 三场景单元测试 + 退出码断言 | `python -m pytest tests/test_ansible_runner.py tests/test_cli.py -q` | T-103/T-101 |
-| REQ-E-08 | 超时/连接失败不自动重试（serial:1 下重复执行意义有限） | AE §7 | 重试计数断言（0 重试） | 同上（test_no_retry） | T-103 |
+| REQ-E-08 | 超时/连接失败不自动重试；probe 不可达时跳过该主机后续 bundle | AE §7 | 重试计数断言（0 重试）+ callback/playbook 闸门断言 | `python -m pytest tests/test_ansible_runner.py -q`（test_playbook_contract_markers、test_no_retry） | T-103/T-130 |
 | REQ-E-09 | 结果脱敏：host-result JSON/事件/HTML 中 IP 脱敏为 `<IP>`、凭据关键字脱敏、原始输出只落本地临时目录；Excel Local.ip 仅使用运行时 inventory 映射用于运维识别 | AE §4.5；HR §1.4；DC C10/C11 | 脱敏单元测试（IP/凭据/日志行）+ 报表不含明文 IP 断言 | `python -m pytest tests/test_normalize.py -q`（test_desensitization） | T-104 |
 
 ## 6. 组 E：报表（reporting-roadmap）

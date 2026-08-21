@@ -20,6 +20,7 @@
 import importlib.util
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -171,12 +172,76 @@ def test_playbook_contract_markers():
 
 
 def test_playbook_parallel_is_explicit_and_bounded():
-    pb = ar.generate_playbook(_specs(_PROFILE), parallel=3)
-    assert "serial: 3" in pb
-    with pytest.raises(ar.CommandConfigError, match="并发主机数"):
-        ar.generate_playbook(_specs(_PROFILE), parallel=4)
-    with pytest.raises(ar.CommandConfigError, match="并发主机数"):
+    # Each worker owns a single-host playbook.  Host concurrency belongs to
+    # the controller thread pool, never to Ansible's play-level serial value.
+    pb = ar.generate_playbook(_specs(_PROFILE), parallel=1)
+    assert "serial: 1" in pb
+    with pytest.raises(ar.CommandConfigError, match="serial"):
+        ar.generate_playbook(_specs(_PROFILE), parallel=3)
+    with pytest.raises(ar.CommandConfigError, match="serial"):
         ar.generate_playbook(_specs(_PROFILE), parallel=0)
+
+
+def test_run_uses_bounded_threads_per_host(monkeypatch):
+    active = 0
+    maximum = 0
+    lock = threading.Lock()
+
+    def fake_worker(selection, host, specs, **kwargs):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return {
+            "hosts": [{
+                "host": host.name,
+                "ip": host.ip,
+                "execution_status": ar.STATUS_SUCCESS,
+                "metrics": [],
+                "summary": {"total": 0, "executed": 0, "failed": 0},
+            }]
+        }
+
+    monkeypatch.setattr(ar, "_run_one_host", fake_worker)
+    hosts = [_host(f"node-{i}", f"192.0.2.{i}") for i in range(1, 7)]
+    result = ar.run(_selection(hosts), [], parallel=3)
+
+    assert maximum <= 3
+    assert maximum >= 2
+    assert [item["host"] for item in result["hosts"]] == [h.name for h in hosts]
+    assert result["execution_status"] == ar.STATUS_SUCCESS
+    with pytest.raises(ar.CommandConfigError, match="1-10"):
+        ar.run(_selection(hosts), [], parallel=11)
+
+
+def test_run_cleans_shared_explicit_host_inventory_after_workers(monkeypatch, tmp_path):
+    inventory = tmp_path / "inventory.ini"
+    inventory.write_text("[all]\nnode-1\nnode-2\n", encoding="utf-8")
+    selection = _selection([_host("node-1", "192.0.2.1"), _host("node-2", "192.0.2.2")])
+    selection.kind = "hosts"
+    selection.inventory_file = inventory
+
+    def fake_worker(selection, host, specs, **kwargs):
+        assert selection.inventory_file == inventory
+        assert inventory.exists()
+        return {
+            "hosts": [{
+                "host": host.name,
+                "ip": host.ip,
+                "execution_status": ar.STATUS_SUCCESS,
+                "metrics": [],
+                "summary": {"total": 0, "executed": 0, "failed": 0},
+            }]
+        }
+
+    monkeypatch.setattr(ar, "_run_one_host", fake_worker)
+    result = ar.run(selection, [], parallel=2)
+
+    assert result["execution_status"] == ar.STATUS_SUCCESS
+    assert not inventory.exists()
 
 
 def test_playbook_minimal_become_only_declared_metrics():
