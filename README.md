@@ -19,7 +19,8 @@
 
 ## 当前开发状态与交接
 
-- 已完成项目内 Python 3.12 和 bundled Ansible runtime 的强制执行路径；
+- 已完成项目内 Python 3.12 和 bundled Ansible runtime 的强制执行路径；控制端使用项目 runtime，
+  受控端不要求安装 Python 或 Ansible（采集任务统一使用 Ansible `raw` + `/bin/bash -lc`）；
 - Linux x86_64/CPython 3.12 的报表依赖已随项目 runtime 提交（`pandas`、`numpy`、`xlsxwriter` 及其依赖），新 Linux 环境无需重复安装；精确版本见 `runtime/report-requirements.lock`；
 - 已完成 `--local` 本地 Linux 基础指标采集，以及远程 `-H` 的统一 JSON 事实源；
 - 已完成第一个中间件模块 **Nginx**（`inspect/modules/nginx.py`）：进程发现 + 白名单、9 个指标（含运行版本基线）、Excel `nginx` Sheet、HTML 中间件卡片/筛选/分组、`--nginx` 只巡检 Nginx；
@@ -31,7 +32,7 @@
 ## 执行路径
 
 - `inspect.sh --local`：使用项目内 Python 3.12，直接调用本机 bash 探测和指标命令；**不调用 Ansible**。
-- `inspect.sh -H <group-or-host>`：优先使用有效的项目内 `inventory/hosts.local.ini`，其次使用有主机的 `inventory/hosts.ini`，按主机组、主机名或 IP 选择目标，再使用项目内 Python 3.12 启动项目内打包的 Ansible；没有默认 inventory 时保留临时 inventory 兼容路径。
+- `inspect.sh -H <group-or-host>`：优先使用有效的项目内 `inventory/hosts.local.ini`，其次使用有主机的 `inventory/hosts.ini`，按主机组、主机名或 IP 选择目标，再使用项目内 Python 3.12 启动项目内打包的 Ansible；受控端只需 SSH、bash 和巡检命令，不依赖受控端 Python/Ansible；没有默认 inventory 时保留临时 inventory 兼容路径。
 - `inspect.sh -i <inventory>`：使用指定 inventory 和项目内打包的 Ansible；不依赖系统 Python/Ansible。
 - `INSPECT_FIXTURE_DIR=...`：两种模式都使用预录 fixture，零连接、零 Ansible。
 
@@ -94,7 +95,7 @@ HTML 指标卡片按纵向单列占满正文宽度；左侧支持主机、状态
 - `local.nginx.process.present`：Nginx 进程存在性（进程发现 + 白名单 CRIT）；
 - `local.nginx.version`：Nginx 版本（从运行中的 master 对应可执行文件执行 `nginx -v`，与 `inspect.conf` 的 `nginx_version` 比较）；
 - `local.nginx.config.valid`：配置有效性（`nginx -t`）；
-- `local.nginx.port.listening`：端口监听与本地访问（`ss` + `curl 127.0.0.1`）；
+- `local.nginx.port.listening`：端口监听与本地访问（`ss` + Nginx 配置中的监听地址 curl）；
 - `local.nginx.error_log.key_evidence`：关键日志（error.log 扫描）；
 - `local.nginx.connections.status`：连接状态（stub_status）；
 - `local.nginx.access_log.status_codes`：访问日志状态码（5xx 分布）；
@@ -160,7 +161,7 @@ bash inspect.sh -H inspection --keepalived
 `elasticsearch_*` 只作兜底；白名单和未运行主机语义与 Nginx/Keepalived 一致。API 认证可使用私有
 `inspect.conf` 的 `elasticsearch_api_user`、`elasticsearch_api_password` 和
 `elasticsearch_cacert`，也可使用目标主机 curl netrc 文件。远程 API 指标使用 Ansible
-script 任务（控制端临时脚本 + 任务环境）传给 curl，兼容目标主机只有 Python 3.7 的情况；
+raw 任务传给 curl，目标主机无需安装 Python 或 Ansible；
 本地模式使用进程环境。私密值只注入 Ansible 控制进程环境，不写入 playbook、JSON 或报表，
 GitHub 模板只保留 `CHANGE_ME` 占位符。
 Excel 输出独立的 `elasticsearch`
@@ -227,5 +228,6 @@ bash inspect.sh -H <host-or-ip-list>
 仓库根目录 `inspect.conf` 的 `timeout` 是统一秒数配置，默认模板为 `timeout = 3`。
 CLI 会将它同时用于 Ansible SSH 连接、能力探测、每条 shell/raw/script 命令以及 curl
 的 `--connect-timeout`/`--max-time`；超时结果统一为 `UNKNOWN`，不会默认通过。
-Elasticsearch、Nginx 和 Keepalived 的所有 curl 请求都固定访问目标主机的
-`127.0.0.1`，中间件配置中的远程 IP/主机名不会成为 HTTP 请求目标。
+Elasticsearch、Nginx 和 Keepalived 的 curl 请求都在目标主机执行，并优先使用各自运行
+配置中的监听地址/VIP；不会访问控制端或 inventory 中的其他主机。解析不到具体监听地址
+时不伪造请求目标，相关指标为 `UNKNOWN`。

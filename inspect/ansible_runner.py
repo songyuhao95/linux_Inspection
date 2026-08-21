@@ -33,7 +33,7 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -236,15 +236,12 @@ class CommandSpec:
     # registry boundary.
     trusted_generated_shell: bool = False
     # Some generated middleware commands need private environment values.  The
-    # raw module cannot receive task environment values. Elasticsearch uses
-    # the script action because ansible-core 2.18's shell module requires
-    # Python >=3.8 on the target host.
+    # value is rendered into a short, controller-side Jinja lookup prefix by
+    # generate_playbook().  Keeping the task as ``raw`` is intentional:
+    # ansible.builtin.shell/script modules can require Python on the managed
+    # host, while raw only needs the target's SSH shell.
     module: str = "ansible.builtin.raw"
     task_environment: Dict[str, str] = field(default_factory=dict)
-    # Controller-side script used by the Ansible script action. The script
-    # contains only the generated command and references task environment
-    # variables for private values; credentials are never embedded in it.
-    script_path: Optional[str] = None
 
 
 # 每指标：命令模板（TD §5.2 数据源列逐字转写，{…} 为 profile 占位）、
@@ -338,7 +335,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "local.nginx.port.listening": {
         "command": (
             "ss -tlnp | grep ':{nginx_port}'; "
-            "curl -sS -I --connect-timeout 3 http://127.0.0.1:{nginx_port}/ | head -n 1"
+            "curl -sS -I --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/ | head -n 1"
         ),
         "profile_keys": ("nginx_port",),
         "become": False,
@@ -356,7 +353,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「关键日志」行",
     },
     "local.nginx.connections.status": {
-        "command": "curl -sS --connect-timeout 3 http://127.0.0.1:{nginx_port}/nginx_status",
+        "command": "curl -sS --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/nginx_status",
         "profile_keys": ("nginx_port",),
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「Nginx连接状态」行",
@@ -411,7 +408,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「VIP绑定状态」行",
     },
     "local.keepalived.vip.access": {
-        "command": "curl -sS -I -H 'Host: {keepalived_vip}' http://127.0.0.1:{keepalived_port}/",
+        "command": "curl -sS -I http://{keepalived_vip}:{keepalived_port}/",
         "profile_keys": ("keepalived_vip", "keepalived_port"),
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「VIP访问」行",
@@ -786,7 +783,16 @@ def _is_runtime_elasticsearch_profile(profile: Dict[str, Any]) -> bool:
 
 
 def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
-    """Discover ES home/config/log/API paths from the running JVM first."""
+    """Discover ES paths and HTTP listener from the running JVM/config first.
+
+    The HTTP host is deliberately taken from the effective Elasticsearch
+    configuration, not from the controller inventory and not from a fixed
+    loopback address.  ``http.host``/``http.bind_host`` take precedence over
+    ``network.bind_host``/``network.host``.  Wildcard and Elasticsearch
+    special hosts (for example ``0.0.0.0`` and ``_site_``) are not usable curl
+    destinations, so they produce an empty endpoint and an explicit UNKNOWN
+    parse result rather than silently probing 127.0.0.1.
+    """
     bins = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_bin")) or ":"
     confs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_conf")) or ":"
     logs = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_log")) or ":"
@@ -822,10 +828,12 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         f"if test -z \"$es_http_port\"; then es_http_port={http_ports}; fi",
         "es_transport_port=$(test -n \"$es_conf\" && sed -nE 's/^[[:space:]]*transport.port:[[:space:]]*([0-9]+).*/\\1/p' \"$es_conf\" | head -n 1)",
         f"if test -z \"$es_transport_port\"; then es_transport_port={transport_ports}; fi",
-        # All Elasticsearch HTTP requests are deliberately loopback-only. The
-        # process/config discovery may identify the local port, but a remote
-        # network.host or inspect.conf endpoint must never become a curl target.
-        "es_endpoint=\"https://127.0.0.1:$es_http_port\"",
+        # Use the configured listener address.  Do not use a controller-side
+        # inventory address and do not force 127.0.0.1: some deployments bind
+        # only to their service IP.  Values such as 0.0.0.0/_site_ are
+        # filtered because they are bind selectors, not connectable addresses.
+        "es_listen_host=\"\"; if test -n \"$es_conf\"; then es_listen_host=$(sed -nE -e 's/^[[:space:]]*http\\.host:[[:space:]]*//p' -e 's/^[[:space:]]*http\\.bind_host:[[:space:]]*//p' -e 's/^[[:space:]]*network\\.bind_host:[[:space:]]*//p' -e 's/^[[:space:]]*network\\.host:[[:space:]]*//p' -e 's/^[[:space:]]*network\\.publish_host:[[:space:]]*//p' \"$es_conf\" | tr -d '[]\"' | tr ',' '\\n' | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' | grep -Ev '^(_|0\\.0\\.0\\.0$|::|0:0:0:0:0:0:0:0$)' | head -n 1); fi",
+        "es_endpoint=\"\"; if test -n \"$es_listen_host\"; then case \"$es_listen_host\" in *:*) es_endpoint=\"https://[$es_listen_host]:$es_http_port\";; *) es_endpoint=\"https://$es_listen_host:$es_http_port\";; esac; fi",
         "es_auth_file=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth_file=\"$p\"; break; fi; done",
         "es_cert=\"\"; if test -n \"$es_conf\"; then es_cert=$(grep -Eo '/[^[:space:]]+\\.(crt|pem)' \"$es_conf\" | head -n 1); fi",
         f"if test -z \"$es_cert\"; then for p in {certs}; do if test -f \"$p\"; then es_cert=\"$p\"; break; fi; done; fi",
@@ -968,6 +976,7 @@ def _nginx_discovery_prefix(profile: Dict[str, Any], *, include_dump: bool) -> s
             "nginx_access_log=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*access_log[[:space:]]+([^[:space:];]+).*/\\1/p' | head -n 1)",
             "case \"$nginx_access_log\" in /*) ;; '') ;; *) if test -n \"$nginx_prefix\"; then nginx_access_log=\"$nginx_prefix/$nginx_access_log\"; fi ;; esac",
             f"if test -z \"$nginx_access_log\" || ! test -f \"$nginx_access_log\"; then for p in {accesses_loop}; do if test -f \"$p\"; then nginx_access_log=\"$p\"; break; fi; done; fi",
+            "nginx_listener_host=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+([^:;[:space:]]+):[0-9]+.*/\\1/p' | head -n 1)",
         ]
     return "; ".join(parts)
 
@@ -992,7 +1001,7 @@ def _build_nginx_metric_command(
         ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))
         return (
             _nginx_discovery_prefix(profile, include_dump=True)
-            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do ss -tlnp | grep :$port; curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://127.0.0.1:$port/\" | head -n 1; done; fi"
+            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_ports\" || test -z \"$nginx_listener_host\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do ss -tlnp | grep :$port; curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://$nginx_listener_host:$port/\" | head -n 1; done; fi"
         )
     if metric_id == "local.nginx.error_log.key_evidence":
         return (
@@ -1003,7 +1012,7 @@ def _build_nginx_metric_command(
         ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))
         return (
             _nginx_discovery_prefix(profile, include_dump=True)
-            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do curl -sS --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://127.0.0.1:$port/nginx_status\"; done; fi"
+            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\" || test -z \"$nginx_listener_host\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do curl -sS --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://$nginx_listener_host:$port/nginx_status\"; done; fi"
         )
     if metric_id == "local.nginx.access_log.status_codes":
         return (
@@ -1080,7 +1089,7 @@ def _build_keepalived_metric_command(
         return (
             _keepalived_discovery_prefix(profile)
             + vip_extract
-            + f"if test -z \"$keepalived_vips\"; then keepalived_vips='{vips}'; fi; keepalived_port='{ports}'; if test -z \"$keepalived_vips\" || test -z \"$keepalived_port\"; then printf '%s\\n' INSPECT_KEEPALIVED_VIP_NOT_FOUND; else for vip in $keepalived_vips; do vip=${{vip%%/*}}; for port in $keepalived_port; do printf 'CONFIG_ACCESS=127.0.0.1:%s (configured_vip=%s)\\n' \"$port\" \"$vip\"; curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://127.0.0.1:$port/\" | head -n 1; done; done; fi"
+            + f"if test -z \"$keepalived_vips\"; then keepalived_vips='{vips}'; fi; keepalived_port='{ports}'; if test -z \"$keepalived_vips\" || test -z \"$keepalived_port\"; then printf '%s\\n' INSPECT_KEEPALIVED_VIP_NOT_FOUND; else for vip in $keepalived_vips; do vip=${{vip%%/*}}; for port in $keepalived_port; do printf 'CONFIG_ACCESS=%s:%s\\n' \"$vip\" \"$port\"; curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://$vip:$port/\" | head -n 1; done; done; fi"
         )
     if metric_id == "local.keepalived.config.baseline":
         return (
@@ -1232,11 +1241,10 @@ def build_metric_command_specs(
                     source_anchor=entry["anchor"],
                     allowed_binaries=_ELASTICSEARCH_GENERATED_ALLOWED_BINARIES,
                     trusted_generated_shell=True,
-                    module=(
-                        "ansible.builtin.shell"
-                        if task_environment
-                        else "ansible.builtin.raw"
-                    ),
+                    # Keep every managed-host task on raw.  The target only
+                    # needs an SSH shell; it does not need the controller's
+                    # Ansible package or any system Python installation.
+                    module="ansible.builtin.raw",
                     task_environment=task_environment,
                 )
             )
@@ -1417,35 +1425,21 @@ def validate_command_specs(
                 f"allow-list 拒绝：become 与注册表声明不一致（最小化 become）: "
                 f"{spec.metric_id}={spec.become!r}"
             )
-        if spec.module not in {
-            "ansible.builtin.raw",
-            "ansible.builtin.shell",
-            "ansible.builtin.script",
-        }:
+        if spec.module != "ansible.builtin.raw":
             raise CommandNotAllowedError(
-                f"allow-list 拒绝：不支持的 Ansible 任务模块: {spec.module!r}"
+                "allow-list 拒绝：受控端任务必须使用 ansible.builtin.raw，"
+                f"避免依赖受控端 Python: {spec.metric_id}={spec.module!r}"
             )
-        if spec.task_environment and spec.module not in {
-            "ansible.builtin.shell",
-            "ansible.builtin.script",
-        }:
+        # task_environment is rendered as a Jinja lookup prefix by the raw
+        # task generator.  It never becomes a literal credential in the
+        # generated playbook.
+        allowed_environment = {
+            "INSPECT_ES_API_USER",
+            "INSPECT_ES_API_PASSWORD",
+        }
+        if any(key not in allowed_environment for key in spec.task_environment):
             raise CommandNotAllowedError(
-                "allow-list 拒绝：任务环境变量只能交给 shell/script 模块，"
-                f"避免 raw 将其当作命令参数: {spec.metric_id}"
-            )
-        if spec.module in {"ansible.builtin.shell", "ansible.builtin.script"} and not (
-            spec.metric_id.startswith("local.elasticsearch.") and spec.task_environment
-        ):
-            raise CommandNotAllowedError(
-                f"allow-list 拒绝：shell/script 模块仅允许 Elasticsearch 私有认证任务: {spec.metric_id}"
-            )
-        if (
-            require_script_path
-            and spec.module == "ansible.builtin.script"
-            and not spec.script_path
-        ):
-            raise CommandNotAllowedError(
-                f"allow-list 拒绝：script 任务缺少控制端脚本路径: {spec.metric_id}"
+                f"allow-list 拒绝：任务环境变量不在私有认证集合内: {spec.metric_id}"
             )
         if spec.command is None:
             if spec.error_code != ERROR_UNSUPPORTED_PROFILE:
@@ -1516,7 +1510,7 @@ def generate_playbook(
 
     契约（AE §1-§7 文本断言）：
       - play 级：hosts: all、gather_facts: false、serial: 1、ignore_unreachable: true；
-      - 每任务：ansible.builtin.raw 或内部生成的 script +
+      - 每任务：ansible.builtin.raw +
         `timeout N /bin/bash -lc '…'`
         （N=15 探测 / 10 指标 / 15 日志，AE §7 超时注入）；
       - become：仅注册表声明需要特权的单条命令 become: true（AE §5
@@ -1559,41 +1553,23 @@ def generate_playbook(
     for idx, spec in enumerate(specs):
         if spec.command is None:
             continue  # UNSUPPORTED_PROFILE：不进 playbook（无命令可执行）
-        raw_cmd = f"timeout {spec.timeout_sec} /bin/bash -lc '{_sh_escape(spec.command)}'"
+        env_prefix = ""
+        if spec.task_environment:
+            env_prefix = " ".join(
+                f'{key}={{{{ lookup("env", "{key}") | quote }}}}'
+                for key in sorted(spec.task_environment)
+            ) + " "
+        raw_cmd = (
+            f"{env_prefix}timeout {spec.timeout_sec} /bin/bash -lc "
+            f"'{_sh_escape(spec.command)}'"
+        )
         lines.append(
             f'    - name: "metric: {spec.metric_id}（{spec.timeout_sec}s）"'
         )
-        if spec.module == "ansible.builtin.script":
-            lines.append(
-                f"      {spec.module}: '{_yaml_single_quote(str(spec.script_path))}'"
-            )
-        else:
-            lines.append(
-                f"      {spec.module}: '{_yaml_single_quote(raw_cmd)}'"
-            )
+        lines.append(
+            f"      {spec.module}: '{_yaml_single_quote(raw_cmd)}'"
+        )
         lines.append(f"      become: {str(spec.become).lower()}")
-        if spec.module == "ansible.builtin.shell":
-            lines.append("      args:")
-            lines.append("        executable: /bin/bash")
-        if spec.task_environment:
-            lines.append("      environment:")
-            for key, value in sorted(spec.task_environment.items()):
-                # Keep private ES credentials out of the generated playbook.
-                # The real runner supplies them only to the controller
-                # process environment; Ansible's env lookup renders them into
-                # the remote script task at execution time.
-                if (
-                    spec.module == "ansible.builtin.script"
-                    and key in {"INSPECT_ES_API_USER", "INSPECT_ES_API_PASSWORD"}
-                ):
-                    value_text = (
-                        '{{ lookup("env", "' + key + '") }}'
-                    )
-                else:
-                    value_text = value
-                lines.append(
-                    f"        {key}: '{_yaml_single_quote(value_text)}'"
-                )
         lines.append(f"      register: inspect_metric_{idx}")
         lines.append("      ignore_errors: true")
     lines.append("")
@@ -1670,47 +1646,17 @@ def prepare_run(
     白名单外未运行 → 跳过该主机 Nginx 指标）。
     """
     # Validate all command and generated-shell constraints before writing any
-    # runtime file.  The controller-side script path is assigned below, then
-    # the final spec list is validated again before the playbook is emitted.
+    # runtime file.  All managed-host tasks remain raw, so no controller-side
+    # script upload or target-side Python interpreter is required.
     validate_command_specs(specs, require_script_path=False)
     runtime_dir = Path(runtime_dir) if runtime_dir is not None else _default_runtime_dir()
     runtime_dir.mkdir(parents=True, exist_ok=True)
     playbook_path = runtime_dir / f"playbook-{uuid.uuid4().hex[:8]}.yml"
     prepared_specs: List[CommandSpec] = list(specs)
-    script_paths: List[Path] = []
     collection_timeout_sec = (
         timeout_sec if timeout_sec is not None else PROBE_TIMEOUT_SEC
     )
     try:
-        for idx, spec in enumerate(prepared_specs):
-            if not (
-                spec.module == "ansible.builtin.shell"
-                and spec.metric_id.startswith("local.elasticsearch.")
-                and spec.task_environment
-            ):
-                continue
-            if spec.command is None:
-                raise CommandConfigError(
-                    f"指标 {spec.metric_id} 的 script 任务缺少命令"
-                )
-            script_path = runtime_dir / f"metric-{idx}-{uuid.uuid4().hex[:8]}.sh"
-            raw_cmd = (
-                f"timeout {spec.timeout_sec} /bin/bash -lc "
-                f"'{_sh_escape(spec.command)}'"
-            )
-            script_text = (
-                "#!/bin/bash\n"
-                "# inspect generated controller-side script; no credentials are embedded.\n"
-                f"{raw_cmd}\n"
-            )
-            script_path.write_text(script_text, encoding="utf-8", newline="\n")
-            script_path.chmod(0o700)
-            script_paths.append(script_path)
-            prepared_specs[idx] = replace(
-                spec,
-                module="ansible.builtin.script",
-                script_path=str(script_path.resolve()),
-            )
         validate_command_specs(prepared_specs)
         text = generate_playbook(
             prepared_specs, timeout_sec=collection_timeout_sec
@@ -1718,7 +1664,7 @@ def prepare_run(
         playbook_path.write_text(text, encoding="utf-8", newline="\n")
         playbook_path.chmod(0o600)
     except OSError as exc:
-        for path in [playbook_path, *script_paths]:
+        for path in [playbook_path]:
             try:
                 path.unlink()
             except FileNotFoundError:
@@ -1729,7 +1675,7 @@ def prepare_run(
             f"运行期 playbook/script 写入失败（{type(exc).__name__}）"
         ) from exc
     except CommandConfigError:
-        for path in [playbook_path, *script_paths]:
+        for path in [playbook_path]:
             try:
                 path.unlink()
             except FileNotFoundError:
@@ -1747,9 +1693,9 @@ def prepare_run(
             timeout_sec=collection_timeout_sec
         ),
         cleanup_paths=(
-            (playbook_path, *script_paths, Path(selection.inventory_file))
+            (playbook_path, Path(selection.inventory_file))
             if getattr(selection, "kind", None) in {"local", "hosts"}
-            else (playbook_path, *script_paths)
+            else (playbook_path,)
         ),
         selection_kind=str(getattr(selection, "kind", "unknown")),
         nginx_whitelist=tuple(nginx_whitelist or ()),

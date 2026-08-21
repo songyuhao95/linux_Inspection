@@ -9,8 +9,8 @@
 
 | 端 | 假定 | 说明 |
 | --- | --- | --- |
-| 控制端 | Linux / WSL，**假定 Python 3 可用** | 运行 `inspect.sh` 与 Ansible；ansible-core 版本未验证，G0 预检记录为待验证项，不写成承诺 |
-| 受控端 | **不假定 Python** | `gather_facts: false`；只使用 `raw`/`script` 模块 + `/bin/bash -lc` 执行 Bash；不使用依赖受控端 Python 的模块 |
+| 控制端 | Linux / WSL，使用项目内 Python 3.12 和 bundled ansible-core | 运行 `inspect.sh` 与 Ansible；不依赖系统 Python/Ansible |
+| 受控端 | **不假定 Python 或 Ansible** | `gather_facts: false`；所有采集任务统一使用 `raw` + `/bin/bash -lc`，只要求 SSH、bash 和指标所需命令 |
 
 其余边界：
 
@@ -36,7 +36,7 @@ inspect.sh
   └─ Ansible（控制端）
        └─ per-host（serial: 1）
             ├─ capability probe（bash 可用性、/proc、free/df/ss 可用性、权限）
-            ├─ 指标采集（raw/script + /bin/bash -lc 的只读命令）
+            ├─ 指标采集（raw + /bin/bash -lc 的只读命令）
             ├─ normalize（控制端本地完成）
             └─ 原子写 host-result-v1 JSON（唯一事实源）
 ```
@@ -56,7 +56,7 @@ inspect.sh
 ## 4. 命令执行与安全
 
 1. **allow-list**：采集命令必须来自指标定义（文档锚点）；实现阶段只允许在契约命令集合内组合，禁止任意命令注入。
-2. 不使用 `shell` 模块依赖受控端 Python；使用 `raw` 直接执行 `/bin/bash -lc '<command>'`，或 `script` 上传只读脚本（脚本内容由采集命令集合生成）。
+2. 不使用依赖受控端 Python 的 `shell`/`script` 任务；所有采集命令使用 `raw` 直接执行 `/bin/bash -lc '<command>'`。Elasticsearch 的私有 API 凭据由控制端 Ansible Jinja `env` lookup 临时渲染为远端命令前缀，不写入 playbook 明文，也不要求目标机安装 Python。
 3. 参数拼接：主机名/IP 来自 `-H`/inventory，属配置边界；命令中不出现凭据。
 4. 输出只读：巡检命令不得修改受控端（无 `kill`/`rm`/`systemctl stop`/写操作）。
 5. 结果脱敏：控制端 normalize 时对 IP、端口、路径、日志片段做脱敏后再写入 JSON（见 host-result-v1.md 第 3 节）；原始输出只落本地临时目录且不进报表。
@@ -91,7 +91,7 @@ inspect.sh
 
 ## 8. 未验证项（G0 预检清单）
 
-1. ansible-core 版本与模块可用性（`raw`/`script` 在目标 ansible 版本下的行为）。
+1. ansible-core 版本与 `raw` 模块行为（目标端不使用 Python 依赖模块）。
 2. 受控端 bash 版本与 `/bin/bash -lc` 兼容性（Kylin V10 默认 bash）。
 3. 巡检账号的 sudo 配置与 become 方式。
 4. SSH 连接参数（跳板、密钥、端口）与 inventory 格式。

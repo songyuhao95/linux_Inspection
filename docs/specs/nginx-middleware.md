@@ -61,9 +61,10 @@ Ansible 账号、密码和连接参数继续只放在 `inventory/hosts.local.ini
   的 `nginx -v`；版本输出中的 `nginx/x.y.z` 与 `inspect.conf` 的 `nginx_version` 候选值
   逐一精确比较。一致为 OK，不一致为 CRIT；没有运行中的 master、没有版本输出或没有
   配置版本基线为 UNKNOWN。不会因为候选路径下存在一个未运行的 Nginx 二进制而判定版本正常。
-- **端口监听与本地访问**：先从实际 Nginx 配置的 `listen` 指令提取端口；无法提取时
-  使用 inspect.conf 的 `nginx_port` 候选。逐端口用 `ss -tlnp` 检查 LISTEN，再用 curl
-  访问 `127.0.0.1:<端口>/`；连接失败、未监听或 HTTP 5xx 为 CRIT。
+- **端口监听与本地访问**：先从实际 Nginx 配置的 `listen 地址:端口` 提取监听地址和端口；
+  无法提取完整监听地址时不伪造访问结论，使用 `INSPECT_NGINX_PORT_NOT_FOUND` → UNKNOWN。
+  逐端口用 `ss -tlnp` 检查 LISTEN，再在目标主机使用配置监听地址 curl 访问；连接失败、
+  未监听或 HTTP 5xx 为 CRIT。
 - **错误日志**：先从 master 的 `-e` 和配置文件的 `error_log` 解析，最后使用
   inspect.conf 的 `nginx_error_log` 候选；读取末尾 1000 行，扫描 emerg、alert、crit、
   error、permission denied、bind()、connect() failed、upstream timed out 等关键字；

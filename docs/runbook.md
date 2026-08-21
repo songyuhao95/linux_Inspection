@@ -69,15 +69,15 @@ bash inspect.sh -H inspection --elasticsearch
 ```
 
 模块先从运行中的 Elasticsearch JVM 解析 `-Des.path.home`、`-Des.path.conf`、
-`-Des.path.logs`、配置中的 HTTP/Transport 端口和证书；解析不到时按
+`-Des.path.logs`、配置中的 HTTP/Transport 端口、监听地址和证书；解析不到时按
 `inspect.conf` 中的 `elasticsearch_*` 候选路径顺序兜底。未运行且不在
 `elasticsearch_whitelist` 的主机跳过 ES 指标；白名单主机未运行保留进程指标并为
-CRIT。API 使用目标机 `elasticsearch_auth_file` 指向的 curl netrc 文件，不把密码写入
+CRIT。API 使用目标机配置文件中的监听地址，并使用 `elasticsearch_auth_file` 指向的 curl netrc 文件，不把密码写入
 项目配置。若现场使用 Elasticsearch HTTP Basic 认证，可在权限为 700 的私有
 `inspect.conf` 中配置 `elasticsearch_api_user` 和 `elasticsearch_api_password`，并在
-`elasticsearch_cacert` 配置 CA 路径；远程 API 指标通过 Ansible script 任务调用
-`curl --cacert <CA> -u <user>:<password>`。script 任务不要求受控端安装 Python 3.8+，
-适配 Kylin 常见的 Python 3.7；账号密码只在控制端 Ansible 子进程环境中临时注入，不写入
+`elasticsearch_cacert` 配置 CA 路径；远程 API 指标通过 Ansible raw 任务调用
+`curl --cacert <CA> -u <user>:<password>`。所有受控端任务均不要求安装 Python 或 Ansible；
+账号密码只在控制端 Ansible 子进程环境中临时注入，不写入
 运行期 playbook。 本地模式通过进程环境调用，规范化事实源和报表会脱敏。
 GitHub 模板中的密码必须保持 `CHANGE_ME`。401/403、连接失败、路径不可读均为 UNKNOWN，不默认通过。Excel 结果写入
 独立 `elasticsearch` Sheet，HTML 自动纳入中间件/指标筛选与分组。详细指标和阈值见

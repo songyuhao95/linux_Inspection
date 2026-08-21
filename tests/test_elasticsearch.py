@@ -63,6 +63,7 @@ def test_elasticsearch_fixture_commands_are_generated_from_profile():
     assert len(specs) == 20
     assert any("_cluster/health" in (spec.command or "") for spec in specs)
     assert all(spec.trusted_generated_shell or spec.metric_id.endswith("process.present") for spec in specs)
+    assert all(spec.module == "ansible.builtin.raw" for spec in specs)
     ar.validate_command_specs(specs)
 
     system = next(x for x in specs if x.metric_id == "local.elasticsearch.system.parameters")
@@ -87,7 +88,7 @@ def test_elasticsearch_api_credentials_use_private_config_and_cacert():
     assert "INSPECT_ES_API_USER" in health.command
     assert "INSPECT_ES_API_PASSWORD" in health.command
     assert "unit-test@password" not in health.command
-    assert health.module == "ansible.builtin.shell"
+    assert health.module == "ansible.builtin.raw"
     assert health.task_environment == {
         "INSPECT_ES_API_USER": "elastic",
         "INSPECT_ES_API_PASSWORD": "unit-test@password",
@@ -101,9 +102,22 @@ def test_elasticsearch_api_credentials_use_private_config_and_cacert():
     assert "es_cacert" in certificate.command
 
     playbook = ar.generate_playbook([health])
-    assert "ansible.builtin.shell:" in playbook
-    assert "environment:" in playbook
-    assert "INSPECT_ES_API_PASSWORD: 'unit-test@password'" in playbook
+    assert "ansible.builtin.shell:" not in playbook
+    assert "environment:" not in playbook
+    assert 'INSPECT_ES_API_PASSWORD={{ lookup("env", "INSPECT_ES_API_PASSWORD") | quote }}' in playbook
+    assert "unit-test@password" not in playbook
+
+
+def test_elasticsearch_endpoint_is_derived_on_target_not_forced_loopback():
+    profile = config.load_inspect_conf()
+    specs = ar.build_metric_command_specs(
+        module_ids=("elasticsearch",), profile=profile, timeout_sec=3
+    )
+    health = next(
+        spec for spec in specs if spec.metric_id == "local.elasticsearch.cluster.health"
+    )
+    assert "es_listen_host" in health.command
+    assert "https://127.0.0.1:$es_http_port" not in health.command
 
 
 def test_elasticsearch_system_parameters_parse_process_limits():

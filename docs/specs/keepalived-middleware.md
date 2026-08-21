@@ -14,7 +14,7 @@ Keepalived P0/P1 检查项实现。模块文件为 `inspect/modules/keepalived.p
 | `local.keepalived.process.present` | Keepalived 进程存在性 | `pgrep -fa '(^|[[:space:]/])keepalived[[:space:]]'`；白名单主机未运行为 CRIT，非白名单主机跳过模块 | P0「Keepalived本节点服务」 |
 | `local.keepalived.version` | Keepalived 版本 | 从运行进程命令行解析实际二进制执行 `-v`，与 `keepalived_version` 精确比较 | 部署规范版本要求 |
 | `local.keepalived.vip.bound` | VIP 绑定状态 | 从实际配置解析 `state` 和 `virtual_ipaddress`，再用 `ip -brief addr` 检查 VIP | P0「VIP绑定状态」 |
-| `local.keepalived.vip.access` | VIP 访问 | 从实际配置读取 VIP 用于绑定核对；仅在目标主机执行 `curl -I http://127.0.0.1:keepalived_port/` 检查本机 HTTP | P0「VIP访问」 |
+| `local.keepalived.vip.access` | VIP 访问 | 从实际配置读取 VIP 和端口；仅在目标主机执行 `curl -I http://<配置VIP>:<配置端口>/` 检查本机监听地址 | P0「VIP访问」 |
 | `local.keepalived.config.baseline` | 配置基线 | 检查 `state`、`interface`、`virtual_router_id`、`priority`、`advert_int`、`virtual_ipaddress`、`script`、`track_script` | P0「Keepalived配置基线」 |
 | `local.keepalived.healthcheck.script` | 健康检查脚本 | 从实际配置解析 `script` 路径，检查脚本存在且可执行；不执行脚本 | P0「健康检查脚本」 |
 | `local.keepalived.error_log.key_evidence` | 关键日志证据 | 读取末尾 1000 行，统计 MASTER/BACKUP/FAULT、VRRP、脚本失败等证据 | P0「关键日志」 |
@@ -60,9 +60,9 @@ SSH 账号、密码和连接参数继续只放在私有 `inventory/hosts.local.i
   OK，不一致为 CRIT；没有运行进程、版本输出或版本基线为 UNKNOWN。
 - **VIP 绑定**：`state=MASTER` 且 VIP 出现在本机 `ip -brief addr` 为 OK；`BACKUP` 且
   本机没有 VIP 为 OK；其他组合为 CRIT，避免双 MASTER 或 MASTER 无 VIP 被判正常。
-- **VIP 访问**：VIP 地址来自运行配置并用于绑定核对，端口来自配置或
-  `keepalived_port` 兜底；为避免巡检产生跨主机访问，HTTP 只在目标主机本机执行
-  `curl http://127.0.0.1:端口/`。未发现 VIP/端口、连接失败或 HTTP 5xx 为 CRIT。
+- **VIP 访问**：VIP 地址和端口来自运行配置或 `inspect.conf` 兜底；为避免巡检产生跨主机访问，
+  HTTP 只在目标主机本机执行 `curl http://配置VIP:端口/`，不再强制使用 127.0.0.1。
+  未发现 VIP/端口、连接失败或 HTTP 5xx 为 CRIT。
 - **配置基线**：逐项检查 8 个关键指令，缺少指令为 WARN，配置路径不存在或不可读为
   UNKNOWN；不是只检查文件是否存在。
 - **健康脚本**：解析 `vrrp_script` 的 `script` 路径，检查文件存在、普通文件和执行权限。
