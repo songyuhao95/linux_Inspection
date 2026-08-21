@@ -164,6 +164,9 @@ def test_playbook_contract_markers():
     assert f"timeout {ar.METRIC_TIMEOUT_SEC} /bin/bash -lc" in pb
     assert f"timeout {ar.LOG_METRIC_TIMEOUT_SEC} /bin/bash -lc" in pb
     assert "become: true" in pb
+    assert pb.count("when: inspect_probe is not unreachable") == len(
+        [s for s in _specs(_PROFILE) if s.command is not None]
+    )
 
 
 def test_playbook_minimal_become_only_declared_metrics():

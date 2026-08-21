@@ -43,6 +43,9 @@ inspect.sh
 
 - `gather_facts: false`：不在收集 facts 上花费时间与权限。
 - `serial: 1`：play 级配置，逐台依次执行。
+- probe 是主机级连接闸门：若 probe 已报告 SSH 不可达，后续指标任务通过
+  `when: inspect_probe is not unreachable` 在控制端跳过，不会为每个指标重复等待一次
+  SSH 超时；该主机最终只产生一个主机级 `CONNECTION_FAILED`，无业务结论。
 - 采集命令全部为只读巡检命令（ps/pgrep/free/df/ss/tail/grep 等），来源见 docs/specs/local-metrics-requirements.md 各指标"数据源"列；命令集合由文档锚点 + 配置边界限定。
 
 ## 3. 能力探测（probe）

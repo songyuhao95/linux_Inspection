@@ -228,6 +228,7 @@ bash inspect.sh -H <host-or-ip-list>
 仓库根目录 `inspect.conf` 的 `timeout` 是统一秒数配置，默认模板为 `timeout = 3`。
 CLI 会将它同时用于 Ansible SSH 连接、能力探测、每条 shell/raw/script 命令以及 curl
 的 `--connect-timeout`/`--max-time`；超时结果统一为 `UNKNOWN`，不会默认通过。
+主机能力探测是连接闸门：不可达主机不会对后续每个指标重复建立 SSH 连接，直接跳过指标任务并报告主机级技术失败。
 Elasticsearch、Nginx 和 Keepalived 的 curl 请求都在目标主机执行，并优先使用各自运行
 配置中的监听地址/VIP；不会访问控制端或 inventory 中的其他主机。解析不到具体监听地址
 时不伪造请求目标，相关指标为 `UNKNOWN`。

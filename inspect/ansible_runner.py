@@ -1570,6 +1570,11 @@ def generate_playbook(
             f"      {spec.module}: '{_yaml_single_quote(raw_cmd)}'"
         )
         lines.append(f"      become: {str(spec.become).lower()}")
+        # A connection failure during the probe must not cause Ansible to
+        # reopen the same SSH connection for every metric task.  The probe is
+        # the host-level gate; an unreachable result skips the remaining
+        # tasks locally and lets the callback report one host-level ERROR.
+        lines.append("      when: inspect_probe is not unreachable")
         lines.append(f"      register: inspect_metric_{idx}")
         lines.append("      ignore_errors: true")
     lines.append("")
