@@ -144,6 +144,112 @@ def test_callback_success_maps_into_existing_host_shape(tmp_path):
     assert host["metrics"][0]["error"] is None
 
 
+def test_callback_bundle_is_split_back_into_individual_metrics(tmp_path):
+    specs = [
+        ar.CommandSpec(
+            metric_id="local.cpu.load_1m",
+            command="cat /proc/loadavg; nproc",
+            timeout_sec=10,
+            become=False,
+            required_commands=("bash", "cat", "nproc"),
+            source_anchor="test",
+        ),
+        ar.CommandSpec(
+            metric_id="local.memory.available_percent",
+            command="free -m",
+            timeout_sec=10,
+            become=False,
+            required_commands=("bash", "free"),
+            source_anchor="test",
+        ),
+    ]
+    plan = _plan(tmp_path, specs)
+    key, _bundle_specs = ar._metric_bundle_groups(specs)[0]
+    task_name = ar._metric_bundle_task_name(0, key)
+    bundle_stdout = (
+        "INSPECT_METRIC_BEGIN\tlocal.cpu.load_1m\n"
+        "0.42 0.30 0.20 1/123 10\n8\n"
+        "INSPECT_METRIC_END\tlocal.cpu.load_1m\t0\n"
+        "INSPECT_METRIC_BEGIN\tlocal.memory.available_percent\n"
+        "Mem: 100 20 10 0 80 90\n"
+        "INSPECT_METRIC_END\tlocal.memory.available_percent\t0\n"
+    )
+    payload = {
+        "plays": [{
+            "tasks": [
+                {
+                    "task": {"name": "probe: 能力探测（15s）"},
+                    "hosts": {"node01": {"stdout": _probe_stdout(), "rc": 0}},
+                },
+                {
+                    "task": {"name": task_name},
+                    "hosts": {"node01": {"stdout": bundle_stdout, "rc": 0}},
+                },
+            ]
+        }],
+        "stats": {"node01": {"unreachable": 0}},
+    }
+    result = ar._parse_callback_results(plan, payload, 0.25)
+    host = result[0]
+    assert host["execution_status"] == ar.STATUS_SUCCESS
+    assert [m["metric_id"] for m in host["metrics"]] == [
+        "local.cpu.load_1m",
+        "local.memory.available_percent",
+    ]
+    assert all(m["error"] is None for m in host["metrics"])
+
+
+def test_callback_bundle_missing_marker_is_data_missing(tmp_path):
+    specs = [
+        ar.CommandSpec(
+            metric_id="local.cpu.load_1m",
+            command="cat /proc/loadavg; nproc",
+            timeout_sec=10,
+            become=False,
+            required_commands=("bash", "cat", "nproc"),
+            source_anchor="test",
+        ),
+        ar.CommandSpec(
+            metric_id="local.memory.available_percent",
+            command="free -m",
+            timeout_sec=10,
+            become=False,
+            required_commands=("bash", "free"),
+            source_anchor="test",
+        ),
+    ]
+    plan = _plan(tmp_path, specs)
+    key, _bundle_specs = ar._metric_bundle_groups(specs)[0]
+    payload = {
+        "plays": [{
+            "tasks": [
+                {
+                    "task": {"name": "probe: 能力探测（15s）"},
+                    "hosts": {"node01": {"stdout": _probe_stdout(), "rc": 0}},
+                },
+                {
+                    "task": {"name": ar._metric_bundle_task_name(0, key)},
+                    "hosts": {
+                        "node01": {
+                            "stdout": (
+                                "INSPECT_METRIC_BEGIN\tlocal.cpu.load_1m\n"
+                                "0.42 0.30 0.20 1/123 10\n8\n"
+                                "INSPECT_METRIC_END\tlocal.cpu.load_1m\t0\n"
+                            ),
+                            "rc": 0,
+                        }
+                    },
+                },
+            ]
+        }],
+        "stats": {"node01": {"unreachable": 0}},
+    }
+    result = ar._parse_callback_results(plan, payload, 0.25)
+    by_id = {m["metric_id"]: m for m in result[0]["metrics"]}
+    assert by_id["local.cpu.load_1m"]["error"] is None
+    assert by_id["local.memory.available_percent"]["error"]["code"] == ar.ERROR_DATA_MISSING
+
+
 def test_callback_unreachable_is_connection_error_without_metrics(tmp_path):
     result = ar._parse_callback_results(
         _plan(tmp_path), _payload(unreachable=True), 0.25

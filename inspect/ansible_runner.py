@@ -1501,6 +1501,107 @@ def _yaml_single_quote(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _metric_bundle_module(metric_id: str) -> str:
+    """Return the stable remote collection bundle for a metric.
+
+    Bundling is deliberately module-oriented rather than one giant host
+    command.  This keeps middleware adapters isolated while reducing the
+    Ansible/raw task count on the managed host.
+    """
+
+    for prefix, module_id in (
+        ("local.nginx.", "nginx"),
+        ("local.keepalived.", "keepalived"),
+        ("local.elasticsearch.", "elasticsearch"),
+    ):
+        if metric_id.startswith(prefix):
+            return module_id
+    return "linux"
+
+
+def _metric_bundle_groups(
+    specs: Sequence[CommandSpec],
+) -> List[Tuple[Tuple[Any, ...], List[CommandSpec]]]:
+    """Group executable specs by module, privilege and secret environment.
+
+    A privileged metric is kept in a separate bundle so a single ``become``
+    declaration cannot accidentally elevate all commands in a module.  The
+    environment values are part of the grouping key to prevent credentials
+    for different generated tasks from being mixed.
+    """
+
+    groups: Dict[Tuple[Any, ...], List[CommandSpec]] = {}
+    for spec in specs:
+        if spec.command is None:
+            continue
+        env_items = tuple(sorted(spec.task_environment.items()))
+        key = (
+            _metric_bundle_module(spec.metric_id),
+            bool(spec.become),
+            env_items,
+        )
+        groups.setdefault(key, []).append(spec)
+    return list(groups.items())
+
+
+def _metric_bundle_task_name(index: int, key: Tuple[Any, ...]) -> str:
+    module_id, privileged, _env_items = key
+    privilege = "privileged" if privileged else "unprivileged"
+    return f"metric-bundle: {module_id} #{index} ({privilege})"
+
+
+def _render_metric_bundle(specs: Sequence[CommandSpec]) -> str:
+    """Render one raw-compatible shell command with per-metric markers.
+
+    Every inner command keeps its own timeout and is followed by an explicit
+    return-code marker.  The outer command intentionally has no aggregate
+    timeout: the inner timeouts bound each read-only probe while allowing the
+    rest of the module bundle to continue after one slow metric.
+    """
+
+    lines = ["set +e"]
+    for spec in specs:
+        # metric_id is registry-owned and therefore safe as a single-quoted
+        # marker value; command remains shell-escaped at the existing raw
+        # command boundary below.
+        metric_id = _sh_escape(spec.metric_id)
+        command = _sh_escape(spec.command or "")
+        lines.extend(
+            [
+                f"printf '%s\\t%s\\n' INSPECT_METRIC_BEGIN '{metric_id}'",
+                f"timeout {spec.timeout_sec} /bin/bash -lc '{command}' 2>&1",
+                "inspect_metric_rc=$?",
+                "printf '\\n'",
+                f"printf '%s\\t%s\\t%s\\n' INSPECT_METRIC_END '{metric_id}' \"$inspect_metric_rc\"",
+            ]
+        )
+    # Keep the YAML scalar single-line.  YAML folds multiline single-quoted
+    # scalars, which would otherwise remove shell command boundaries.
+    return "; ".join(lines)
+
+
+def _parse_metric_bundle_output(text: str) -> Dict[str, Dict[str, Any]]:
+    """Split marked bundle stdout into the existing per-metric raw shape."""
+
+    results: Dict[str, Dict[str, Any]] = {}
+    pattern = re.compile(
+        r"INSPECT_METRIC_BEGIN\t(?P<metric>[^\t\r\n]+)\r?\n"
+        r"(?P<stdout>.*?)"
+        r"\r?\nINSPECT_METRIC_END\t(?P=metric)\t(?P<rc>-?\d+)(?:\r?\n|$)",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        metric_id = match.group("metric")
+        if metric_id in results:
+            continue
+        results[metric_id] = {
+            "rc": int(match.group("rc")),
+            "stdout": match.group("stdout"),
+            "stderr": "",
+        }
+    return results
+
+
 def generate_playbook(
     specs: Sequence[CommandSpec],
     probe_command: Optional[str] = None,
@@ -1510,10 +1611,10 @@ def generate_playbook(
 
     契约（AE §1-§7 文本断言）：
       - play 级：hosts: all、gather_facts: false、serial: 1、ignore_unreachable: true；
-      - 每任务：ansible.builtin.raw +
-        `timeout N /bin/bash -lc '…'`
-        （N=15 探测 / 10 指标 / 15 日志，AE §7 超时注入）；
-      - become：仅注册表声明需要特权的单条命令 become: true（AE §5
+      - 探测任务与按模块/权限分组的 metric-bundle 任务均使用
+        ansible.builtin.raw；bundle 内每个指标保留自己的
+        `timeout N /bin/bash -lc '…'`（AE §7 超时注入）；
+      - become：仅包含注册表声明需要特权的 bundle 使用 become: true（AE §5
         最小化 become），其余 false；
       - 无 retries/until（AE §7：超时/连接失败不自动重试）；
       - 忽略单命令失败（rc 语义留给 normalize，T-104）：ignore_errors。
@@ -1550,32 +1651,29 @@ def generate_playbook(
     lines.append("      become: false")
     lines.append("      register: inspect_probe")
     lines.append("      ignore_errors: true")
-    for idx, spec in enumerate(specs):
-        if spec.command is None:
-            continue  # UNSUPPORTED_PROFILE：不进 playbook（无命令可执行）
+    for idx, (key, bundle_specs) in enumerate(_metric_bundle_groups(specs)):
+        _module_id, _privileged, env_items = key
         env_prefix = ""
-        if spec.task_environment:
+        if env_items:
             env_prefix = " ".join(
-                f'{key}={{{{ lookup("env", "{key}") | quote }}}}'
-                for key in sorted(spec.task_environment)
+                f'export {env_key}={{{{ lookup("env", "{env_key}") | quote }}}};'
+                for env_key, _env_value in env_items
             ) + " "
-        raw_cmd = (
-            f"{env_prefix}timeout {spec.timeout_sec} /bin/bash -lc "
-            f"'{_sh_escape(spec.command)}'"
+        raw_cmd = f"{env_prefix}{_render_metric_bundle(bundle_specs)}"
+        lines.append(
+            f'    - name: "{_metric_bundle_task_name(idx, key)}"'
         )
         lines.append(
-            f'    - name: "metric: {spec.metric_id}（{spec.timeout_sec}s）"'
+            f"      {bundle_specs[0].module}: '{_yaml_single_quote(raw_cmd)}'"
         )
-        lines.append(
-            f"      {spec.module}: '{_yaml_single_quote(raw_cmd)}'"
-        )
-        lines.append(f"      become: {str(spec.become).lower()}")
+        lines.append(f"      become: {str(bool(key[1])).lower()}")
         # A connection failure during the probe must not cause Ansible to
         # reopen the same SSH connection for every metric task.  The probe is
         # the host-level gate; an unreachable result skips the remaining
-        # tasks locally and lets the callback report one host-level ERROR.
+        # bundle tasks locally and lets the callback report one host-level
+        # ERROR.
         lines.append("      when: inspect_probe is not unreachable")
-        lines.append(f"      register: inspect_metric_{idx}")
+        lines.append(f"      register: inspect_bundle_{idx}")
         lines.append("      ignore_errors: true")
     lines.append("")
     return "\n".join(lines)
@@ -2493,6 +2591,12 @@ def _parse_callback_results(
         for host in plan.hosts
     }
     spec_by_id = {spec.metric_id: spec for spec in plan.metric_specs}
+    bundle_specs_by_task = {
+        _metric_bundle_task_name(index, key): bundle_specs
+        for index, (key, bundle_specs) in enumerate(
+            _metric_bundle_groups(plan.metric_specs)
+        )
+    }
 
     for play_entry in payload.get("plays", []):
         if not isinstance(play_entry, dict):
@@ -2529,6 +2633,40 @@ def _parse_callback_results(
                             ERROR_PROBE_FAILED,
                             "能力探测任务失败（Ansible callback；无业务结论）",
                         )
+                    continue
+                if task_name.startswith("metric-bundle:"):
+                    bundle_specs = bundle_specs_by_task.get(task_name, ())
+                    if not bundle_specs:
+                        continue
+                    bundled = _parse_metric_bundle_output(
+                        _callback_text(raw.get("stdout"))
+                    )
+                    for spec in bundle_specs:
+                        part = bundled.get(spec.metric_id)
+                        if part is None:
+                            metric_result = classify_metric_result(
+                                spec.metric_id,
+                                None,
+                                "",
+                                "",
+                                spec.required_commands,
+                                state["probe_matrix"],
+                                preset_error={
+                                    "code": ERROR_DATA_MISSING,
+                                    "message": "Ansible metric-bundle 缺少该指标标记",
+                                },
+                            )
+                        else:
+                            metric_result = classify_metric_result(
+                                spec.metric_id,
+                                part["rc"],
+                                part["stdout"],
+                                part["stderr"],
+                                spec.required_commands,
+                                state["probe_matrix"],
+                            )
+                        metric_result["command"] = spec.command or ""
+                        state["metrics"][spec.metric_id] = metric_result
                     continue
                 if not task_name.startswith("metric:"):
                     continue

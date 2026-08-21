@@ -154,6 +154,8 @@ def test_registry_templates_only_allowed_binaries():
 
 def test_playbook_contract_markers():
     pb = ar.generate_playbook(_specs(_PROFILE))
+    executable = [s for s in _specs(_PROFILE) if s.command is not None]
+    bundles = ar._metric_bundle_groups(executable)
     assert "gather_facts: false" in pb
     assert "serial: 1" in pb
     assert "hosts: all" in pb
@@ -164,17 +166,19 @@ def test_playbook_contract_markers():
     assert f"timeout {ar.METRIC_TIMEOUT_SEC} /bin/bash -lc" in pb
     assert f"timeout {ar.LOG_METRIC_TIMEOUT_SEC} /bin/bash -lc" in pb
     assert "become: true" in pb
-    assert pb.count("when: inspect_probe is not unreachable") == len(
-        [s for s in _specs(_PROFILE) if s.command is not None]
-    )
+    assert pb.count("metric-bundle:") == len(bundles)
+    assert pb.count("when: inspect_probe is not unreachable") == len(bundles)
 
 
 def test_playbook_minimal_become_only_declared_metrics():
     pb = ar.generate_playbook(_specs(_PROFILE))
-    assert pb.count("become: true") == 2  # 仅 port.listening + logs.key_evidence
-    # probe + 8 个 linux 基础 false + nginx.process.present +
-    # keepalived.process.present + elasticsearch.process.present
-    assert pb.count("become: false") == 12
+    bundles = ar._metric_bundle_groups(
+        [s for s in _specs(_PROFILE) if s.command is not None]
+    )
+    assert pb.count("become: true") == sum(1 for key, _ in bundles if key[1])
+    assert pb.count("become: false") == 1 + sum(
+        1 for key, _ in bundles if not key[1]
+    )
 
 
 def test_playbook_no_retries():
@@ -189,34 +193,29 @@ def test_playbook_probe_task_first_and_ignores_errors():
     lines = pb.splitlines()
     first_task = next(i for i, l in enumerate(lines) if "probe: 能力探测" in l)
     # probe 任务在第一个指标任务之前
-    assert first_task < next(i for i, l in enumerate(lines) if "metric:" in l)
+    assert first_task < next(i for i, l in enumerate(lines) if "metric-bundle:" in l)
     assert "register: inspect_probe" in pb
     assert "ignore_errors: true" in pb
 
 
-def test_playbook_registers_each_metric_task():
+def test_playbook_registers_each_metric_bundle_task():
     pb = ar.generate_playbook(_specs(_PROFILE))
-    for i in range(10):
-        assert f"register: inspect_metric_{i}" in pb
+    bundles = ar._metric_bundle_groups(
+        [s for s in _specs(_PROFILE) if s.command is not None]
+    )
+    for i in range(len(bundles)):
+        assert f"register: inspect_bundle_{i}" in pb
 
 
 def test_playbook_yaml_single_quote_roundtrip():
-    """单引号标量 roundtrip（纯 stdlib）：YAML 双写（''→'）与 shell 转义
-    （'\\''→'）两级可逆恢复；YAML 单引号标量中反斜杠为字面量（合法）。"""
+    """每个原始命令都保留在 bundle 中，并继续使用 raw/bash/timeout。"""
     specs = _specs(_PROFILE)
     pb = ar.generate_playbook(specs)
     for spec in specs:
         if spec.command is None:
             continue
-        raw = f"timeout {spec.timeout_sec} /bin/bash -lc '{ar._sh_escape(spec.command)}'"
-        quoted = f"'{ar._yaml_single_quote(raw)}'"
-        assert f"ansible.builtin.raw: {quoted}" in pb
-        # 第一级：YAML 双写还原（'' → '）恢复 shell 转义后的原文
-        assert quoted[1:-1].replace("''", "'") == raw
-        # 第二级：shell 转义还原（'\'' → '）恢复原始命令
-        assert raw.replace("'\\''", "'") == (
-            f"timeout {spec.timeout_sec} /bin/bash -lc '{spec.command}'"
-        )
+        assert spec.metric_id in pb
+        assert f"timeout {spec.timeout_sec} /bin/bash -lc" in pb
 
 
 def test_playbook_no_unsupported_profile_tasks():

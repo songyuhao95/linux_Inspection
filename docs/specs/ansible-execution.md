@@ -36,7 +36,7 @@ inspect.sh
   └─ Ansible（控制端）
        └─ per-host（serial: 1）
             ├─ capability probe（bash 可用性、/proc、free/df/ss 可用性、权限）
-            ├─ 指标采集（raw + /bin/bash -lc 的只读命令）
+            ├─ 模块 bundle 采集（raw + /bin/bash -lc 的只读命令）
             ├─ normalize（控制端本地完成）
             └─ 原子写 host-result-v1 JSON（唯一事实源）
 ```
@@ -46,6 +46,14 @@ inspect.sh
 - probe 是主机级连接闸门：若 probe 已报告 SSH 不可达，后续指标任务通过
   `when: inspect_probe is not unreachable` 在控制端跳过，不会为每个指标重复等待一次
   SSH 超时；该主机最终只产生一个主机级 `CONNECTION_FAILED`，无业务结论。
+- 远程指标不会再为每个指标生成一个 Ansible 任务。可执行指标按
+  `linux`、`nginx`、`keepalived`、`elasticsearch` 模块打包；不同 `become` 权限或
+  私有环境值会拆成独立 bundle。每台主机仍按 `serial: 1` 执行，但一个模块通常只
+  产生一个 SSH/raw 远程任务。
+- bundle 内部为每个指标保留 `timeout N /bin/bash -lc '…'`，并输出受控的
+  `INSPECT_METRIC_BEGIN/END` 标记。控制端 callback 按 `metric_id` 拆分回既有单指标
+  stdout/rc，再继续执行原有分类、normalize 和事实源写入；缺少标记显式记为
+  `ERROR_DATA_MISSING`，绝不默认通过。
 - 采集命令全部为只读巡检命令（ps/pgrep/free/df/ss/tail/grep 等），来源见 docs/specs/local-metrics-requirements.md 各指标"数据源"列；命令集合由文档锚点 + 配置边界限定。
 
 ## 3. 能力探测（probe）
@@ -59,7 +67,7 @@ inspect.sh
 ## 4. 命令执行与安全
 
 1. **allow-list**：采集命令必须来自指标定义（文档锚点）；实现阶段只允许在契约命令集合内组合，禁止任意命令注入。
-2. 不使用依赖受控端 Python 的 `shell`/`script` 任务；所有采集命令使用 `raw` 直接执行 `/bin/bash -lc '<command>'`。Elasticsearch 的私有 API 凭据由控制端 Ansible Jinja `env` lookup 临时渲染为远端命令前缀，不写入 playbook 明文，也不要求目标机安装 Python。
+2. 不使用依赖受控端 Python 的 `shell`/`script` 任务；所有采集命令使用 `raw` 直接执行 `/bin/bash -lc '<command>'`，bundle 只是把多个这种只读命令放进同一远程任务。Elasticsearch 的私有 API 凭据由控制端 Ansible Jinja `env` lookup 临时导出到 bundle 进程环境，不写入 playbook 明文，也不要求目标机安装 Python。
 3. 参数拼接：主机名/IP 来自 `-H`/inventory，属配置边界；命令中不出现凭据。
 4. 输出只读：巡检命令不得修改受控端（无 `kill`/`rm`/`systemctl stop`/写操作）。
 5. 结果脱敏：控制端 normalize 时对 IP、端口、路径、日志片段做脱敏后再写入 JSON（见 host-result-v1.md 第 3 节）；原始输出只落本地临时目录且不进报表。
@@ -67,7 +75,7 @@ inspect.sh
 
 ## 5. 权限模型（become）
 
-- 默认以**普通巡检账号**执行只读命令；仅在指标明确需要特权（如读取其他用户日志）且该指标判定依赖特权数据时，对该条命令使用最小化 `become: true`。
+- 默认以**普通巡检账号**执行只读命令；仅在指标明确需要特权（如读取其他用户日志）且该指标判定依赖特权数据时，将该指标放入独立的最小化 `become: true` bundle，不会把同模块的普通指标一起提升。
 - become 方法（sudo/su）与控制端账号属配置边界，G0 预检时由现场确认。
 - 单指标权限不足 → 该指标 `UNKNOWN`（error=PERMISSION_DENIED），**继续**其余指标与主机，整体 `execution_status=PARTIAL`。
 - 禁止以 root 全程运行巡检；禁止 become 提升后执行非只读操作。
@@ -90,7 +98,7 @@ inspect.sh
   独立的执行上限，避免多个指标串行执行时把每条命令的 timeout 错当成整次巡检上限。
 - SSH 通过 `ConnectTimeout=<timeout>` 和 Ansible connection timeout 控制；curl 同时
   设置 `--connect-timeout <timeout>` 与 `--max-time <timeout>`。
-- 超时/连接失败不自动重试（serial:1 顺序下重复执行意义有限）；G0 预检验证 ansible 连接参数（ssh 超时、ping 间隔）后确定。
+- 超时/连接失败不自动重试（serial:1 顺序下重复执行意义有限）；bundle 内某个指标超时后记录该指标 `UNKNOWN`，继续执行同 bundle 后续指标。G0 预检验证 ansible 连接参数（ssh 超时、ping 间隔）后确定。
 
 ## 8. 未验证项（G0 预检清单）
 
