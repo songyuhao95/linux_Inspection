@@ -49,7 +49,9 @@ inspect.sh
 
 - 每台主机执行前先 probe：`/bin/bash -lc 'command -v bash; command -v pgrep; command -v ss; command -v free; command -v df; ...'`。
 - probe 结果决定后续采集可用性：某命令不存在 → 相关指标 `UNKNOWN`（error=COMMAND_NOT_FOUND）并继续；bash 本身不可用 → 该主机整体 `execution_status=ERROR`，记录技术失败，不产生业务结论。
-- probe 超时 15s；采集命令超时 10s（日志类 15s），超时按 `TIMEOUT` 处理（`UNKNOWN` + error），不得把超时当作业务正常。
+- probe、采集命令、SSH 连接和 curl 的等待时间统一由根目录 `inspect.conf` 的
+  `timeout` 控制（模板默认 3s）；超时按 `TIMEOUT` 处理（`UNKNOWN` + error），
+  不得把超时当作业务正常。允许配置范围为 1-60s。
 
 ## 4. 命令执行与安全
 
@@ -81,7 +83,10 @@ inspect.sh
 
 ## 7. 超时与重试
 
-- probe 15s；指标命令 10s（日志 15s）；单主机总时长上限 300s。
+- probe、指标命令和日志命令使用 `inspect.conf timeout`；单主机 Ansible 控制进程仍有
+  独立的执行上限，避免多个指标串行执行时把每条命令的 timeout 错当成整次巡检上限。
+- SSH 通过 `ConnectTimeout=<timeout>` 和 Ansible connection timeout 控制；curl 同时
+  设置 `--connect-timeout <timeout>` 与 `--max-time <timeout>`。
 - 超时/连接失败不自动重试（serial:1 顺序下重复执行意义有限）；G0 预检验证 ansible 连接参数（ssh 超时、ping 间隔）后确定。
 
 ## 8. 未验证项（G0 预检清单）

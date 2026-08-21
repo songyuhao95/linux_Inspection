@@ -2,7 +2,8 @@
 
 职责（docs/specs/technical-design.md §4 probe.py 行 + §5.1，AE §3）：
   - 每台受控主机执行采集前先探测命令可用性：`/bin/bash -lc` 包裹
-    `command -v bash; command -v pgrep; ...`（TD §5.1 逐字命令），超时 15s；
+    `command -v bash; command -v pgrep; ...`（TD §5.1 逐字命令），默认超时 15s；
+    CLI 会用 inspect.conf 的统一 timeout 覆盖；
   - 输出逐行解析为能力矩阵（{命令: 可用/缺失}）：`command -v X` 成功输出
     绝对路径 → available；无输出/非零 → missing（TD §5.1 解析规则）；
   - bash 本身不可用 → 该主机整体 execution_status=ERROR，不产生业务结论；
@@ -16,8 +17,8 @@
 不发起连接（命令文本由 ansible_runner 封装进 playbook 执行）；
 "探测之外的命令执行"为禁止行为（TD §4 probe.py 行）。
 
-探测命令集合与超时属冻结设计（TD §5.1/AE §7）：probe 15s；
-指标命令 10s（日志类 15s）；单主机总时长 300s（均见 ansible_runner）。
+探测命令集合与默认超时属冻结设计（TD §5.1/AE §7）：probe 默认 15s；
+指标命令默认 10s（日志类 15s）；CLI 统一使用 inspect.conf timeout。
 """
 
 from __future__ import annotations

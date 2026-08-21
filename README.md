@@ -221,3 +221,11 @@ bash inspect.sh -H <host-or-ip-list>
 生产环境仍建议按组织规则预先核验并管理 `known_hosts`。
 
 `--local` 是本地排查模式，不经过 Ansible；只有远程 `-H` 或 `-i` 模式才调用项目内 bundled Ansible。
+
+### 统一超时与本机 HTTP 探测
+
+仓库根目录 `inspect.conf` 的 `timeout` 是统一秒数配置，默认模板为 `timeout = 3`。
+CLI 会将它同时用于 Ansible SSH 连接、能力探测、每条 shell/raw/script 命令以及 curl
+的 `--connect-timeout`/`--max-time`；超时结果统一为 `UNKNOWN`，不会默认通过。
+Elasticsearch、Nginx 和 Keepalived 的所有 curl 请求都固定访问目标主机的
+`127.0.0.1`，中间件配置中的远程 IP/主机名不会成为 HTTP 请求目标。

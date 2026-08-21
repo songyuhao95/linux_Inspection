@@ -32,7 +32,7 @@ metrics:
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置/VIP/角色无法发现，或 ip 命令不可用" }
   local.keepalived.vip.access:
     name: VIP 访问
-    source_anchor: "P0 VIP访问：curl -sS -I --connect-timeout 3 http://VIP:8010/；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    source_anchor: "P0 VIP访问：在目标主机本机执行 curl -sS -I http://127.0.0.1:端口/；VIP 地址只用于配置/绑定核对；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
       OK: { rule: "访问配置中的 VIP 和 keepalived_port，HTTP 返回 200/3xx/401/403 等可解释状态且不是 5xx", rule_id: "keepalived-p0-v1.keepalived.vip.access.ok", reason: null, note: null }
       WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }

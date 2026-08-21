@@ -911,10 +911,17 @@ def _resolve_one(
 
 DEFAULT_RUNTIME_CONFIG_NAME = "inspect.conf"
 
+# 现场连接、命令和 HTTP 请求的统一默认上限（秒）。inspect.conf 可覆盖，
+# 但 CLI 会把同一个值传给 SSH、探测/指标 shell 和 curl，避免各模块各自等待。
+DEFAULT_INSPECT_TIMEOUT_SEC = 3
+MIN_INSPECT_TIMEOUT_SEC = 1
+MAX_INSPECT_TIMEOUT_SEC = 60
+
 # inspect.conf 使用一行一个参数、管道分隔候选值；这里的空字典表示“没有
 # 配置候选路径”，不是再回退到文档中的固定路径。这样能保证现场没有配置时
 # 的中间件指标进入 UNKNOWN，而不是误检另一套安装。
 INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
+    "timeout": [str(DEFAULT_INSPECT_TIMEOUT_SEC)],
     "nginx_bin": [],
     "nginx_conf": [],
     "nginx_error_log": [],
@@ -1039,6 +1046,30 @@ def load_inspect_conf(path: Optional[Union[str, Path]] = None) -> Dict[str, List
             raise ConfigError(f"inspect.conf 第 {lineno} 行参数名非法: {key!r}")
         result[key] = _split_conf_values(value, source=str(source), lineno=lineno)
     return result
+
+
+def load_inspect_timeout(
+    config: Optional[Dict[str, List[str]]] = None,
+) -> int:
+    """读取并校验 inspect.conf 的全局 timeout（秒）。
+
+    timeout 必须是单个整数，范围 1-60 秒。保留一个较小上限是为了避免
+    配置错误把 SSH/命令等待放大到不可控；默认值为 3 秒。
+    """
+    data = config if config is not None else load_inspect_conf()
+    values = data.get("timeout", [str(DEFAULT_INSPECT_TIMEOUT_SEC)])
+    if len(values) != 1:
+        raise ConfigError("inspect.conf timeout 必须是单个秒数，不能使用 | 分隔多个值")
+    raw = str(values[0]).strip()
+    if not re.fullmatch(r"[0-9]+", raw):
+        raise ConfigError(f"inspect.conf timeout 必须为整数秒: {raw!r}")
+    value = int(raw)
+    if not MIN_INSPECT_TIMEOUT_SEC <= value <= MAX_INSPECT_TIMEOUT_SEC:
+        raise ConfigError(
+            "inspect.conf timeout 超出范围: "
+            f"{value}（允许 {MIN_INSPECT_TIMEOUT_SEC}-{MAX_INSPECT_TIMEOUT_SEC} 秒）"
+        )
+    return value
 
 
 def load_keepalived_baseline(
@@ -1166,9 +1197,13 @@ __all__ = [
     "KEEPALIVED_BASELINE_VERSION",
     "ELASTICSEARCH_BASELINE_VERSION",
     "DEFAULT_RUNTIME_CONFIG_NAME",
+    "DEFAULT_INSPECT_TIMEOUT_SEC",
+    "MIN_INSPECT_TIMEOUT_SEC",
+    "MAX_INSPECT_TIMEOUT_SEC",
     "build_resolved_thresholds",
     "load_document_baseline",
     "load_inspect_conf",
+    "load_inspect_timeout",
     "load_inspect_config",
     "load_nginx_baseline",
     "load_keepalived_baseline",

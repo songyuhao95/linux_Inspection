@@ -83,9 +83,14 @@ PROBE_TIMEOUT_SEC = probe_mod.PROBE_TIMEOUT_SEC
 METRIC_TIMEOUT_SEC = 10
 LOG_METRIC_TIMEOUT_SEC = 15
 HOST_TIMEOUT_SEC = 300
+MIN_COMMAND_TIMEOUT_SEC = 1
+MAX_COMMAND_TIMEOUT_SEC = 60
 
 # GNU coreutils timeout 的默认退出码（命令超时 → 分类为 TIMEOUT）
 TIMEOUT_RC = 124
+# curl 的操作超时退出码；外层 GNU timeout 通常会将其转换为 124，但保留
+# 28 兼容 curl 在恰好达到 --max-time 时先自行退出的情况。
+CURL_TIMEOUT_RC = 28
 
 # host-result-v1 error.code 枚举（HR §1.4 / TD §4 error 枚举；T-104 消费）
 ERROR_CONNECTION_FAILED = "CONNECTION_FAILED"
@@ -406,7 +411,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「VIP绑定状态」行",
     },
     "local.keepalived.vip.access": {
-        "command": "curl -sS -I --connect-timeout 3 http://{keepalived_vip}:{keepalived_port}/",
+        "command": "curl -sS -I -H 'Host: {keepalived_vip}' http://127.0.0.1:{keepalived_port}/",
         "profile_keys": ("keepalived_vip", "keepalived_port"),
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「VIP访问」行",
@@ -790,7 +795,6 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
     cacerts = _elasticsearch_shell_words(
         _elasticsearch_candidates(profile, "elasticsearch_cacert")
     ) or certs or ":"
-    endpoints = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_endpoint")) or ":"
     auths = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_auth_file")) or ":"
     http_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_http_port")) or "9200"
     transport_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_transport_port")) or "9300"
@@ -818,12 +822,10 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         f"if test -z \"$es_http_port\"; then es_http_port={http_ports}; fi",
         "es_transport_port=$(test -n \"$es_conf\" && sed -nE 's/^[[:space:]]*transport.port:[[:space:]]*([0-9]+).*/\\1/p' \"$es_conf\" | head -n 1)",
         f"if test -z \"$es_transport_port\"; then es_transport_port={transport_ports}; fi",
-        "es_endpoint=\"\"",
-        "es_bind_host=$(test -n \"$es_conf\" && sed -nE 's/^[[:space:]]*(network.host|http.host|network.bind_host):[[:space:]]*([^#[:space:]]+).*/\\2/p' \"$es_conf\" | head -n 1)",
-        "case \"$es_bind_host\" in 0.0.0.0|_site_|_local_|\\[::\\]|::) es_bind_host=127.0.0.1;; esac",
-        "if test -n \"$es_bind_host\"; then es_endpoint=\"https://$es_bind_host:$es_http_port\"; fi",
-        f"if test -z \"$es_endpoint\"; then for p in {endpoints}; do es_endpoint=\"$p\"; break; done; fi",
-        "if test -z \"$es_endpoint\"; then es_endpoint=\"https://127.0.0.1:$es_http_port\"; fi",
+        # All Elasticsearch HTTP requests are deliberately loopback-only. The
+        # process/config discovery may identify the local port, but a remote
+        # network.host or inspect.conf endpoint must never become a curl target.
+        "es_endpoint=\"https://127.0.0.1:$es_http_port\"",
         "es_auth_file=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth_file=\"$p\"; break; fi; done",
         "es_cert=\"\"; if test -n \"$es_conf\"; then es_cert=$(grep -Eo '/[^[:space:]]+\\.(crt|pem)' \"$es_conf\" | head -n 1); fi",
         f"if test -z \"$es_cert\"; then for p in {certs}; do if test -f \"$p\"; then es_cert=\"$p\"; break; fi; done; fi",
@@ -853,17 +855,22 @@ def _elasticsearch_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def _es_curl(path: str, options: str = "") -> str:
+def _es_curl(path: str, options: str = "", *, timeout_sec: int = METRIC_TIMEOUT_SEC) -> str:
     """Build a curl call using task-local auth/TLS arrays, never literals."""
     extra = f" {options}" if options else ""
     return (
-        f"curl -sS --connect-timeout 3 --max-time 10 "
+        f"curl -sS --connect-timeout {timeout_sec} --max-time {timeout_sec} "
         f"\"${{es_curl_args[@]}}\"{extra} \"$es_endpoint{path}\""
     )
 
 
-def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
+def _build_elasticsearch_metric_command(
+    metric_id: str, profile: Dict[str, Any], *, timeout_sec: int = METRIC_TIMEOUT_SEC
+) -> str:
     prefix = _elasticsearch_discovery_prefix(profile)
+    def api(path: str, options: str = "") -> str:
+        return _es_curl(path, options, timeout_sec=timeout_sec)
+
     if metric_id == "local.elasticsearch.version":
         # Do not execute the Elasticsearch launcher for version discovery.
         # On some tar deployments the launcher starts a JVM and can block;
@@ -873,48 +880,48 @@ def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any])
             prefix
             + "; if test -z \"$es_process_line\" || test -z \"$es_endpoint\"; then "
             + "printf '%s\\n' INSPECT_ELASTICSEARCH_RUNNING_NOT_FOUND; else "
-            + _es_curl("/")
+            + api("/")
             + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; fi"
         )
     if metric_id == "local.elasticsearch.cluster.health":
-        return prefix + "; if test -z \"$es_endpoint\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_ENDPOINT_NOT_FOUND; else " + _es_curl("/_cluster/health?pretty") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; fi"
+        return prefix + "; if test -z \"$es_endpoint\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_ENDPOINT_NOT_FOUND; else " + api("/_cluster/health?pretty") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; fi"
     if metric_id == "local.elasticsearch.nodes.online":
-        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,ip,node.role,master,heap.percent,cpu,load_1m,disk.used_percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cat/nodes?v&h=name,ip,node.role,master,heap.percent,cpu,load_1m,disk.used_percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.nodes.cpu":
-        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,ip,cpu,load_1m,load_5m,load_15m") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cat/nodes?v&h=name,ip,cpu,load_1m,load_5m,load_15m") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.nodes.memory":
-        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,heap.percent,ram.percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cat/nodes?v&h=name,heap.percent,ram.percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.nodes.disk":
-        return prefix + "; " + _es_curl("/_cat/allocation?v") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cat/allocation?v") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.disk.watermark":
-        return prefix + "; " + _es_curl("/_cluster/settings?include_defaults=true&filter_path=**.watermark*") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cluster/settings?include_defaults=true&filter_path=**.watermark*") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.shards.unassigned":
-        return prefix + "; " + _es_curl("/_cat/shards?v&h=index,shard,prirep,state,node,unassigned.reason") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cat/shards?v&h=index,shard,prirep,state,node,unassigned.reason") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.service.port":
         return prefix + "; ps -ef | grep '[e]lasticsearch'; ss -tlnp | grep -E \" :$es_http_port|:$es_http_port|:$es_transport_port\""
     if metric_id == "local.elasticsearch.heap.gc":
-        return prefix + "; " + _es_curl("/_cat/nodes?v&h=name,heap.percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; if test -n \"$es_gc_log\"; then tail -n 200 \"$es_gc_log\" | grep -Ei 'Pause|Full|OutOfMemory|heap'; else printf '%s\\n' INSPECT_ELASTICSEARCH_GC_LOG_NOT_FOUND; fi"
+        return prefix + "; " + api("/_cat/nodes?v&h=name,heap.percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; if test -n \"$es_gc_log\"; then tail -n 200 \"$es_gc_log\" | grep -Ei 'Pause|Full|OutOfMemory|heap'; else printf '%s\\n' INSPECT_ELASTICSEARCH_GC_LOG_NOT_FOUND; fi"
     if metric_id == "local.elasticsearch.thread_pool.rejected":
-        return prefix + "; " + _es_curl("/_cat/thread_pool/search,write?v&h=node_name,name,active,queue,rejected,completed") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cat/thread_pool/search,write?v&h=node_name,name,active,queue,rejected,completed") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.cluster.settings":
-        return prefix + "; " + _es_curl("/_cluster/settings?flat_settings=true&pretty") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cluster/settings?flat_settings=true&pretty") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.discovery.config":
         return prefix + "; if test -z \"$es_conf\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_CONFIG_NOT_FOUND; else printf 'INSPECT_ELASTICSEARCH_CONF=%s\\n' \"$es_conf\"; grep -E 'discovery.seed_hosts|cluster.initial_master_nodes|network.host|node.name' \"$es_conf\"; fi"
     if metric_id == "local.elasticsearch.indices.health":
-        return prefix + "; " + _es_curl("/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
+        return prefix + "; " + api("/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.slowlog.key_evidence":
         return prefix + "; if test -z \"$es_log_dir\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_LOG_NOT_FOUND; else ls -1 \"$es_log_dir\"/*slowlog* 2>/dev/null; tail -n 100 \"$es_log_dir\"/*slowlog* 2>/dev/null; fi"
     if metric_id == "local.elasticsearch.security.accounts":
         status = " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
-        return prefix + "; " + _es_curl("/_security/user?pretty") + status + "; " + _es_curl("/_security/role?pretty") + status
+        return prefix + "; " + api("/_security/user?pretty") + status + "; " + api("/_security/role?pretty") + status
     if metric_id == "local.elasticsearch.certificate.validity":
         return prefix + "; if test -z \"$es_cert\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_CERT_NOT_FOUND; else openssl x509 -in \"$es_cert\" -noout -dates -checkend 2592000; fi"
     if metric_id == "local.elasticsearch.snapshot.repository":
         repos = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_snapshot_repo")) or ""
         repo = repos.split()[0] if repos else ""
         status = " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
-        verify = _es_curl(f"/{repo}/_verify?pretty", "-X POST") + status
-        return prefix + f"; if test -z \"$es_endpoint\" || test -z \"{repos}\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND; else " + _es_curl("/_snapshot/_all?pretty") + status + "; " + verify + "; fi"
+        verify = api(f"/{repo}/_verify?pretty", "-X POST") + status
+        return prefix + f"; if test -z \"$es_endpoint\" || test -z \"{repos}\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND; else " + api("/_snapshot/_all?pretty") + status + "; " + verify + "; fi"
     if metric_id == "local.elasticsearch.system.parameters":
         return prefix + "; printf 'ES_MAX_MAP_COUNT=%s\\n' \"$(cat /proc/sys/vm/max_map_count 2>/dev/null)\"; free -m; if test -n \"$es_pid\" && test -r \"/proc/$es_pid/limits\"; then printf 'ES_ULIMIT_NOFILE=%s\\n' \"$(sed -nE 's/^Max open files[[:space:]]+([0-9]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; printf 'ES_ULIMIT_NPROC=%s\\n' \"$(sed -nE 's/^Max processes[[:space:]]+([0-9]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; printf 'ES_ULIMIT_MEMLOCK=%s\\n' \"$(sed -nE 's/^Max locked memory[[:space:]]+([^[:space:]]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; else printf 'ES_ULIMIT_NOFILE=\\nES_ULIMIT_NPROC=\\nES_ULIMIT_MEMLOCK=\\n'; fi"
     if metric_id == "local.elasticsearch.process.present":
@@ -965,7 +972,9 @@ def _nginx_discovery_prefix(profile: Dict[str, Any], *, include_dump: bool) -> s
     return "; ".join(parts)
 
 
-def _build_nginx_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
+def _build_nginx_metric_command(
+    metric_id: str, profile: Dict[str, Any], *, timeout_sec: int = METRIC_TIMEOUT_SEC
+) -> str:
     """Build a per-metric Nginx command with process-first discovery."""
     if metric_id == "local.nginx.config.valid":
         error_candidates = _nginx_candidates(profile, "nginx_error_log")
@@ -983,7 +992,7 @@ def _build_nginx_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
         ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))
         return (
             _nginx_discovery_prefix(profile, include_dump=True)
-            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do ss -tlnp | grep :$port; curl -sS -I --connect-timeout 3 \"http://127.0.0.1:$port/\" | head -n 1; done; fi"
+            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do ss -tlnp | grep :$port; curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://127.0.0.1:$port/\" | head -n 1; done; fi"
         )
     if metric_id == "local.nginx.error_log.key_evidence":
         return (
@@ -994,7 +1003,7 @@ def _build_nginx_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
         ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))
         return (
             _nginx_discovery_prefix(profile, include_dump=True)
-            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do curl -sS --connect-timeout 3 \"http://127.0.0.1:$port/nginx_status\"; done; fi"
+            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do curl -sS --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://127.0.0.1:$port/nginx_status\"; done; fi"
         )
     if metric_id == "local.nginx.access_log.status_codes":
         return (
@@ -1049,7 +1058,9 @@ def _keepalived_config_prefix(profile: Dict[str, Any]) -> str:
     )
 
 
-def _build_keepalived_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
+def _build_keepalived_metric_command(
+    metric_id: str, profile: Dict[str, Any], *, timeout_sec: int = METRIC_TIMEOUT_SEC
+) -> str:
     """Build a Keepalived command with process-first path discovery."""
     if metric_id == "local.keepalived.version":
         return (
@@ -1069,7 +1080,7 @@ def _build_keepalived_metric_command(metric_id: str, profile: Dict[str, Any]) ->
         return (
             _keepalived_discovery_prefix(profile)
             + vip_extract
-            + f"if test -z \"$keepalived_vips\"; then keepalived_vips='{vips}'; fi; keepalived_port='{ports}'; if test -z \"$keepalived_vips\" || test -z \"$keepalived_port\"; then printf '%s\\n' INSPECT_KEEPALIVED_VIP_NOT_FOUND; else for vip in $keepalived_vips; do vip=${{vip%%/*}}; for port in $keepalived_port; do printf 'CONFIG_ACCESS=%s:%s\\n' \"$vip\" \"$port\"; curl -sS -I --connect-timeout 3 \"http://$vip:$port/\" | head -n 1; done; done; fi"
+            + f"if test -z \"$keepalived_vips\"; then keepalived_vips='{vips}'; fi; keepalived_port='{ports}'; if test -z \"$keepalived_vips\" || test -z \"$keepalived_port\"; then printf '%s\\n' INSPECT_KEEPALIVED_VIP_NOT_FOUND; else for vip in $keepalived_vips; do vip=${{vip%%/*}}; for port in $keepalived_port; do printf 'CONFIG_ACCESS=127.0.0.1:%s (configured_vip=%s)\\n' \"$port\" \"$vip\"; curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://127.0.0.1:$port/\" | head -n 1; done; done; fi"
         )
     if metric_id == "local.keepalived.config.baseline":
         return (
@@ -1098,6 +1109,7 @@ def build_metric_command_specs(
     metrics: Optional[Sequence[Dict[str, Any]]] = None,
     profile: Optional[Dict[str, Any]] = None,
     module_ids: Optional[Sequence[str]] = None,
+    timeout_sec: Optional[int] = None,
 ) -> List[CommandSpec]:
     """由指标注册表（metrics.py）+ TD §5.2 模板构造采集命令规格列表。
 
@@ -1110,7 +1122,8 @@ def build_metric_command_specs(
       提供 → 安全校验后替换占位符；缺失/未提供 → 对已显式选择的
       profile 指标构造 command=None + error_code=UNSUPPORTED_PROFILE；
       未选择的模块不会进入执行计划，也不会制造 UNKNOWN。
-    - 超时取自 metrics.py 定义（timeout_sec：10s，日志类 15s，AE §7）；
+    - 未传 timeout_sec 时沿用 metrics.py 定义（普通 10s，日志类 15s）；
+      CLI 会把 inspect.conf 的全局 timeout_sec 传入，覆盖所有指标；
     - 所需命令取自 probe.metric_required_commands（TD §5.2 数据源列）。
     """
     if metrics is None:
@@ -1128,6 +1141,13 @@ def build_metric_command_specs(
             )
         metrics = default_registry().metric_definitions(selected_modules)
     profile = profile or {}
+    if timeout_sec is not None and not (
+        MIN_COMMAND_TIMEOUT_SEC <= timeout_sec <= MAX_COMMAND_TIMEOUT_SEC
+    ):
+        raise CommandConfigError(
+            "全局 timeout 超出范围（允许 "
+            f"{MIN_COMMAND_TIMEOUT_SEC}-{MAX_COMMAND_TIMEOUT_SEC}s）: {timeout_sec}"
+        )
     specs: List[CommandSpec] = []
     for m in metrics:
         metric_id = m["metric_id"]
@@ -1136,12 +1156,15 @@ def build_metric_command_specs(
             raise CommandConfigError(
                 f"allow-list 注册表缺少指标定义: {metric_id}（AE §4.1 唯一来源）"
             )
-        timeout_sec = m.get("timeout_sec")
-        if timeout_sec not in (METRIC_TIMEOUT_SEC, LOG_METRIC_TIMEOUT_SEC):
+        metric_timeout_sec = m.get("timeout_sec")
+        if metric_timeout_sec not in (METRIC_TIMEOUT_SEC, LOG_METRIC_TIMEOUT_SEC):
             raise CommandConfigError(
                 f"指标超时越界（允许 {METRIC_TIMEOUT_SEC}/{LOG_METRIC_TIMEOUT_SEC}s）: "
-                f"{metric_id}={timeout_sec!r}"
+                f"{metric_id}={metric_timeout_sec!r}"
             )
+        effective_timeout_sec = (
+            timeout_sec if timeout_sec is not None else metric_timeout_sec
+        )
         required = probe_mod.metric_required_commands(metric_id)
         if not required:
             raise CommandConfigError(f"指标所需命令映射缺失: {metric_id}")
@@ -1153,12 +1176,14 @@ def build_metric_command_specs(
             and metric_id != NGINX_PROCESS_METRIC
             and _is_runtime_nginx_profile(profile)
         ):
-            command = _build_nginx_metric_command(metric_id, profile)
+            command = _build_nginx_metric_command(
+                metric_id, profile, timeout_sec=effective_timeout_sec
+            )
             specs.append(
                 CommandSpec(
                     metric_id=metric_id,
                     command=command,
-                    timeout_sec=timeout_sec,
+                    timeout_sec=effective_timeout_sec,
                     become=bool(entry["become"]),
                     required_commands=required,
                     source_anchor=entry["anchor"],
@@ -1172,12 +1197,14 @@ def build_metric_command_specs(
             and metric_id != KEEPALIVED_PROCESS_METRIC
             and _is_runtime_keepalived_profile(profile)
         ):
-            command = _build_keepalived_metric_command(metric_id, profile)
+            command = _build_keepalived_metric_command(
+                metric_id, profile, timeout_sec=effective_timeout_sec
+            )
             specs.append(
                 CommandSpec(
                     metric_id=metric_id,
                     command=command,
-                    timeout_sec=timeout_sec,
+                    timeout_sec=effective_timeout_sec,
                     become=bool(entry["become"]),
                     required_commands=required,
                     source_anchor=entry["anchor"],
@@ -1191,13 +1218,15 @@ def build_metric_command_specs(
             and metric_id != ELASTICSEARCH_PROCESS_METRIC
             and _is_runtime_elasticsearch_profile(profile)
         ):
-            command = _build_elasticsearch_metric_command(metric_id, profile)
+            command = _build_elasticsearch_metric_command(
+                metric_id, profile, timeout_sec=effective_timeout_sec
+            )
             task_environment = _elasticsearch_task_environment(profile)
             specs.append(
                 CommandSpec(
                     metric_id=metric_id,
                     command=command,
-                    timeout_sec=timeout_sec,
+                    timeout_sec=effective_timeout_sec,
                     become=bool(entry["become"]),
                     required_commands=required,
                     source_anchor=entry["anchor"],
@@ -1221,7 +1250,7 @@ def build_metric_command_specs(
                 CommandSpec(
                     metric_id=metric_id,
                     command=None,
-                    timeout_sec=timeout_sec,
+                    timeout_sec=effective_timeout_sec,
                     become=bool(entry["become"]),
                     required_commands=required,
                     source_anchor=entry["anchor"],
@@ -1238,7 +1267,7 @@ def build_metric_command_specs(
                 CommandSpec(
                     metric_id=metric_id,
                     command=command,
-                    timeout_sec=timeout_sec,
+                    timeout_sec=effective_timeout_sec,
                     become=bool(entry["become"]),
                     required_commands=required,
                     source_anchor=entry["anchor"],
@@ -1251,7 +1280,7 @@ def build_metric_command_specs(
                 CommandSpec(
                     metric_id=metric_id,
                     command=None,
-                    timeout_sec=timeout_sec,
+                    timeout_sec=effective_timeout_sec,
                     become=bool(entry["become"]),
                     required_commands=required,
                     source_anchor=entry["anchor"],
@@ -1367,7 +1396,7 @@ def validate_command_specs(
       - 命令可执行名超出该指标注册表模板的可执行名集合（含注入尝试）；
       - 命令含命令替换/变量展开指示符（`$`/反引号，含引号内）——
         parse_binaries 抛错，注入一律拒绝（T-103F H-1/H-2）；
-      - 超时不在允许集（10/15s，AE §7）；
+      - 超时不在安全范围（1-60s；CLI 的 inspect.conf 通常统一为 3s）；
       - become 与注册表声明不一致（最小化 become 边界，AE §5）；
       - command=None 但 error_code 非 UNSUPPORTED_PROFILE。
     """
@@ -1377,9 +1406,11 @@ def validate_command_specs(
             raise CommandNotAllowedError(
                 f"allow-list 拒绝：指标未登记: {spec.metric_id!r}"
             )
-        if spec.timeout_sec not in (METRIC_TIMEOUT_SEC, LOG_METRIC_TIMEOUT_SEC):
+        if not MIN_COMMAND_TIMEOUT_SEC <= spec.timeout_sec <= MAX_COMMAND_TIMEOUT_SEC:
             raise CommandNotAllowedError(
-                f"allow-list 拒绝：超时越界（10/15s）: {spec.metric_id}={spec.timeout_sec}"
+                "allow-list 拒绝：超时越界（允许 "
+                f"{MIN_COMMAND_TIMEOUT_SEC}-{MAX_COMMAND_TIMEOUT_SEC}s）: "
+                f"{spec.metric_id}={spec.timeout_sec}"
             )
         if bool(spec.become) != bool(entry["become"]):
             raise CommandNotAllowedError(
@@ -1479,6 +1510,7 @@ def _yaml_single_quote(value: str) -> str:
 def generate_playbook(
     specs: Sequence[CommandSpec],
     probe_command: Optional[str] = None,
+    timeout_sec: Optional[int] = None,
 ) -> str:
     """生成采集 playbook 文本（YAML）。
 
@@ -1492,12 +1524,23 @@ def generate_playbook(
       - 无 retries/until（AE §7：超时/连接失败不自动重试）；
       - 忽略单命令失败（rc 语义留给 normalize，T-104）：ignore_errors。
     """
-    probe_command = probe_command or probe_mod.build_probe_command()
+    collection_timeout_sec = (
+        timeout_sec if timeout_sec is not None else PROBE_TIMEOUT_SEC
+    )
+    if not MIN_COMMAND_TIMEOUT_SEC <= collection_timeout_sec <= MAX_COMMAND_TIMEOUT_SEC:
+        raise CommandConfigError(
+            "全局 timeout 超出范围（允许 "
+            f"{MIN_COMMAND_TIMEOUT_SEC}-{MAX_COMMAND_TIMEOUT_SEC}s）: "
+            f"{collection_timeout_sec}"
+        )
+    probe_command = probe_command or probe_mod.build_probe_command(
+        timeout_sec=collection_timeout_sec
+    )
     lines = [
         "---",
         "# inspect 采集 playbook（T-103 ansible_runner 生成；ansible-execution v1）",
         "# 契约：gather_facts:false / serial:1 / raw|script + /bin/bash -lc / 最小化 become /",
-        "#       只读命令 allow-list / 每命令超时注入（probe 15s、指标 10s、日志 15s、",
+        "#       只读命令 allow-list / 每命令超时注入（由 inspect.conf timeout 统一控制、",
         "#       单主机 300s）/ 无重试（AE §1-§7；超时与连接失败不自动重试）",
         '- name: "inspect collection"',
         "  hosts: all",
@@ -1506,7 +1549,7 @@ def generate_playbook(
         "  ignore_unreachable: true",
         "  tasks:",
     ]
-    lines.append(f'    - name: "probe: 能力探测（{PROBE_TIMEOUT_SEC}s）"')
+    lines.append(f'    - name: "probe: 能力探测（{collection_timeout_sec}s）"')
     lines.append(
         f"      ansible.builtin.raw: '{_yaml_single_quote(probe_command)}'"
     )
@@ -1603,6 +1646,7 @@ class RunPlan:
     nginx_whitelist: Tuple[str, ...] = ()
     keepalived_whitelist: Tuple[str, ...] = ()
     elasticsearch_whitelist: Tuple[str, ...] = ()
+    timeout_sec: int = PROBE_TIMEOUT_SEC
 
 
 def _default_runtime_dir() -> Path:
@@ -1616,6 +1660,7 @@ def prepare_run(
     nginx_whitelist: Optional[Sequence[str]] = None,
     keepalived_whitelist: Optional[Sequence[str]] = None,
     elasticsearch_whitelist: Optional[Sequence[str]] = None,
+    timeout_sec: Optional[int] = None,
 ) -> RunPlan:
     """allow-list 校验 → 生成 playbook 与 argv → RunPlan（不执行不连接）。
 
@@ -1633,6 +1678,9 @@ def prepare_run(
     playbook_path = runtime_dir / f"playbook-{uuid.uuid4().hex[:8]}.yml"
     prepared_specs: List[CommandSpec] = list(specs)
     script_paths: List[Path] = []
+    collection_timeout_sec = (
+        timeout_sec if timeout_sec is not None else PROBE_TIMEOUT_SEC
+    )
     try:
         for idx, spec in enumerate(prepared_specs):
             if not (
@@ -1664,7 +1712,9 @@ def prepare_run(
                 script_path=str(script_path.resolve()),
             )
         validate_command_specs(prepared_specs)
-        text = generate_playbook(prepared_specs)
+        text = generate_playbook(
+            prepared_specs, timeout_sec=collection_timeout_sec
+        )
         playbook_path.write_text(text, encoding="utf-8", newline="\n")
         playbook_path.chmod(0o600)
     except OSError as exc:
@@ -1693,7 +1743,9 @@ def prepare_run(
         hosts=list(selection.hosts),
         limit=selection.limit,
         metric_specs=prepared_specs,
-        probe_command=probe_mod.build_probe_command(),
+        probe_command=probe_mod.build_probe_command(
+            timeout_sec=collection_timeout_sec
+        ),
         cleanup_paths=(
             (playbook_path, *script_paths, Path(selection.inventory_file))
             if getattr(selection, "kind", None) in {"local", "hosts"}
@@ -1703,6 +1755,7 @@ def prepare_run(
         nginx_whitelist=tuple(nginx_whitelist or ()),
         keepalived_whitelist=tuple(keepalived_whitelist or ()),
         elasticsearch_whitelist=tuple(elasticsearch_whitelist or ()),
+        timeout_sec=collection_timeout_sec,
     )
     plan.argv = build_playbook_argv(
         plan.playbook_path, plan.inventory_file, plan.limit
@@ -1795,13 +1848,16 @@ def classify_metric_result(
                 f"能力探测未发现命令: {', '.join(missing)}（AE §3 → UNKNOWN，继续）",
             ),
         }
-    if rc == TIMEOUT_RC:
+    if rc in {TIMEOUT_RC, CURL_TIMEOUT_RC}:
         return {
             "metric_id": metric_id,
             "rc": rc,
             "stdout": stdout,
             "stderr": stderr,
-            "error": _error(ERROR_TIMEOUT, "命令超时（timeout 退出码 124，AE §7）"),
+            "error": _error(
+                ERROR_TIMEOUT,
+                "命令超时（timeout/curl 达到 inspect.conf timeout，AE §7）",
+            ),
         }
     low_err = (stderr or "").lower()
     if any(p in low_err for p in _PERMISSION_PATTERNS):
@@ -2385,6 +2441,10 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
         env["ANSIBLE_RETRY_FILES_ENABLED"] = "False"
         env["ANSIBLE_HOST_KEY_CHECKING"] = ANSIBLE_HOST_KEY_CHECKING
         env["ANSIBLE_SSH_COMMON_ARGS"] = ANSIBLE_SSH_COMMON_ARGS
+        env["ANSIBLE_SSH_COMMON_ARGS"] += (
+            f" -o ConnectTimeout={plan.timeout_sec}"
+        )
+        env["ANSIBLE_TIMEOUT"] = str(plan.timeout_sec)
         # The generated script task resolves these values through Ansible's
         # controller-side env lookup.  This keeps the private API credentials
         # out of the playbook, argv, callback, and fact source while still
@@ -2663,6 +2723,7 @@ def run(
     nginx_whitelist: Optional[Sequence[str]] = None,
     keepalived_whitelist: Optional[Sequence[str]] = None,
     elasticsearch_whitelist: Optional[Sequence[str]] = None,
+    timeout_sec: Optional[int] = None,
 ) -> Dict[str, Any]:
     """prepare_run + execute_plan 便捷入口（cli 编排挂接点）。"""
     plan = prepare_run(
@@ -2672,6 +2733,7 @@ def run(
         nginx_whitelist=nginx_whitelist,
         keepalived_whitelist=keepalived_whitelist,
         elasticsearch_whitelist=elasticsearch_whitelist,
+        timeout_sec=timeout_sec,
     )
     return execute_plan(plan, fixture_dir=fixture_dir)
 

@@ -10,7 +10,8 @@
 
 ## API 认证与判定
 
-API 使用 `elasticsearch_endpoint`，默认示例为 `https://127.0.0.1:9200`。证书候选路径由
+API 使用目标主机本机的 `https://127.0.0.1:<http.port>`；`elasticsearch_endpoint` 仅为兼容旧配置，
+其中的主机名/IP 会被忽略。证书候选路径由
 `elasticsearch_cacert` 配置，实际请求优先使用 `curl --cacert`；没有可读 CA 时才回退
 到兼容自签名证书的 `-k`。HTTP API 账号密码由私有 `inspect.conf` 的
 `elasticsearch_api_user` 和 `elasticsearch_api_password` 提供，远程 API 指标使用 Ansible script
@@ -21,38 +22,39 @@ Python 3.7。控制端通过 Ansible env lookup 把私密值临时注入任务�
 真实密码不得提交；也可以继续使用目标机 `elasticsearch_auth_file` netrc 作为认证兜底。
 未授权 401/403、连接失败、配置/日志/证书不可读均为 UNKNOWN，绝不会默认通过。
 
-端口优先从运行配置的 `http.port`/`transport.port` 读取，随后使用 `inspect.conf` 9200/9300 候选；API 地址优先由实际配置的 `network.host`/`http.host` 与 HTTP 端口组合，无法解析时才使用 `elasticsearch_endpoint` 候选。集群 `green`、期望节点数达到、活跃分片 100% 为正常；`yellow` 为 WARN，`red` 或节点严重缺失为 CRIT。未分配主分片为 CRIT，未分配副本或初始化中为 WARN。慢日志未启用时显示“未配置”，不默认判定为故障。
+端口优先从运行配置的 `http.port`/`transport.port` 读取，随后使用 `inspect.conf` 9200/9300 候选；HTTP 请求始终组合为目标主机的 `127.0.0.1:<http.port>`。集群 `green`、期望节点数达到、活跃分片 100% 为正常；`yellow` 为 WARN，`red` 或节点严重缺失为 CRIT。未分配主分片为 CRIT，未分配副本或初始化中为 WARN。慢日志未启用时显示“未配置”，不默认判定为故障。
 
 ### 三个指标的实际取值命令
 
 以下命令是脱敏后的复现形式；`ES_ENDPOINT`、`ES_CA`、`ES_PASSWORD` 使用现场实际值，
-密码不要直接写入命令历史。脚本会先从运行进程的 `-Des.path.*` 和配置文件发现端点、证书，
-再按 `inspect.conf` 候选兜底。
+密码不要直接写入命令历史。脚本会先从运行进程的 `-Des.path.*` 和配置文件发现端口、证书，
+再按 `inspect.conf` 候选兜底；所有 Elasticsearch curl 请求强制访问目标主机的
+`127.0.0.1`，不会访问配置中的远程 IP/主机名。
 
 ```bash
 # 1. 版本：读取运行实例根 API 的 version.number，不再执行 bin/elasticsearch --version，
 #    避免某些 tar 安装的启动脚本启动 JVM 或阻塞。
-curl -sS --connect-timeout 3 --max-time 10 \
+curl -sS --connect-timeout 3 --max-time 3 \
   --cacert "$ES_CA" -u "elastic:$ES_PASSWORD" \
-  "$ES_ENDPOINT/" -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
+  "https://127.0.0.1:9200/" -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
 
 # 2. 索引健康与规模：v 只返回表头表示当前没有索引，这是“0 个索引”的有效结果。
-curl -sS --connect-timeout 3 --max-time 10 \
+curl -sS --connect-timeout 3 --max-time 3 \
   --cacert "$ES_CA" -u "elastic:$ES_PASSWORD" \
-  "$ES_ENDPOINT/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc" \
+  "https://127.0.0.1:9200/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc" \
   -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
 
 # 3. 快照仓库：先列出仓库，再验证 inspect.conf 中的仓库名（以下以 backup 为例）。
-curl -sS --connect-timeout 3 --max-time 10 \
+curl -sS --connect-timeout 3 --max-time 3 \
   --cacert "$ES_CA" -u "elastic:$ES_PASSWORD" \
-  "$ES_ENDPOINT/_snapshot/_all?pretty" -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
-curl -sS --connect-timeout 3 --max-time 10 -X POST \
+  "https://127.0.0.1:9200/_snapshot/_all?pretty" -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
+curl -sS --connect-timeout 3 --max-time 3 -X POST \
   --cacert "$ES_CA" -u "elastic:$ES_PASSWORD" \
-  "$ES_ENDPOINT/_snapshot/backup/_verify?pretty" \
+  "https://127.0.0.1:9200/_snapshot/backup/_verify?pretty" \
   -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
 ```
 
-根 API 和 CAT API 返回 HTTP 401/403、网络错误或格式异常会是 UNKNOWN。索引接口只有表头时
+上述命令中的 `3` 应与私有 `inspect.conf` 的 `timeout` 保持一致。根 API 和 CAT API 返回 HTTP 401/403、网络错误或格式异常会是 UNKNOWN。索引接口只有表头时
 按 `indices=0; red=0; yellow=0` 判定 OK；快照仓库不存在时 Elasticsearch 会返回
 `repository_missing_exception`，巡检将其作为“仓库缺失”业务 WARN，而不是误报为认证失败。
 

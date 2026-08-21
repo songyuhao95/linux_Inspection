@@ -294,6 +294,7 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
 
     try:
         inspect_conf = config_mod.load_inspect_conf()
+        timeout_sec = config_mod.load_inspect_timeout(inspect_conf)
         nginx_cfg = config_mod.load_nginx_config()
         keepalived_cfg = config_mod.load_keepalived_config()
         elasticsearch_cfg = config_mod.load_elasticsearch_config()
@@ -308,7 +309,7 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     else:
         selected_modules = ("linux_basic",) + tuple(middleware_module_ids())
     specs = runner_mod.build_metric_command_specs(
-        module_ids=selected_modules, profile=inspect_conf
+        module_ids=selected_modules, profile=inspect_conf, timeout_sec=timeout_sec
     )
     fixture_dir = os.environ.get(runner_mod.FIXTURE_ENV_VAR)
     nginx_whitelist = list(nginx_cfg.get("whitelist") or [])
@@ -321,6 +322,7 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
                 nginx_whitelist=nginx_whitelist,
                 keepalived_whitelist=keepalived_whitelist,
                 elasticsearch_whitelist=elasticsearch_whitelist,
+                timeout_sec=timeout_sec,
             )
         else:
             run_result = runner_mod.run(
@@ -328,6 +330,7 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
                 nginx_whitelist=nginx_whitelist,
                 keepalived_whitelist=keepalived_whitelist,
                 elasticsearch_whitelist=elasticsearch_whitelist,
+                timeout_sec=timeout_sec,
             )
     except (
         local_runner.LocalExecutionError,

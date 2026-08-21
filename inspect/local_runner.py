@@ -70,7 +70,10 @@ def _run_shell(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout_sec + 5,
+            # The shell process itself must honor the same global ceiling as
+            # the GNU timeout wrapper inside the command. Do not add a grace
+            # period here: a hung child must become UNKNOWN promptly.
+            timeout=timeout_sec,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
@@ -95,6 +98,7 @@ def _fixture_result(
     nginx_whitelist: Optional[Sequence[str]] = None,
     keepalived_whitelist: Optional[Sequence[str]] = None,
     elasticsearch_whitelist: Optional[Sequence[str]] = None,
+    timeout_sec: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Reuse the existing fixture reader; it does not create a playbook or connect."""
     plan = runner_mod.RunPlan(
@@ -103,11 +107,14 @@ def _fixture_result(
         hosts=list(selection.hosts),
         limit=getattr(selection, "limit", None),
         metric_specs=list(specs),
-        probe_command=probe_mod.build_probe_command(),
+        probe_command=probe_mod.build_probe_command(
+            timeout_sec=timeout_sec or runner_mod.PROBE_TIMEOUT_SEC
+        ),
         selection_kind="local",
         nginx_whitelist=tuple(nginx_whitelist or ()),
         keepalived_whitelist=tuple(keepalived_whitelist or ()),
         elasticsearch_whitelist=tuple(elasticsearch_whitelist or ()),
+        timeout_sec=timeout_sec or runner_mod.PROBE_TIMEOUT_SEC,
     )
     result = runner_mod._execute_fixture(plan, fixture_dir)
     result["local_mode"] = True
@@ -122,6 +129,7 @@ def run_local(
     nginx_whitelist: Optional[Sequence[str]] = None,
     keepalived_whitelist: Optional[Sequence[str]] = None,
     elasticsearch_whitelist: Optional[Sequence[str]] = None,
+    timeout_sec: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Collect the selected local host directly; never call Ansible."""
     del runtime_dir  # kept for the CLI runner signature symmetry
@@ -140,6 +148,7 @@ def run_local(
             nginx_whitelist=nginx_whitelist,
             keepalived_whitelist=keepalived_whitelist,
             elasticsearch_whitelist=elasticsearch_whitelist,
+            timeout_sec=timeout_sec,
         )
 
     bash_path = shutil.which("bash")
@@ -167,10 +176,11 @@ def run_local(
 
     env = _clean_local_env()
     repo_root = Path(__file__).resolve().parent.parent
+    effective_timeout_sec = timeout_sec or runner_mod.PROBE_TIMEOUT_SEC
     probe_rc, probe_stdout, probe_stderr = _run_shell(
         bash_path,
-        probe_mod.build_probe_command(),
-        probe_mod.PROBE_TIMEOUT_SEC,
+        probe_mod.build_probe_command(timeout_sec=effective_timeout_sec),
+        effective_timeout_sec,
         env=env,
         cwd=repo_root,
     )

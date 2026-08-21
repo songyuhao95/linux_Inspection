@@ -59,6 +59,17 @@ def _load_config_module():
 
 cfg = _load_config_module()
 
+
+def test_inspect_conf_timeout_is_single_bounded_integer():
+    assert cfg.load_inspect_timeout({"timeout": ["3"]}) == 3
+    assert cfg.load_inspect_timeout({}) == 3
+    with pytest.raises(cfg.ConfigError, match="单个秒数"):
+        cfg.load_inspect_timeout({"timeout": ["3", "4"]})
+    with pytest.raises(cfg.ConfigError, match="整数秒"):
+        cfg.load_inspect_timeout({"timeout": ["fast"]})
+    with pytest.raises(cfg.ConfigError, match="超出范围"):
+        cfg.load_inspect_timeout({"timeout": ["61"]})
+
 # ---------------------------------------------------------------------------
 # MR §6 阈值汇总表（local-metrics-requirements.md §6，2026-08-15 核对）——
 # 唯一权威阈值来源；与基线文件必须逐字一致，任何差异即停止条件。
