@@ -1089,8 +1089,19 @@ def parse_elasticsearch_shards(output: str) -> Dict[str, Any]:
 
 def parse_elasticsearch_service_port(output: str) -> Dict[str, Any]:
     lines = _content_lines(output)
-    process = any("elasticsearch" in line.lower() for line in lines if "LISTEN" not in line)
-    listen_lines = [line for line in lines if "LISTEN" in line]
+    process_marker = re.search(
+        r"^INSPECT_ELASTICSEARCH_PROCESS=(true|false)$", output or "", re.MULTILINE
+    )
+    process = (
+        process_marker.group(1) == "true"
+        if process_marker
+        else any(
+            "elasticsearch" in line.lower()
+            for line in lines
+            if not line.strip().startswith("LISTEN")
+        )
+    )
+    listen_lines = [line for line in lines if line.strip().startswith("LISTEN")]
     ports = sorted({int(x) for x in re.findall(r":(\d+)(?=\s|$)", "\n".join(listen_lines)) if int(x) > 0})
     expected_match = re.search(
         r"^INSPECT_ELASTICSEARCH_EXPECTED_PORTS=([0-9]+),([0-9]+)$",
