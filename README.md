@@ -26,6 +26,7 @@
 - 已完成第一个中间件模块 **Nginx**（`inspect/modules/nginx.py`）：进程发现 + 白名单、9 个指标（含运行版本基线）、Excel `nginx` Sheet、HTML 中间件卡片/筛选/分组、`--nginx` 只巡检 Nginx；
 - 已完成 **Keepalived**（`inspect/modules/keepalived.py`）：进程发现 + 白名单、版本、VIP 绑定/访问、配置基线、健康检查脚本、关键日志和能力稳定性共 8 个指标，Excel `keepalived` Sheet、HTML 筛选/分组、`--keepalived` 只巡检 Keepalived；
 - 当前远程认证以项目 inventory 为配置入口，公开模板不包含可用主机或真实凭据；
+- 已完成远程采集性能优化（T-130）：Ansible 按主机/模块/权限组生成 metric bundle，控制端按标记拆回单指标结果；三台可达测试主机实测采集时长由约 35.4 秒降至约 31.0 秒，包含不可达主机时不会重复执行其全部指标；
 - 远程真实 VM 验证按 `docs/g0-real-vm.md` 执行，部署到 VM 按 `docs/local-vm-deploy.md` 执行；
 - 新增中间件时只扩展 `inspect/modules/`，并同步更新 `docs/specs/`、测试和本 README 的交接状态。
 
