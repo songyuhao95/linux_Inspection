@@ -1170,7 +1170,10 @@ def parse_elasticsearch_snapshot(output: str) -> Dict[str, Any]:
         # Elasticsearch reports that business condition as a JSON 404/400;
         # preserve it for the judge as WARN instead of misclassifying it as
         # an authentication/transport parse failure.
-        if re.search(r"repository_missing_exception|repository.*missing", output or "", re.IGNORECASE):
+        if re.search(r"repository_missing_exception|repository.*missing", output or "", re.IGNORECASE) or (
+            any(status in {400, 404} for status in statuses)
+            and not any(status in {401, 403} for status in statuses)
+        ):
             return {
                 "repository_count": 0,
                 "verify_ok": False,
