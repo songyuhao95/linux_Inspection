@@ -1092,7 +1092,22 @@ def parse_elasticsearch_service_port(output: str) -> Dict[str, Any]:
     process = any("elasticsearch" in line.lower() for line in lines if "LISTEN" not in line)
     listen_lines = [line for line in lines if "LISTEN" in line]
     ports = sorted({int(x) for x in re.findall(r":(\d+)(?=\s|$)", "\n".join(listen_lines)) if int(x) > 0})
-    return {"process": process, "ports": ports, "summary": [mask_output(x) for x in lines[:10]]}
+    expected_match = re.search(
+        r"^INSPECT_ELASTICSEARCH_EXPECTED_PORTS=([0-9]+),([0-9]+)$",
+        output or "",
+        re.MULTILINE,
+    )
+    expected_ports = (
+        sorted({int(expected_match.group(1)), int(expected_match.group(2))})
+        if expected_match
+        else []
+    )
+    return {
+        "process": process,
+        "ports": ports,
+        "expected_ports": expected_ports,
+        "summary": [mask_output(x) for x in lines[:10]],
+    }
 
 
 def parse_elasticsearch_heap_gc(output: str) -> Dict[str, Any]:
@@ -1827,7 +1842,12 @@ def _judge_es_shards(parsed, resolved, profile=None):
 
 
 def _judge_es_service_port(parsed, resolved, profile=None):
-    ports = {int(x) for x in (profile or {}).get("elasticsearch_http_port", ["9200"])} | {int(x) for x in (profile or {}).get("elasticsearch_transport_port", ["9300"])}
+    discovered = parsed.get("expected_ports") or []
+    ports = set(discovered) or {
+        int(x) for x in (profile or {}).get("elasticsearch_http_port", ["9200"])
+    } | {
+        int(x) for x in (profile or {}).get("elasticsearch_transport_port", ["9300"])
+    }
     if not ports:
         return _unknown_decision(resolved, extra_note="HTTP/Transport 端口未配置")
     if parsed["process"] and ports.issubset(set(parsed["ports"])):
@@ -2118,7 +2138,8 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
     if metric_id == "local.elasticsearch.shards.unassigned":
         return f"primary={parsed['unassigned_primary']};replica={parsed['unassigned_replica']};initializing={parsed['initializing']}"
     if metric_id == "local.elasticsearch.service.port":
-        return f"process={parsed['process']};ports={','.join(map(str, parsed['ports']))}"
+        expected = ",".join(map(str, parsed.get("expected_ports", [])))
+        return f"process={parsed['process']};ports={','.join(map(str, parsed['ports']))};expected={expected}"
     if metric_id == "local.elasticsearch.heap.gc":
         return f"heap={parsed.get('max_heap')};full_gc={parsed['full_gc']};oom={parsed['oom']}"
     if metric_id == "local.elasticsearch.thread_pool.rejected":
@@ -2357,7 +2378,8 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
         if metric_id == "local.elasticsearch.shards.unassigned":
             return f"主分片未分配={parsed['unassigned_primary']}；副本未分配={parsed['unassigned_replica']}；初始化中={parsed['initializing']}"
         if metric_id == "local.elasticsearch.service.port":
-            return f"进程={parsed['process']}；监听端口={','.join(map(str, parsed['ports'])) or '无'}"
+            expected = ",".join(map(str, parsed.get("expected_ports", []))) or "配置端口未知"
+            return f"进程={parsed['process']}；监听端口={','.join(map(str, parsed['ports'])) or '无'}；期望端口={expected}"
         if metric_id == "local.elasticsearch.heap.gc":
             return f"最大heap={parsed.get('max_heap')}; Full GC命中={parsed['full_gc']}；OOM命中={parsed['oom']}"
         if metric_id == "local.elasticsearch.thread_pool.rejected":

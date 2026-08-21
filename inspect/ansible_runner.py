@@ -960,8 +960,10 @@ def _build_elasticsearch_metric_command(
     if metric_id == "local.elasticsearch.service.port":
         # Query the configured HTTP/Transport ports directly.  The previous
         # broad grep could miss a valid LISTEN row on some ss output layouts;
-        # the filtered socket query keeps the port evidence deterministic.
-        return prefix + "; ps -ef | grep '[e]lasticsearch'; if test -n \"$es_http_port\"; then ss -tlnp \"sport = :$es_http_port\" 2>/dev/null; fi; if test -n \"$es_transport_port\" && test \"$es_transport_port\" != \"$es_http_port\"; then ss -tlnp \"sport = :$es_transport_port\" 2>/dev/null; fi"
+        # use the portable full LISTEN listing instead.  The normalizer checks
+        # the discovered expected ports against this listing, so unrelated
+        # sockets cannot make the metric pass.
+        return prefix + "; printf 'INSPECT_ELASTICSEARCH_EXPECTED_PORTS=%s,%s\\n' \"$es_http_port\" \"$es_transport_port\"; ps -ef | grep '[e]lasticsearch'; ss -tlnp | grep -E 'LISTEN'"
     if metric_id == "local.elasticsearch.heap.gc":
         return prefix + "; " + api("/_cat/nodes?v&h=name,heap.percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; if test -n \"$es_gc_log\"; then tail -n 200 \"$es_gc_log\" | grep -Ei 'Pause|Full|OutOfMemory|heap'; else printf '%s\\n' INSPECT_ELASTICSEARCH_GC_LOG_NOT_FOUND; fi"
     if metric_id == "local.elasticsearch.thread_pool.rejected":

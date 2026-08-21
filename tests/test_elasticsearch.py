@@ -115,7 +115,24 @@ def test_elasticsearch_fixture_commands_are_generated_from_profile():
     service = next(
         x for x in specs if x.metric_id == "local.elasticsearch.service.port"
     )
-    assert 'ss -tlnp "sport = :$es_http_port"' in service.command
+    assert "INSPECT_ELASTICSEARCH_EXPECTED_PORTS" in service.command
+    assert "ss -tlnp | grep -E 'LISTEN'" in service.command
+
+
+def test_elasticsearch_service_port_uses_discovered_expected_ports():
+    parsed = normalize.parse_elasticsearch_service_port(
+        "INSPECT_ELASTICSEARCH_EXPECTED_PORTS=19200,19300\n"
+        "java org.elasticsearch.bootstrap.Elasticsearch\n"
+        "LISTEN 0 128 192.0.2.10:19200 0.0.0.0:* users:(('java',pid=7,fd=1))\n"
+        "LISTEN 0 128 192.0.2.10:19300 0.0.0.0:* users:(('java',pid=7,fd=2))\n"
+    )
+    assert parsed["expected_ports"] == [19200, 19300]
+    assert parsed["ports"] == [19200, 19300]
+    assert normalize.JUDGERS["local.elasticsearch.service.port"](
+        parsed,
+        config.build_resolved_thresholds()["local.elasticsearch.service.port"],
+        {},
+    )["status"] == "OK"
 
 
 def test_elasticsearch_api_credentials_use_private_config_and_cacert():
