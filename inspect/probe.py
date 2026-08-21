@@ -171,7 +171,7 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     "local.keepalived.error_log.key_evidence": ("bash", "pgrep", "head", "tail", "grep"),
     "local.keepalived.capability.stability": ("bash", "pgrep", "head", "getcap", "systemctl", "tail"),
     "local.elasticsearch.process.present": ("bash", "pgrep"),
-    "local.elasticsearch.version": ("bash", "pgrep", "head", "sed"),
+    "local.elasticsearch.version": ("bash", "pgrep", "head", "sed", "curl"),
     "local.elasticsearch.cluster.health": ("bash", "pgrep", "head", "sed", "curl"),
     "local.elasticsearch.nodes.online": ("bash", "pgrep", "head", "sed", "curl"),
     "local.elasticsearch.nodes.cpu": ("bash", "pgrep", "head", "sed", "curl"),

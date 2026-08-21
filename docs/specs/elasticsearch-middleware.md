@@ -23,6 +23,39 @@ Python 3.7。控制端通过 Ansible env lookup 把私密值临时注入任务�
 
 端口优先从运行配置的 `http.port`/`transport.port` 读取，随后使用 `inspect.conf` 9200/9300 候选；API 地址优先由实际配置的 `network.host`/`http.host` 与 HTTP 端口组合，无法解析时才使用 `elasticsearch_endpoint` 候选。集群 `green`、期望节点数达到、活跃分片 100% 为正常；`yellow` 为 WARN，`red` 或节点严重缺失为 CRIT。未分配主分片为 CRIT，未分配副本或初始化中为 WARN。慢日志未启用时显示“未配置”，不默认判定为故障。
 
+### 三个指标的实际取值命令
+
+以下命令是脱敏后的复现形式；`ES_ENDPOINT`、`ES_CA`、`ES_PASSWORD` 使用现场实际值，
+密码不要直接写入命令历史。脚本会先从运行进程的 `-Des.path.*` 和配置文件发现端点、证书，
+再按 `inspect.conf` 候选兜底。
+
+```bash
+# 1. 版本：读取运行实例根 API 的 version.number，不再执行 bin/elasticsearch --version，
+#    避免某些 tar 安装的启动脚本启动 JVM 或阻塞。
+curl -sS --connect-timeout 3 --max-time 10 \
+  --cacert "$ES_CA" -u "elastic:$ES_PASSWORD" \
+  "$ES_ENDPOINT/" -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
+
+# 2. 索引健康与规模：v 只返回表头表示当前没有索引，这是“0 个索引”的有效结果。
+curl -sS --connect-timeout 3 --max-time 10 \
+  --cacert "$ES_CA" -u "elastic:$ES_PASSWORD" \
+  "$ES_ENDPOINT/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc" \
+  -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
+
+# 3. 快照仓库：先列出仓库，再验证 inspect.conf 中的仓库名（以下以 backup 为例）。
+curl -sS --connect-timeout 3 --max-time 10 \
+  --cacert "$ES_CA" -u "elastic:$ES_PASSWORD" \
+  "$ES_ENDPOINT/_snapshot/_all?pretty" -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
+curl -sS --connect-timeout 3 --max-time 10 -X POST \
+  --cacert "$ES_CA" -u "elastic:$ES_PASSWORD" \
+  "$ES_ENDPOINT/_snapshot/backup/_verify?pretty" \
+  -w '\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\n'
+```
+
+根 API 和 CAT API 返回 HTTP 401/403、网络错误或格式异常会是 UNKNOWN。索引接口只有表头时
+按 `indices=0; red=0; yellow=0` 判定 OK；快照仓库不存在时 Elasticsearch 会返回
+`repository_missing_exception`，巡检将其作为“仓库缺失”业务 WARN，而不是误报为认证失败。
+
 ## 使用
 
 ```bash

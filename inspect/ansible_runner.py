@@ -865,7 +865,17 @@ def _es_curl(path: str, options: str = "") -> str:
 def _build_elasticsearch_metric_command(metric_id: str, profile: Dict[str, Any]) -> str:
     prefix = _elasticsearch_discovery_prefix(profile)
     if metric_id == "local.elasticsearch.version":
-        return prefix + "; if test -z \"$es_process_line\" || test -z \"$es_bin\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_RUNNING_NOT_FOUND; else \"$es_bin\" --version 2>&1; fi"
+        # Do not execute the Elasticsearch launcher for version discovery.
+        # On some tar deployments the launcher starts a JVM and can block;
+        # the authenticated root API already returns version.number and is
+        # both faster and authoritative for the running service.
+        return (
+            prefix
+            + "; if test -z \"$es_process_line\" || test -z \"$es_endpoint\"; then "
+            + "printf '%s\\n' INSPECT_ELASTICSEARCH_RUNNING_NOT_FOUND; else "
+            + _es_curl("/")
+            + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; fi"
+        )
     if metric_id == "local.elasticsearch.cluster.health":
         return prefix + "; if test -z \"$es_endpoint\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_ENDPOINT_NOT_FOUND; else " + _es_curl("/_cluster/health?pretty") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; fi"
     if metric_id == "local.elasticsearch.nodes.online":

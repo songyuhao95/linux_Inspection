@@ -936,12 +936,24 @@ def _es_json(output: str) -> Any:
 
 def parse_elasticsearch_version(output: str) -> Dict[str, Any]:
     if "INSPECT_ELASTICSEARCH_RUNNING_NOT_FOUND" in _content_lines(output):
-        raise ParseError("未发现运行中的 Elasticsearch 或其可执行文件")
+        raise ParseError("未发现运行中的 Elasticsearch 或其 API 端点")
+    try:
+        data = _es_json(output)
+    except ParseError:
+        data = None
+    if isinstance(data, dict):
+        version = data.get("version")
+        if isinstance(version, dict) and version.get("number"):
+            actual = str(version["number"])
+            return {
+                "version": actual,
+                "summary": [mask_output(x) for x in _content_lines(output)[:3]],
+            }
     match = re.search(r"(?:Version|version)\s*[:=]\s*([0-9][A-Za-z0-9._+-]*)", output or "")
     if not match:
         match = re.search(r"\b([0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9._-]+)?)\b", output or "")
     if not match:
-        raise ParseError("Elasticsearch --version 未返回可识别版本号")
+        raise ParseError("Elasticsearch 根 API 未返回可识别 version.number")
     return {"version": match.group(1), "summary": [mask_output(x) for x in _content_lines(output)[:3]]}
 
 
@@ -958,7 +970,7 @@ def parse_elasticsearch_cluster_health(output: str) -> Dict[str, Any]:
         raise ParseError("集群健康 JSON 缺少 status/节点数/分片百分比") from exc
 
 
-def _es_cat_rows(output: str) -> List[List[str]]:
+def _es_cat_rows(output: str, *, allow_empty: bool = False) -> List[List[str]]:
     status = _es_http_status(output)
     if status is not None and status >= 400:
         raise ParseError(f"Elasticsearch API HTTP {status}")
@@ -966,12 +978,21 @@ def _es_cat_rows(output: str) -> List[List[str]]:
     if not lines:
         raise ParseError("Elasticsearch CAT API 无返回行")
     rows = []
+    header_seen = False
     for line in lines:
         parts = line.split()
-        if not parts or parts[0].lower() in {"name", "node_name", "index", "shard", "health", "node"}:
+        if not parts:
+            continue
+        if parts[0].lower() in {"name", "node_name", "index", "shard", "health", "node"}:
+            if "health" in {item.lower() for item in parts} and "index" in {
+                item.lower() for item in parts
+            }:
+                header_seen = True
             continue
         rows.append(parts)
     if not rows:
+        if allow_empty and header_seen:
+            return []
         raise ParseError("Elasticsearch CAT API 无数据行")
     return rows
 
@@ -1092,7 +1113,9 @@ def parse_elasticsearch_discovery_config(output: str) -> Dict[str, Any]:
 
 
 def parse_elasticsearch_indices(output: str) -> Dict[str, Any]:
-    rows = _es_cat_rows(output)
+    # CAT indices with `v` returns only its header when the cluster contains
+    # no indices. That is a valid zero-index result, not a parser failure.
+    rows = _es_cat_rows(output, allow_empty=True)
     red = sum(1 for row in rows if row[0].lower() == "red")
     yellow = sum(1 for row in rows if row[0].lower() == "yellow")
     return {"count": len(rows), "red": red, "yellow": yellow, "rows": rows}
@@ -1143,6 +1166,17 @@ def parse_elasticsearch_snapshot(output: str) -> Dict[str, Any]:
         raise ParseError("未配置 Elasticsearch 快照仓库")
     statuses = _es_http_statuses(output)
     if any(status >= 400 for status in statuses):
+        # A configured repository name may simply not exist on the target.
+        # Elasticsearch reports that business condition as a JSON 404/400;
+        # preserve it for the judge as WARN instead of misclassifying it as
+        # an authentication/transport parse failure.
+        if re.search(r"repository_missing_exception|repository.*missing", output or "", re.IGNORECASE):
+            return {
+                "repository_count": 0,
+                "verify_ok": False,
+                "repository_missing": True,
+                "rows": [mask_output(x) for x in _es_lines(output)[-10:]],
+            }
         raise ParseError(
             "Elasticsearch snapshot API HTTP "
             + ",".join(str(status) for status in statuses if status >= 400)
