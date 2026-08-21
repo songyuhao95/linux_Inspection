@@ -109,7 +109,13 @@ def test_elasticsearch_fixture_commands_are_generated_from_profile():
 
     system = next(x for x in specs if x.metric_id == "local.elasticsearch.system.parameters")
     assert "/proc/$es_pid/limits" in system.command
+    assert "^[[:space:]]*([0-9]+)" in system.command
     assert "su -" not in system.command
+
+    service = next(
+        x for x in specs if x.metric_id == "local.elasticsearch.service.port"
+    )
+    assert 'ss -tlnp "sport = :$es_http_port"' in service.command
 
 
 def test_elasticsearch_api_credentials_use_private_config_and_cacert():

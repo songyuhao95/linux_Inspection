@@ -853,7 +853,10 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         "if test -z \"$es_conf_dir\" && test -n \"$es_home\"; then es_conf_dir=\"$es_home/config\"; fi",
         "es_conf=\"\"; if test -n \"$es_conf_dir\" && test -f \"$es_conf_dir/elasticsearch.yml\"; then es_conf=\"$es_conf_dir/elasticsearch.yml\"; fi",
         f"if test -z \"$es_conf\"; then for p in {confs}; do if test -f \"$p\"; then es_conf=\"$p\"; break; fi; done; fi",
-        "es_pid=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/^([0-9]+).*/\\1/p')",
+        # ``ps -eo pid=`` right-aligns the PID with leading spaces.  Missing
+        # that whitespace made /proc/$pid/limits look unavailable and turned
+        # every real node's system-parameter metric into UNKNOWN.
+        "es_pid=$(printf '%s\\n' \"$es_process_line\" | sed -nE 's/^[[:space:]]*([0-9]+).*/\\1/p')",
         "es_user=\"\"; if test -n \"$es_pid\"; then es_user=$(ps -o user= -p \"$es_pid\" | sed -n 's/[[:space:]]//gp'); fi",
         f"if test -z \"$es_user\"; then for p in {system_users}; do es_user=\"$p\"; break; done; fi",
         "es_log_dir=$(printf '%s\\n' \"$es_path_line\" | sed -nE 's/.*-Des.path.logs=([^[:space:]]+).*/\\1/p')",
@@ -955,7 +958,10 @@ def _build_elasticsearch_metric_command(
     if metric_id == "local.elasticsearch.shards.unassigned":
         return prefix + "; " + api("/_cat/shards?v&h=index,shard,prirep,state,node,unassigned.reason") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
     if metric_id == "local.elasticsearch.service.port":
-        return prefix + "; ps -ef | grep '[e]lasticsearch'; ss -tlnp | grep -E \" :$es_http_port|:$es_http_port|:$es_transport_port\""
+        # Query the configured HTTP/Transport ports directly.  The previous
+        # broad grep could miss a valid LISTEN row on some ss output layouts;
+        # the filtered socket query keeps the port evidence deterministic.
+        return prefix + "; ps -ef | grep '[e]lasticsearch'; if test -n \"$es_http_port\"; then ss -tlnp \"sport = :$es_http_port\" 2>/dev/null; fi; if test -n \"$es_transport_port\" && test \"$es_transport_port\" != \"$es_http_port\"; then ss -tlnp \"sport = :$es_transport_port\" 2>/dev/null; fi"
     if metric_id == "local.elasticsearch.heap.gc":
         return prefix + "; " + api("/_cat/nodes?v&h=name,heap.percent") + " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'; if test -n \"$es_gc_log\"; then tail -n 200 \"$es_gc_log\" | grep -Ei 'Pause|Full|OutOfMemory|heap'; else printf '%s\\n' INSPECT_ELASTICSEARCH_GC_LOG_NOT_FOUND; fi"
     if metric_id == "local.elasticsearch.thread_pool.rejected":
