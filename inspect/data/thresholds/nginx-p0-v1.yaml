@@ -1,0 +1,88 @@
+# Nginx 文档基线阈值（nginx-p0-v1）
+#
+# 来源：《安徽农金Nginx、Keepalived运维巡检手册v1.0.docx》（P0 必看指标 /
+# P1 关注指标表；Nginx 巡检手册 sha256[:8]=72b0834d）。
+# 本文件是手册 P0/P1 指标表「正常标准 / 异常判断 / 处理建议」的逐项转写：
+# 每条指标含 OK/WARN/CRIT/UNKNOWN 边界、source_anchor 与版本标识 nginx-p0-v1。
+#
+# 转写规则（与 MR §3 一致）：
+#   - 边界文本逐字转录手册单元格；禁止发明或调整阈值；
+#   - 单元格为“（文档未定义）”的边界 → rule: null（未定义，不参与判定）；
+#   - 无法判定的边界按 UNKNOWN 语义标注（reason: missing|conflict|none + 原文 note）。
+schema: threshold-baseline-v1
+version: nginx-p0-v1
+scope: nginx-p0-v1
+source_doc: "安徽农金Nginx、Keepalived运维巡检手册v1.0.docx（P0/P1 指标表）"
+metrics:
+  local.nginx.process.present:
+    name: Nginx 进程存在性
+    source_anchor: "P0 指标表「Nginx本节点服务」行（ps -eo pid=,comm=,args= 后要求 comm=nginx 且 args 含 nginx: master/worker process；命令文本回显不算运行，只认真实进程）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "执行 ps -eo pid=,comm=,args= 并筛选 comm=nginx 且 args 含 nginx: master/worker process，至少发现一条真实 Nginx 进程；仅命令行中出现 nginx 路径或巡检命令文本不算运行", rule_id: "nginx-p0-v1.nginx.process.present.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "没有发现匹配的 Nginx 进程，即 Nginx 未运行或已故障；仅对 nginx 白名单内主机给出此 CRIT，白名单外主机跳过 Nginx 指标", rule_id: "nginx-p0-v1.nginx.process.present.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无权限或 pgrep 不可用" }
+  local.nginx.version:
+    name: Nginx 版本
+    source_anchor: "P0 指标表「Nginx版本」行（从运行中的 Nginx master 进程解析可执行文件并执行 nginx -v，不能只检查固定安装路径）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "从运行中的 Nginx master 进程取得实际可执行文件，执行 nginx -v 提取 nginx/x.y.z；实际版本等于 inspect.conf nginx_version 候选值之一", rule_id: "nginx-p0-v1.nginx.version.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "实际运行版本不等于 inspect.conf nginx_version 中配置的任一允许版本；报告同时列出实际版本和允许版本，便于升级或回滚核对", rule_id: "nginx-p0-v1.nginx.version.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无法发现运行中的 Nginx 可执行文件、nginx -v 无版本输出或未配置 nginx_version" }
+  local.nginx.config.valid:
+    name: Nginx 配置有效性
+    source_anchor: "P0 指标表「Nginx配置有效性」行（nginx_bin -t -e nginx_error_log -c nginx_conf；返回 syntax is ok 和 test is successful）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "执行 nginx_bin -t -e nginx_error_log -c nginx_conf；使用配置的 Nginx 错误日志路径，避免测试账号因默认 /var/log/nginx/error.log 无权限而失败；命令输出同时包含 syntax is ok 和 test is successful，stdout/stderr 均纳入判定", rule_id: "nginx-p0-v1.nginx.config.valid.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "上述配置测试命令可执行但未同时出现两个成功标志，或输出明确包含 syntax/error/emerg 等配置错误；常见原因是语法错误、配置文件缺失或端口冲突。命令/日志文件无权限属于技术 UNKNOWN，不伪装成 CRIT", rule_id: "nginx-p0-v1.nginx.config.valid.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "nginx 可执行文件不可用或无权限读取配置" }
+  local.nginx.port.listening:
+    name: Nginx 端口监听与本地访问
+    source_anchor: "P0 指标表「Nginx端口与本地访问」行（ss -tlnp | grep ':8010'；curl -sS -I --connect-timeout 3 http://127.0.0.1:8010/）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "优先从实际 Nginx 配置的 listen 指令提取端口；无法提取时按 inspect.conf 的 nginx_port 候选；ss -tlnp 确认每个端口处于 LISTEN，且 curl 访问 http://127.0.0.1:端口/ 返回可解释的 HTTP 状态", rule_id: "nginx-p0-v1.nginx.port.listening.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: "对实际配置 listen 端口（无法解析时为 inspect.conf nginx_port 候选）检查；端口未 LISTEN、curl 连接超时/拒绝，或本地 HTTP 返回 5xx 时为 CRIT", rule_id: "nginx-p0-v1.nginx.port.listening.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "ss/curl 不可用" }
+  local.nginx.error_log.key_evidence:
+    name: Nginx 关键日志
+    source_anchor: "P0 指标表「关键日志」行（tail -n 100 error.log；egrep -i 'emerg|alert|crit|error|permission denied|bind(|connect() failed|upstream timed out'）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "优先从 Nginx master 的 -e 参数和配置 error_log 指令解析日志；均无结果时按 inspect.conf nginx_error_log 候选；读取末尾 1000 行，未命中 emerg、alert、crit、error、permission denied、bind()、connect() failed、upstream timed out 等关键字", rule_id: "nginx-p0-v1.nginx.error_log.key_evidence.ok", reason: null, note: null }
+      WARN: { rule: "同一日志文件末尾 1000 行命中上述关键错误关键字；报告保留命中数量和最近命中内容，运维需结合时间、上游和端口继续处理", rule_id: "nginx-p0-v1.nginx.error_log.key_evidence.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "日志不可读" }
+  local.nginx.connections.status:
+    name: Nginx 连接状态（stub_status）
+    source_anchor: "P1 指标表「Nginx连接状态」行（curl -sS --connect-timeout 3 http://127.0.0.1:8010/nginx_status）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "访问与 nginx_port 相同实例的 http://127.0.0.1:端口/nginx_status；返回 Active connections、Reading、Writing、Waiting 四类 stub_status 字段，表示 Nginx 连接状态页已开启且可访问", rule_id: "nginx-p0-v1.nginx.connections.status.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "未开启 stub_status、状态 URL 不可访问或 curl 不可用；这不是 Nginx 进程故障，记录为未配置/无法采集" }
+  local.nginx.access_log.status_codes:
+    name: 访问日志状态码
+    source_anchor: "P1 指标表「访问日志状态码」行（tail -n 1000 access.log；5xx 无持续增长）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "优先从 nginx -T 输出解析 access_log；无结果时按 inspect.conf nginx_access_log 候选；读取末尾 1000 行并逐行统计状态码，normalized_value 为 5xx 命中行数；5xx=0 且请求状态以 2xx/3xx 为主", rule_id: "nginx-p0-v1.nginx.access_log.status_codes.ok", reason: null, note: null }
+      WARN: { rule: "上述访问日志末尾 1000 行出现一个或多个 5xx；报告统计状态码分布和最近命中，运维需按 URL、来源 IP、状态码、时间段关联 error.log 判断是否持续", rule_id: "nginx-p0-v1.nginx.access_log.status_codes.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "访问日志不可读" }
+  local.nginx.config.baseline:
+    name: Nginx 配置基线
+    source_anchor: "P1 指标表「Nginx配置基线」行（grep -E 'worker_processes|worker_rlimit_nofile|worker_connections|use epoll|multi_accept|keepalive_timeout|client_max_body_size|limit_req|limit_conn' nginx.conf）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "优先从 Nginx master 的 -c 参数解析配置文件；文件无效时按 inspect.conf nginx_conf 候选；配置中同时找到 worker_processes、worker_connections、keepalive_timeout 三项核心指令，并采集 worker_rlimit_nofile、use epoll、multi_accept、client_max_body_size、limit_req、limit_conn 等关注项", rule_id: "nginx-p0-v1.nginx.config.baseline.ok", reason: null, note: null }
+      WARN: { rule: "上述 Nginx 配置文件缺少任一核心指令，或与已批准基线存在漂移；报告列出实际命中的指令，运维需结合变更单判断是否需要修正", rule_id: "nginx-p0-v1.nginx.config.baseline.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置文件不可读" }
+  local.nginx.security.baseline:
+    name: 安全配置基线
+    source_anchor: "P1 指标表「安全配置基线」行（grep -E 'server_tokens|autoindex|X-Frame-Options|X-Content-Type-Options|Content-Security-Policy|request_method' nginx.conf）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    boundaries:
+      OK: { rule: "优先从 Nginx master 的 -c 参数解析配置文件；文件无效时按 inspect.conf nginx_conf 候选；按 inspect.conf nginx_baseline（默认 server_tokens_off=True、autoindex_off=True）检查安全指令，分别避免暴露版本信息和目录索引", rule_id: "nginx-p0-v1.nginx.security.baseline.ok", reason: null, note: null }
+      WARN: { rule: "上述配置文件缺少 server_tokens off 或 autoindex off；同时采集安全响应头和 request_method 相关配置供复核，缺失项按安全加固要求补齐", rule_id: "nginx-p0-v1.nginx.security.baseline.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置文件不可读" }

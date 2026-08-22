@@ -1,0 +1,2 @@
+# Preserve the offline runtime byte-for-byte across checkout platforms.
+/runtime/** -text -diff

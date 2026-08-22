@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="inspect render_html（T-127）">
+<title>$TITLE</title>
+<style>
+/* =====================================================================
+   inspect 离线单文件 HTML 报表 v1 样式（T-127）
+   全内联，零外链（无 link/script src/fetch/字体/网络请求，RR §4）；
+   色板与徽标按 RR §5：OK #2E7D32 / WARN #F9A825 / CRIT #C62828 /
+   UNKNOWN #757575；execution_status 以描边徽标区分于业务状态填充徽标。
+   ===================================================================== */
+:root {
+  --status-ok: #2E7D32;
+  --status-warn: #F9A825;
+  --status-crit: #C62828;
+  --status-unknown: #757575;
+  --bg: #f4f5f7;
+  --card-bg: #ffffff;
+  --border: #d9dce1;
+  --text: #212529;
+  --text-dim: #6c757d;
+  --nav-bg: #1f2733;
+  --nav-text: #cfd6df;
+  --nav-panel: #2a3547;
+  --accent: #4f8cc9;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* ---------------- 布局：左导航 + 右滚动区（RR §4） ---------------- */
+.layout { display: flex; min-height: 100vh; }
+.nav {
+  flex: 0 0 280px;
+  width: 280px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+  background: var(--nav-bg);
+  color: var(--nav-text);
+  padding: 16px 14px 32px;
+}
+.content { flex: 1; min-width: 0; padding: 20px 24px 48px; }
+
+/* ---------------- 左导航各块 ---------------- */
+.nav-brand { font-size: 15px; font-weight: 700; margin: 0 0 4px; color: #ffffff; }
+.nav-sub { font-size: 12px; color: #93a0b0; margin: 0 0 14px; }
+.nav-block { margin: 0 0 18px; }
+.nav-title {
+  font-size: 12px; font-weight: 700; letter-spacing: .06em;
+  color: #8fa0b3; margin: 0 0 8px; padding-bottom: 4px;
+  border-bottom: 1px solid #37424f;
+}
+.multi-select {
+  margin: 8px 0; border: 1px solid #4a5767; border-radius: 6px;
+  background: transparent; color: var(--nav-text);
+}
+.multi-select > summary {
+  padding: 8px 10px; cursor: pointer; list-style: none; font-size: 13px;
+  user-select: none;
+}
+.multi-select > summary::-webkit-details-marker { display: none; }
+.multi-select > summary::before { content: "▸"; display: inline-block; width: 16px; color: #8fa0b3; }
+.multi-select[open] > summary::before { content: "▾"; }
+.selection-count { float: right; color: #8fa0b3; font-size: 11px; }
+.multi-menu { padding: 0 8px 8px; }
+.filter-search {
+  width: 100%; padding: 6px 8px; border: 1px solid #4a5767; border-radius: 4px;
+  background: #18202b; color: #ffffff; outline: none; font-size: 12px;
+}
+.filter-search:focus { border-color: var(--accent); }
+.filter-options { margin-top: 6px; max-height: 280px; overflow-y: auto; }
+.filter-option {
+  display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 5px 4px;
+  border-radius: 4px; cursor: pointer; font-size: 12px; word-break: break-all;
+}
+.filter-option:hover { background: var(--nav-panel); }
+.filter-option input { accent-color: var(--accent); }
+.filter-option.hidden { display: none; }
+.filter-reset {
+  display: block; width: 100%; margin-top: 10px; padding: 6px 10px;
+  font-size: 12px; border-radius: 4px; border: 1px dashed #4a5767;
+  background: transparent; color: #93a0b0; cursor: pointer;
+}
+.filter-reset:hover { color: #ffffff; border-color: #8fa0b3; }
+
+/* ---------------- 右滚动区：Run 摘要 + 工具栏 ---------------- */
+.run-header {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 18px; margin-bottom: 12px;
+}
+.run-header h1 { font-size: 19px; margin: 0 0 6px; }
+.run-summary-title { font-size: 14px; margin: 0 0 6px; color: var(--text-dim); }
+.run-header .run-stream { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; }
+.run-conclusion { font-size: 13px; margin: 0; }
+.run-meta {
+  display: grid; grid-template-columns: minmax(150px, 220px) 1fr;
+  margin: 0; border-top: 1px solid #eceef1; padding-top: 8px;
+}
+.run-meta dt { color: var(--text-dim); font-size: 12px; padding: 3px 10px 3px 0; }
+.run-meta dd { margin: 0; font-size: 13px; padding: 3px 0; word-break: break-all; }
+.display-mode-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 14px; background: var(--card-bg);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.display-mode-bar label { font-weight: 700; }
+#group-by-select {
+  min-width: 150px; padding: 5px 8px; border: 1px solid var(--border);
+  border-radius: 5px; background: #ffffff; color: var(--text); font-size: 13px;
+}
+.toolbar {
+  display: flex; align-items: center; gap: 18px;
+  margin-bottom: 14px; padding: 10px 14px;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.print-toggle { font-size: 13px; color: var(--text-dim); cursor: pointer; user-select: none; }
+.print-toggle input { margin-right: 6px; vertical-align: -1px; }
+.filter-hint { font-size: 12px; color: var(--text-dim); }
+
+/* ---------------- 主机大卡片摘要（摘要与指标合并） ---------------- */
+.host-section {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px; margin-bottom: 22px;
+}
+.host-summary { margin-bottom: 14px; }
+.macro-counts { list-style: none; margin: 0 0 8px; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.count { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; color: #ffffff; }
+.count b { font-size: 13px; margin-left: 4px; }
+.count-ok      { background: #2E7D32; }
+.count-warn    { background: #F9A825; color: #1f2733; }
+.count-crit    { background: #C62828; }
+.count-unknown { background: #757575; }
+.macro-conclusion { font-size: 13px; margin: 0 0 6px; }
+.macro-meta { font-size: 12px; color: var(--text-dim); margin: 0; }
+
+/* ---------------- 主机详情：逐指标卡片（RR §4 字段全集） ---------------- */
+.group-view { display: none; }
+.group-view.active { display: block; }
+.report-group { margin-bottom: 28px; }
+.report-group.hidden { display: none; }
+.group-title { font-size: 17px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+.host-section { margin-bottom: 28px; }
+.host-title { font-size: 17px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.metric-grid {
+  display: block;
+}
+.metric-grid > .metric-card,
+.metric-grid > .host-error {
+  width: 100%;
+}
+.metric-grid > * + * { margin-top: 10px; }
+.host-meta { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; word-break: break-all; }
+.host-error {
+  margin: 0 0 10px; padding: 10px 12px; border: 1px solid #C62828;
+  border-left: 4px solid #C62828; border-radius: 6px; background: #fff4f4;
+}
+.host-error strong { color: #C62828; }
+.host-error p { margin: 4px 0 0; color: var(--text); word-break: break-word; }
+
+.metric-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-left: 4px solid var(--status-unknown);
+  border-radius: 8px; padding: 10px 12px; margin-bottom: 0;
+  min-width: 0;
+  cursor: pointer;
+}
+.metric-card.status-ok      { border-left-color: #2E7D32; }
+.metric-card.status-warn    { border-left-color: #F9A825; }
+.metric-card.status-crit    { border-left-color: #C62828; }
+.metric-card.status-unknown { border-left-color: #757575; }
+.metric-card.hidden { display: none; }
+.card-context { color: var(--text-dim); font-size: 12px; font-weight: 400; }
+
+.card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+.card-title { font-size: 14px; margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.metric-id { font-family: Consolas, "Courier New", monospace; font-weight: 700; }
+.metric-name { color: var(--text-dim); font-weight: 400; }
+.card-values {
+  display: grid; grid-template-columns: auto auto auto;
+  gap: 2px 18px; margin: 8px 0 4px; font-size: 13px;
+}
+.card-values div { display: contents; }
+.card-values dt { color: var(--text-dim); font-size: 11px; }
+.card-values dd { margin: 0; font-family: Consolas, "Courier New", monospace; }
+.card-values dd.null-value { color: #adb5bd; }
+
+.card-short-fields {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px 8px;
+  margin-top: 8px;
+}
+.short-field { min-width: 0; }
+.short-field-label {
+  display: block; color: var(--text-dim); font-size: 11px;
+  line-height: 1.2; margin-bottom: 3px;
+}
+.short-field-value {
+  display: block; font-size: 12px; line-height: 1.35;
+  font-family: Consolas, "Courier New", monospace;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.card-fields { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+.card-fields th {
+  text-align: left; width: 120px; min-width: 120px;
+  color: var(--text-dim); font-weight: 500;
+  padding: 3px 8px 3px 0; vertical-align: top;
+}
+.card-fields td { padding: 3px 0; word-break: break-word; overflow-wrap: anywhere; }
+.card-fields tr { border-top: 1px dashed #eceef1; }
+.card-fields tr:first-child { border-top: none; }
+.field-null { color: #adb5bd; }
+
+/* 徽标：业务状态（填充色）与执行状态（描边）区分（RR §5） */
+.chip {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; color: #ffffff; letter-spacing: .04em;
+}
+.chip-ok      { background: #2E7D32; }
+.chip-warn    { background: #F9A825; color: #1f2733; }
+.chip-crit    { background: #C62828; }
+.chip-unknown { background: #757575; }
+.exec-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  border: 2px solid; background: var(--card-bg);
+}
+.exec-success { border-color: #2E7D32; color: #2E7D32; }
+.exec-partial { border-color: #F9A825; background: #FFF8E1; color: #8a6d00; }
+.exec-error   { border-color: #C62828; background: #FDECEA; color: #C62828; }
+
+footer.site-footer { margin-top: 30px; font-size: 12px; color: var(--text-dim); }
+
+/* ---------------- 打印友好（RR §4）：默认宏观摘要，详情可展开 ---------------- */
+@media (max-width: 1200px) {
+  .card-short-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .card-short-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media print {
+  .nav, .toolbar { display: none; }
+  body { background: #ffffff; font-size: 12px; }
+  .layout { display: block; }
+  .content { padding: 0; }
+  .host-section { break-inside: avoid; margin-bottom: 16px; }
+  .metric-grid { display: block; }
+  .metric-card { break-inside: avoid; }
+  .host-detail, .group-view:not(.active) { display: none; }
+  body.print-details .host-detail, body.print-details .group-view.active { display: block; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <!-- ==================== 左导航（RR §4） ==================== -->
+  <nav class="nav" aria-label="报表导航">
+    <p class="nav-brand">巡检 HTML 报表</p>
+    <p class="nav-sub">离线单文件 · 只读展示 JSON 事实源</p>
+
+    <div class="nav-block">
+      <h3 class="nav-title">筛选条件（支持多选）</h3>
+      $HOST_NAV
+      $STATUS_FILTERS
+      $MIDDLEWARE_NAV
+      $METRIC_NAV
+      <button type="button" class="filter-reset" id="filter-reset">清除筛选</button>
+    </div>
+  </nav>
+
+  <!-- ==================== 右滚动区 ==================== -->
+  <main class="content">
+    <!-- Run 摘要置于正文最上方，便于打开报表即看到全局结论 -->
+    $RUN_SUMMARY
+
+    <section class="display-mode-bar" aria-label="正文显示方式">
+      <label for="group-by-select">正文显示：</label>
+      <select id="group-by-select">
+        <option value="host">按主机分组</option>
+        <option value="status">按状态分组</option>
+        <option value="middleware">按中间件分组</option>
+        <option value="metric">按监控指标分组</option>
+      </select>
+      <span class="filter-hint">筛选条件对当前分组视图生效。</span>
+    </section>
+
+    <div class="toolbar">
+      <label class="print-toggle">
+        <input type="checkbox" id="print-details-toggle"> 打印时包含主机详情
+      </label>
+      <span class="filter-hint">左侧筛选支持搜索和多选；指标卡片字段与 Excel 报表保持一致。</span>
+    </div>
+
+    <!-- 四种分组视图在渲染期静态生成，JS 仅切换显隐 -->
+    <section class="host-detail" aria-label="指标详情">
+      $GROUPED_DETAILS
+    </section>
+
+    <footer class="site-footer">生成时间：$GENERATED_AT</footer>
+  </main>
+</div>
+
+<!-- 内嵌 JSON 事实源（只读展示数据，展示层不做二次计算；RR §4 / TD §8） -->
+<script type="application/json" id="inspection-data">$DATA_JSON</script>
+<script>
+(function () {
+  "use strict";
+  /* 仅做筛选显隐、搜索和分组视图切换；业务计数由 Python 渲染期写入。 */
+  var filters = { status: {}, host: {}, middleware: {}, metric: {} };
+
+  function selected(set) {
+    return Object.keys(set).length > 0;
+  }
+
+  function matches(set, value) {
+    if (!selected(set)) { return true; }
+    return set[value] === true;
+  }
+
+  function middlewareMatches(set, value) {
+    var values = (value || "").split("|");
+    var i;
+    if (!selected(set)) { return true; }
+    for (i = 0; i < values.length; i += 1) {
+      if (set[values[i]] === true) { return true; }
+    }
+    return false;
+  }
+
+  function applyFilters() {
+    var activeView = document.querySelector(".group-view.active");
+    var cards, errors, groups, i, card, error, visible, groupCards, j, anyVisible;
+    if (!activeView) { return; }
+    cards = activeView.querySelectorAll(".metric-card");
+    for (i = 0; i < cards.length; i += 1) {
+      card = cards[i];
+      visible = matches(filters.status, card.getAttribute("data-status")) &&
+                matches(filters.host, card.getAttribute("data-host")) &&
+                matches(filters.metric, card.getAttribute("data-metric-id")) &&
+                middlewareMatches(filters.middleware, card.getAttribute("data-middleware"));
+      if (visible) { card.classList.remove("hidden"); }
+      else { card.classList.add("hidden"); }
+    }
+    errors = activeView.querySelectorAll(".host-error");
+    for (i = 0; i < errors.length; i += 1) {
+      error = errors[i];
+      visible = matches(filters.host, error.getAttribute("data-host")) &&
+                matches(filters.status, error.getAttribute("data-status")) &&
+                middlewareMatches(filters.middleware, error.getAttribute("data-middleware")) &&
+                matches(filters.metric, error.getAttribute("data-metric-id"));
+      if (visible) { error.classList.remove("hidden"); }
+      else { error.classList.add("hidden"); }
+    }
+    groups = activeView.querySelectorAll(".report-group");
+    for (i = 0; i < groups.length; i += 1) {
+      groupCards = groups[i].querySelectorAll(".metric-card");
+      errors = groups[i].querySelectorAll(".host-error");
+      anyVisible = false;
+      for (j = 0; j < groupCards.length; j += 1) {
+        if (!groupCards[j].classList.contains("hidden")) { anyVisible = true; break; }
+      }
+      if (!anyVisible) {
+        for (j = 0; j < errors.length; j += 1) {
+          if (!errors[j].classList.contains("hidden")) { anyVisible = true; break; }
+        }
+      }
+      if (anyVisible) { groups[i].classList.remove("hidden"); }
+      else { groups[i].classList.add("hidden"); }
+    }
+  }
+
+  function updateSelectionCounts() {
+    var containers = document.querySelectorAll(".multi-select");
+    var i, kind, count, summaryCount;
+    for (i = 0; i < containers.length; i += 1) {
+      kind = containers[i].getAttribute("data-filter-kind");
+      count = Object.keys(filters[kind] || {}).length;
+      summaryCount = containers[i].querySelector(".selection-count");
+      if (summaryCount) { summaryCount.textContent = count ? ("已选 " + count) : "未选择"; }
+    }
+  }
+
+  function bindChecks() {
+    var checks = document.querySelectorAll(".filter-check");
+    var i;
+    for (i = 0; i < checks.length; i += 1) {
+      checks[i].addEventListener("change", function () {
+        var kind = this.getAttribute("data-filter-kind");
+        var value = this.getAttribute("data-filter-value");
+        if (!kind || !value) { return; }
+        if (this.checked) { filters[kind][value] = true; }
+        else { delete filters[kind][value]; }
+        updateSelectionCounts();
+        applyFilters();
+      });
+    }
+  }
+
+  function bindSearches() {
+    var searches = document.querySelectorAll(".filter-search");
+    var i;
+    for (i = 0; i < searches.length; i += 1) {
+      searches[i].addEventListener("input", function () {
+        var kind = this.getAttribute("data-search-kind");
+        var query = this.value.toLowerCase();
+        var options = document.querySelectorAll('.filter-option');
+        var j, option, optionKind;
+        for (j = 0; j < options.length; j += 1) {
+          option = options[j];
+          optionKind = option.querySelector("input").getAttribute("data-filter-kind");
+          if (optionKind !== kind) { continue; }
+          if (option.textContent.toLowerCase().indexOf(query) >= 0) {
+            option.classList.remove("hidden");
+          } else { option.classList.add("hidden"); }
+        }
+      });
+    }
+  }
+
+  var resetBtn = document.getElementById("filter-reset");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", function () {
+      filters = { status: {}, host: {}, middleware: {}, metric: {} };
+      var checks = document.querySelectorAll(".filter-check");
+      var searches = document.querySelectorAll(".filter-search");
+      var options = document.querySelectorAll(".filter-option");
+      var i;
+      for (i = 0; i < checks.length; i += 1) { checks[i].checked = false; }
+      for (i = 0; i < searches.length; i += 1) { searches[i].value = ""; }
+      for (i = 0; i < options.length; i += 1) { options[i].classList.remove("hidden"); }
+      updateSelectionCounts();
+      applyFilters();
+    });
+  }
+
+  var modeSelect = document.getElementById("group-by-select");
+  if (modeSelect) {
+    modeSelect.addEventListener("change", function () {
+      var views = document.querySelectorAll(".group-view");
+      var i, view;
+      for (i = 0; i < views.length; i += 1) {
+        view = views[i];
+        if (view.getAttribute("data-group-mode") === modeSelect.value) {
+          view.classList.add("active");
+        } else { view.classList.remove("active"); }
+      }
+      applyFilters();
+    });
+  }
+
+  bindChecks();
+  bindSearches();
+  updateSelectionCounts();
+  applyFilters();
+
+  /* 打印友好：默认只打印当前摘要；勾选后打印当前分组详情。 */
+  var printToggle = document.getElementById("print-details-toggle");
+  if (printToggle) {
+    printToggle.addEventListener("change", function () {
+      if (printToggle.checked) { document.body.classList.add("print-details"); }
+      else { document.body.classList.remove("print-details"); }
+    });
+  }
+})();
+</script>
+</body>
+</html>

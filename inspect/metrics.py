@@ -1,0 +1,730 @@
+"""10 个共同 P0 指标注册表（linux-common-p0-v1，T-101）。
+
+每条指标定义锚定 docs/specs/local-metrics-requirements.md §5（字段与来源锚点）
+与 docs/specs/technical-design.md §5.2（采集命令、超时、解析器约定）。
+本模块只提供**定义数据**，不执行任何采集命令、不做阈值判定
+（阈值判定属 T-102 基线文件/T-104 normalize 范围；规则 ID 仅作引用）。
+
+字段契约（tests/test_metrics.py 机械校验，增删需同步合同）：
+  metric_id         版本化标识（如 local.cpu.utilization）
+  name              中文名称（--list-metrics 展示）
+  command           采集命令（MR §5 数据源列只读转译，含 <profile> 配置占位）
+  timeout_sec       默认采集超时上限（CLI 会由 inspect.conf timeout 统一覆盖）
+  parser            解析器名（TD §5.2；normalize.py T-104 按名注册实现）
+  unit              单位（MR §5 单位列）
+  source_anchor     来源锚点（MR §2 格式：文件名+文档类型+章节+表T#R#+sha256[:8]）
+  threshold_layer   阈值层（MR §3：文档基线/外部配置覆盖/无规则冲突→UNKNOWN）
+  threshold_rule_ids 阈值规则 ID 引用（MR §6 汇总行 + 冲突/缺失编号 C1-C13）
+  conflicts         冲突/缺失备注（docs/reviews/docx-source-conflicts.md 编号）
+  doc_baseline      文档基线判定摘要（MR §5 文档基线列）
+  unknown_conditions UNKNOWN 条件（MR §5 权限/能力失败与缺失边界列）
+"""
+
+# 来源文件指纹（linux-docx/，基线 baee20b 只读）：文件 sha256 前 8 位
+_MANUAL_SHA = (
+    "巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, "
+    "Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, "
+    "Rocketmq=9d70e22c, Tomcat=49aa5707"
+)
+_DEPLOY_SHA = (
+    "部署规范 sha256[:8]: ES=246a0387, Kafka=7021c214, Mysql=e0571b68, "
+    "Nacos=d3233b50, Nginx=06707079, Rabbitmq=5b5b42a0, Redis=c4b82daf, "
+    "Rocketmq=8cbcd254, Tomcat=c0046da0"
+)
+
+# 阈值规则 ID 前缀：文档基线版本标识（MR §6 汇总表，T-102 转写基线 YAML）
+_RULE_PREFIX = "linux-common-p0-v1"
+
+VERSION = _RULE_PREFIX
+
+METRICS = [
+    {
+        "metric_id": "local.process.present",
+        "name": "进程存在性",
+        "command": "pgrep -fa '<profile 进程模式>' || ps -ef | grep '[p]attern'"
+                   "（pattern 来自产品 profile 配置）",
+        "timeout_sec": 10,
+        "parser": "parse_process_present",
+        "unit": "布尔（present/absent）+ 匹配行数",
+        "source_anchor": (
+            "9 份运维巡检手册 §三(二)P0必看指标-服务/进程行"
+            "（如 Kafka 手册 T5R2、Tomcat 手册 T5R1、Redis 手册 T5R1；"
+            "示例命令 pgrep -fa 'kafka.Kafka'、ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线（进程存在=正常）+ 外部配置（进程模式）覆盖；无 profile → UNKNOWN",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.process.present"],
+        "conflicts": [],
+        "doc_baseline": "进程存在 → OK；进程不存在 → CRIT（故障）；服务反复重启 → WARN",
+        "unknown_conditions": "无 profile 配置、无权限或 pgrep 不可用 → UNKNOWN，继续其余指标",
+    },
+    {
+        "metric_id": "local.service.active",
+        "name": "systemd 服务状态",
+        "command": "systemctl is-active <unit>; systemctl show -p ActiveState,SubState <unit>"
+                   "（unit 名来自产品 profile/部署规范）",
+        "timeout_sec": 10,
+        "parser": "parse_service_active",
+        "unit": "枚举（active/inactive/failed/unknown/not-found）",
+        "source_anchor": (
+            "巡检手册 P0 服务行（Nginx T5R1/T5R4、Redis T5R1、Rabbitmq T5R1、"
+            "Mysql T5R1、Nacos T5R1）+ 部署规范 systemd 章节"
+            "（Mysql T11、Redis T13/T24、Rocketmq T18/T19、Tomcat T15、ES T7）；"
+            + _MANUAL_SHA + "；" + _DEPLOY_SHA
+        ),
+        "threshold_layer": "文档基线 + 外部配置（unit 名）覆盖；无配置 → UNKNOWN",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.service.active"],
+        "conflicts": ["C8（unit 命名冲突，配置边界）"],
+        "doc_baseline": "active → OK；非 active/进程不存在 → CRIT（故障）；反复重启 → WARN",
+        "unknown_conditions": "unit 无配置/冲突（C8）、无权限读取 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.port.listening",
+        "name": "端口监听",
+        "command": "ss -tlnp | grep -E ':<profile 端口>'（核对监听进程与产品进程一致）",
+        "timeout_sec": 10,
+        "parser": "parse_port_listening",
+        "unit": "枚举（listening/not-listening）+ 端口列表",
+        "source_anchor": (
+            "巡检手册 P0 端口行（ES T5R8、Kafka T5R10、Nacos T5R2、Redis T5R3、"
+            "Rabbitmq T5R3、Rocketmq T5R4、Tomcat T5R2、Nginx T5R3）+ 环境信息端口表；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线 + 外部配置（端口+模式）覆盖；无配置 → UNKNOWN",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.port.listening"],
+        "conflicts": ["C7（模式外端口仍开放如 Kafka 9092 → WARN 需确认）", "C13（端口/模式无配置）"],
+        "doc_baseline": "端口监听且进程匹配 → OK；不监听 → CRIT（故障）；模式外端口开放 → WARN",
+        "unknown_conditions": "端口/模式无配置（C13）、ss 权限不足或不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.cpu.utilization",
+        "name": "CPU 使用率",
+        "command": "top -bn2 -d 1 | grep 'Cpu(s)' | tail -1；ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -10",
+        "timeout_sec": 10,
+        "parser": "parse_cpu_utilization",
+        "unit": "%",
+        "source_anchor": (
+            "9 份巡检手册 P0 CPU 行（ES T5R3、Kafka T5R7、Mysql T5R7、Nacos T5R7、"
+            "Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8、Nginx T5R9、Tomcat T5R6）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线（linux-common-p0-v1）+ 外部配置覆盖",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.cpu.utilization"],
+        "conflicts": ["C2（Nginx 仅 80% 关注层、Tomcat 相对判据，阈值差异）"],
+        "doc_baseline": "长期 <70% 且短时波动 <80% → OK；持续 >80% → WARN（关注）；"
+                        ">90% 且伴随业务证据 → CRIT（告警）",
+        "unknown_conditions": "无法采样 → UNKNOWN；>90% 无业务证据采集能力 → 保持 WARN 并在 provenance 注明",
+    },
+    {
+        "metric_id": "local.cpu.load_1m",
+        "name": "系统负载",
+        "command": "cat /proc/loadavg；nproc（或 /proc/cpuinfo 核数）",
+        "timeout_sec": 10,
+        "parser": "parse_cpu_load_1m",
+        "unit": "1分钟系统负载（数值）",
+        "source_anchor": (
+            "9 份巡检手册 P0 CPU 行正常标准“load_1m 不持续高于 CPU 核数”"
+            "（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线 + 缺失边界 → 默认 UNKNOWN，外部配置可覆盖",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.cpu.load_1m"],
+        "conflicts": ["C5（持续>核数的告警等级缺失）"],
+        "doc_baseline": "load_1m ≤ 核数 → OK；持续 > 核数 → 等级缺失 → UNKNOWN"
+                        "（建议外部配置：如持续 > 核数 → WARN）",
+        "unknown_conditions": "核数无法获取、/proc 不可读、持续性确认采样不足 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.memory.available_percent",
+        "name": "可用内存百分比",
+        "command": "free -m（available 字段；available/总内存 × 100 取整）",
+        "timeout_sec": 10,
+        "parser": "parse_memory_available_percent",
+        "unit": "%",
+        "source_anchor": (
+            "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、"
+            "Rabbitmq T5R9、Rocketmq T5R9、Nginx T5R9、Tomcat T5R7、Redis T5R7）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线 + 外部配置覆盖",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.memory.available_percent"],
+        "conflicts": ["C4（10%–20% 区间文档未定义，措辞差异数值一致）"],
+        "doc_baseline": "≥20% → OK；<10% → CRIT（告警）；10%–20% → 缺失 → UNKNOWN"
+                        "（外部配置可覆盖）",
+        "unknown_conditions": "free 不可用、10%–20% 区间无外部配置 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.swap.used_percent",
+        "name": "Swap 使用率",
+        "command": "free -m Swap 行（used/total）或 /proc/meminfo SwapTotal/SwapFree"
+                   "（used/total × 100；total=0 视为未配置）",
+        "timeout_sec": 10,
+        "parser": "parse_swap_used_percent",
+        "unit": "%",
+        "source_anchor": (
+            "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、"
+            "Rabbitmq T5R9、Rocketmq T5R9、Tomcat T5R7）；swap=0 为部署基线（ES/部署规范）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线 + 外部配置覆盖；used>0 判据冲突 → 默认 UNKNOWN",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.swap.used_percent"],
+        "conflicts": ["C3（used>0：5 份手册=告警/故障、ES=需确认部署基线、"
+                      "Tomcat=持续使用为风险、Nginx/Redis 未定义，冲突未解决）"],
+        "doc_baseline": "used=0（或未配置 swap）→ OK（全部手册一致）；used>0 → UNKNOWN"
+                        "（冲突 C3，外部配置可覆盖）",
+        "unknown_conditions": "无法读取、used>0 且无外部配置 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.filesystem.used_percent",
+        "name": "磁盘使用率",
+        "command": "df -hT（全部文件系统；按文件系统取最大值）",
+        "timeout_sec": 10,
+        "parser": "parse_filesystem_used_percent",
+        "unit": "%",
+        "source_anchor": (
+            "9 份巡检手册 P0 磁盘行（ES T5R5、Kafka T5R9、Mysql T5R9、Nacos T5R9、"
+            "Rabbitmq T5R10、Redis T5R10、Rocketmq T5R10、Nginx T5R10、Tomcat T5R8）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线（75/85/95 分层）+ 外部配置覆盖",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.filesystem.used_percent"],
+        "conflicts": ["C1（Nginx/Tomcat 建议线 80% 差异，外部配置覆盖）",
+                      "C6（ES >90% 严重告警层并入 CRIT）"],
+        "doc_baseline": "<75% → OK（Nginx/Tomcat <80%，C1）；75–85% → WARN（关注）；"
+                        ">85% → CRIT（告警）；>95% → CRIT（故障风险）",
+        "unknown_conditions": "根文件系统不可读或 df 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.filesystem.inode_used_percent",
+        "name": "inode 使用率",
+        "command": "df -i（全部文件系统；按文件系统取最大值）",
+        "timeout_sec": 10,
+        "parser": "parse_filesystem_inode_used_percent",
+        "unit": "%",
+        "source_anchor": (
+            "9 份巡检手册 P0 磁盘行（ES T5R5、Kafka T5R9、Mysql T5R9、Nacos T5R9、"
+            "Rabbitmq T5R10、Redis T5R10、Rocketmq T5R10、Nginx T5R10、Tomcat T5R8）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线 + 外部配置覆盖；≥80% 数值边界缺失 → 默认 UNKNOWN",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.filesystem.inode_used_percent"],
+        "conflicts": ["C5（≥80% 仅描述“接近耗尽”未给数值边界）"],
+        "doc_baseline": "<80% → OK（全部手册一致）；≥80% → 缺失 → UNKNOWN"
+                        "（外部配置可覆盖）",
+        "unknown_conditions": "根文件系统不可读、df 不可用、≥80% 无外部配置 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.logs.key_evidence",
+        "name": "关键日志证据",
+        "command": "tail -300 <profile 日志路径> | egrep -i '<profile 关键词>'"
+                   "（路径/关键词为产品 profile 配置）",
+        "timeout_sec": 15,
+        "parser": "parse_logs_key_evidence",
+        "unit": "匹配行数 + 关键词分布",
+        "source_anchor": (
+            "9 份巡检手册 P0 关键日志行（ES T5R11、Kafka T5R11、Mysql T5R11、"
+            "Nacos T5R10、Rabbitmq T5R11、Redis T5R11、Rocketmq T5R11、Nginx T5R11、"
+            "Tomcat T5R5）；" + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线（无新增不可解释 ERROR/FATAL → OK）+ 产品 profile 关键词集配置",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.logs.key_evidence"],
+        "conflicts": ["C10（命中后按产品手册判定，冲突未解决 → UNKNOWN）"],
+        "doc_baseline": "无新增不可解释 ERROR/FATAL、WARN 均可解释 → OK；OOM/磁盘满/连接耗尽/"
+                        "主从异常/认证失败等 → WARN 或 CRIT（按产品手册）",
+        "unknown_conditions": "日志不可读（不作为 OK）、关键词集无配置 → UNKNOWN",
+    },
+]
+
+
+# --------------------------------------------------------------------------
+# Nginx 中间件指标（nginx-p0-v1，安徽农金Nginx、Keepalived运维巡检手册v1.0）
+# --------------------------------------------------------------------------
+_NGINX_RULE_PREFIX = "nginx-p0-v1"
+_NGINX_ANCHOR = (
+    "安徽农金Nginx、Keepalived运维巡检手册v1.0.docx（P0 必看指标表：Nginx本节点服务/"
+    "配置有效性/端口与本地访问/关键日志；P1 关注指标表：连接状态/访问日志状态码/"
+    "配置基线/安全配置基线）；" + _MANUAL_SHA
+)
+
+NGINX_METRICS = [
+    {
+        "metric_id": "local.nginx.process.present",
+        "name": "Nginx 进程存在性",
+        "command": "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+nginx[[:space:]]+nginx: (master|worker) process'",
+        "timeout_sec": 10,
+        "parser": "parse_process_present",
+        "unit": "布尔（present/absent）+ 匹配行数",
+        "source_anchor": (
+            "P0 指标表「Nginx本节点服务」行（ps 的 comm 列必须为 nginx，args 列必须为 "
+            "nginx master/worker process；命令文本中出现 nginx 不算运行）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（进程存在=正常；未运行=CRIT）+ nginx 白名单（白名单内未运行 → CRIT 未运行）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.process.present"],
+        "conflicts": [],
+        "doc_baseline": "进程存在 → OK；进程不存在 → CRIT（未运行/故障）；白名单外主机未运行 → 跳过该主机 nginx 指标",
+        "unknown_conditions": "无权限或 pgrep 不可用 → UNKNOWN，继续其余指标",
+    },
+    {
+        "metric_id": "local.nginx.version",
+        "name": "Nginx 版本",
+        "command": "{nginx_bin} -v 2>&1",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_version",
+        "unit": "版本号",
+        "source_anchor": (
+            "P0 指标表「Nginx版本」行（从运行中 Nginx master 进程解析可执行文件，执行 nginx -v，"
+            "取得实际 nginx/x.y.z）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "inspect.conf nginx_version 版本白名单（实际版本一致=正常；不一致=CRIT）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.version"],
+        "conflicts": [],
+        "doc_baseline": "实际运行版本属于 inspect.conf 的 nginx_version 候选值 → OK；实际版本不在候选值内 → CRIT",
+        "unknown_conditions": "无法发现运行中的 Nginx 可执行文件、nginx -v 无版本输出或未配置 nginx_version → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.config.valid",
+        "name": "Nginx 配置有效性",
+        "command": "{nginx_bin} -t -e {nginx_error_log} -c {nginx_conf}",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_config_valid",
+        "unit": "枚举（valid/invalid）",
+        "source_anchor": (
+            "P0 指标表「Nginx配置有效性」行（/usr/sbin/nginx -e error.log -c "
+            "nginx.conf -t；返回 syntax is ok 和 test is successful）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（语法通过=正常；语法失败=CRIT）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.config.valid"],
+        "conflicts": [],
+        "doc_baseline": "syntax is ok + test is successful → OK；语法失败/文件缺失/端口冲突/权限错误 → CRIT（故障）",
+        "unknown_conditions": "nginx 可执行文件不可用、无权限读取配置 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.port.listening",
+        "name": "Nginx 端口监听与本地访问",
+        "command": (
+            "ss -tlnp | grep ':{nginx_port}'; "
+            "curl -sS -I --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/ | head -n 1"
+        ),
+        "timeout_sec": 10,
+        "parser": "parse_nginx_port_listening",
+        "unit": "枚举（listening/reachable）+ 本地 HTTP 状态",
+        "source_anchor": (
+            "P0 指标表「Nginx端口与本地访问」行（ss -tlnp | grep ':8010'；"
+            "curl -sS -I --connect-timeout 3 http://{nginx_listener_host}:8010/）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（监听且本地可访问=正常；不监听/连接失败/5xx=CRIT）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.port.listening"],
+        "conflicts": [],
+        "doc_baseline": "端口 LISTEN 且本地 HTTP 返回 200/302/401/403 等可解释状态 → OK；端口不监听、连接超时/拒绝或持续 5xx → CRIT（故障）",
+        "unknown_conditions": "ss/curl 不可用或无法读取 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.error_log.key_evidence",
+        "name": "Nginx 关键日志",
+                "command": (
+            "ls -1 {nginx_error_log} 2>/dev/null; "
+            "tail -n 1000 {nginx_error_log} | egrep -i "
+            "'emerg|alert|crit|error|permission denied|bind\\(|connect\\(\\) failed|"
+            "upstream timed out' | tail -n 20"
+        ),
+        "timeout_sec": 15,
+        "parser": "parse_nginx_error_log",
+        "unit": "命中行数 + 严重度分布",
+        "source_anchor": (
+            "P0 指标表「关键日志」行（tail -n 100 error.log；egrep -i 'emerg|alert|crit|"
+            "error|permission denied|bind(|connect() failed|upstream timed out'）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（无持续 emerg/alert/crit/error=正常；有命中=关注）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.error_log.key_evidence"],
+        "conflicts": [],
+        "doc_baseline": "无命中 → OK；命中 emerg/alert/crit/error 等 → WARN（记录时间点与错误内容，优先处理）",
+        "unknown_conditions": "日志不可读（不作为 OK）→ UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.connections.status",
+        "name": "Nginx 连接状态（stub_status）",
+        "command": "curl -sS --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/nginx_status",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_connections_status",
+        "unit": "连接数（active/reading/writing/waiting）",
+        "source_anchor": (
+            "P1 指标表「Nginx连接状态」行（curl -sS --connect-timeout 3 "
+            "http://{nginx_listener_host}:8010/nginx_status）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（返回 Active connections 等=正常；未开启 stub_status=未配置）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.connections.status"],
+        "conflicts": [],
+        "doc_baseline": "已开启 stub_status 且返回连接数 → OK；未开启 → UNKNOWN（记录为未配置）",
+        "unknown_conditions": "stub_status 未开启/URL 不可访问、curl 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.access_log.status_codes",
+        "name": "访问日志状态码",
+        "command": (
+            "ls -1 {nginx_access_log} 2>/dev/null; "
+            "tail -n 1000 {nginx_access_log} | grep -E ' [1-5][0-9][0-9] '"
+        ),
+        "timeout_sec": 15,
+        "parser": "parse_nginx_access_log_status_codes",
+        "unit": "5xx 命中数 + 状态码分布",
+        "source_anchor": (
+            "P1 指标表「访问日志状态码」行（tail -n 1000 access.log | awk '{print $9}' "
+            "| sort | uniq -c；5xx 无持续增长）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（2xx/3xx 为主、5xx 无持续增长=正常；5xx 命中=关注）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.access_log.status_codes"],
+        "conflicts": [],
+        "doc_baseline": "5xx=0 → OK；5xx>0 → WARN（记录 URL/来源 IP/状态码/时间段，关联 error.log 处理）",
+        "unknown_conditions": "访问日志不可读 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.config.baseline",
+        "name": "Nginx 配置基线",
+        "command": (
+            "ls -1 {nginx_conf} 2>/dev/null; "
+            "grep -E 'worker_processes|worker_rlimit_nofile|worker_connections|"
+            "use epoll|multi_accept|keepalive_timeout|client_max_body_size|limit_req|"
+            "limit_conn' {nginx_conf}"
+        ),
+        "timeout_sec": 10,
+        "parser": "parse_nginx_config_baseline",
+        "unit": "关键指令命中集合（worker_processes/worker_connections/keepalive_timeout 等）",
+        "source_anchor": (
+            "P1 指标表「Nginx配置基线」行（grep -E 'worker_processes|worker_rlimit_nofile|"
+            "worker_connections|use epoll|multi_accept|keepalive_timeout|client_max_body_size|"
+            "limit_req|limit_conn' nginx.conf）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（关键指令齐全=正常；配置漂移=关注）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.config.baseline"],
+        "conflicts": [],
+        "doc_baseline": "worker_processes/worker_connections/keepalive_timeout 等核心指令存在 → OK；缺失 → WARN（配置漂移，记录差异与变更依据）",
+        "unknown_conditions": "配置文件不可读 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.security.baseline",
+        "name": "安全配置基线",
+        "command": (
+            "ls -1 {nginx_conf} 2>/dev/null; "
+            "grep -E 'server_tokens|autoindex|X-Frame-Options|X-Content-Type-Options|"
+            "Content-Security-Policy|request_method' {nginx_conf}"
+        ),
+        "timeout_sec": 10,
+        "parser": "parse_nginx_security_baseline",
+        "unit": "安全指令命中集合（server_tokens/autoindex/安全响应头）",
+        "source_anchor": (
+            "P1 指标表「安全配置基线」行（grep -E 'server_tokens|autoindex|X-Frame-Options|"
+            "X-Content-Type-Options|Content-Security-Policy|request_method' nginx.conf）；" + _NGINX_ANCHOR
+        ),
+        "threshold_layer": "文档基线（server_tokens off + autoindex off=正常；安全配置缺失=关注）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.security.baseline"],
+        "conflicts": [],
+        "doc_baseline": "server_tokens off 且 autoindex off → OK；缺失 → WARN（记录风险，按安全加固要求补齐）",
+        "unknown_conditions": "配置文件不可读 → UNKNOWN",
+    },
+]
+
+# 阈值规则 ID 前缀（nginx-p0-v1）
+NGINX_RULE_PREFIX = _NGINX_RULE_PREFIX
+
+METRICS.extend(NGINX_METRICS)
+
+
+# --------------------------------------------------------------------------
+# Keepalived 中间件指标（keepalived-p0-v1）
+# --------------------------------------------------------------------------
+_KEEPALIVED_RULE_PREFIX = "keepalived-p0-v1"
+_KEEPALIVED_ANCHOR = (
+    "安徽农金Nginx、Keepalived运维巡检手册v1.0.docx（P0 必看指标表：Keepalived本节点服务/"
+    "VIP绑定状态/VIP访问/配置基线/健康检查脚本/关键日志；P1 关注指标表：Keepalived能力与漂移稳定性）；"
+    "定位：T5R4/T5R6；"
+    + _MANUAL_SHA
+)
+
+KEEPALIVED_METRICS = [
+    {
+        "metric_id": "local.keepalived.process.present",
+        "name": "Keepalived 进程存在性",
+        "command": "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+keepalived[[:space:]]'",
+        "timeout_sec": 10,
+        "parser": "parse_process_present",
+        "unit": "布尔（present/absent）+ 匹配行数",
+        "source_anchor": "P0 指标表「Keepalived本节点服务」行（ps 的 comm 列必须为 keepalived；命令文本中出现 keepalived 不算运行）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（Keepalived 主进程/VRRP 子进程存在=正常；未运行=CRIT）+ keepalived 白名单",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.process.present"],
+        "conflicts": [],
+        "doc_baseline": "发现 Keepalived 进程 → OK；未发现 → 白名单主机 CRIT「未运行」，非白名单主机跳过 Keepalived 指标",
+        "unknown_conditions": "无权限或 pgrep 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.version",
+        "name": "Keepalived 版本",
+        "command": "{keepalived_bin} -v 2>&1",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_version",
+        "unit": "版本号",
+        "source_anchor": "环境信息「Keepalived版本」行（以 keepalived -v 输出为准）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "inspect.conf keepalived_version 版本基线（实际版本一致=正常；不一致=CRIT）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.version"],
+        "conflicts": [],
+        "doc_baseline": "运行中的 Keepalived 版本命中 inspect.conf keepalived_version 候选值 → OK；不一致 → CRIT",
+        "unknown_conditions": "无法发现运行中的 Keepalived 可执行文件、-v 无版本输出或未配置 keepalived_version → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.vip.bound",
+        "name": "VIP 绑定状态",
+        "command": "ip -brief addr；解析 {keepalived_conf} 中 virtual_ipaddress 与 state",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_vip_bound",
+        "unit": "枚举（bound/unbound）+ VIP/角色",
+        "source_anchor": "P0 指标表「VIP绑定状态」行（ip -brief addr；ip addr show dev interface）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（MASTER 持有 VIP、BACKUP 不持有 VIP）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.vip.bound"],
+        "conflicts": ["单主机巡检无法单独证明另一台节点是否同时持有 VIP"],
+        "doc_baseline": "从实际 Keepalived 配置读取 state/VIP；MASTER 应持有 VIP，BACKUP 正常不持有 VIP；符合角色预期 → OK；角色异常、MASTER 无 VIP 或 BACKUP 持有 VIP → CRIT",
+        "unknown_conditions": "运行配置不可发现、virtual_ipaddress 未配置、ip 不可用或无法读取地址 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.vip.access",
+        "name": "VIP 访问",
+        "command": "curl -sS -I --connect-timeout {timeout} --max-time {timeout} http://{keepalived_vip}:{keepalived_port}/",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_vip_access",
+        "unit": "枚举（reachable/unreachable）+ HTTP 状态",
+        "source_anchor": "P0 指标表「VIP访问」行（仅在目标主机本机执行 curl -sS -I http://配置VIP:端口/；VIP 地址只用于配置/绑定核对）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（VIP 可访问且非 5xx=正常；无法访问/5xx=CRIT）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.vip.access"],
+        "conflicts": [],
+        "doc_baseline": "优先读取配置中的 virtual_ipaddress 确认 VIP 配置，再使用 inspect.conf keepalived_port；为避免跨主机访问，HTTP 只在目标主机本机请求 http://配置VIP:端口/；返回 200/3xx/401/403 等可解释状态 → OK；连接失败或 5xx → CRIT",
+        "unknown_conditions": "端口无法从 inspect.conf 得到、curl 不可用或本机请求超时 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.config.baseline",
+        "name": "Keepalived 配置基线",
+        "command": "egrep 'state|interface|virtual_router_id|priority|advert_int|virtual_ipaddress|script|track_script' {keepalived_conf}",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_config_baseline",
+        "unit": "关键指令命中集合",
+        "source_anchor": "P0 指标表「Keepalived配置基线」行（egrep state/interface/virtual_router_id/priority/advert_int/virtual_ipaddress/script/track_script）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（VRRP 角色、网卡、VRID、优先级、VIP、健康检查配置齐全=正常）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.config.baseline"],
+        "conflicts": [],
+        "doc_baseline": "配置中同时存在 state、interface、virtual_router_id、priority、advert_int、virtual_ipaddress、script、track_script 等关键项 → OK；缺失 → WARN，表示可能配置漂移",
+        "unknown_conditions": "配置文件不可发现、不可读或 grep 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.healthcheck.script",
+        "name": "健康检查脚本",
+        "command": "解析 {keepalived_conf} 中 vrrp_script 的 script 路径；ls -l；test -x",
+        "timeout_sec": 10,
+        "parser": "parse_keepalived_healthcheck",
+        "unit": "枚举（present/executable）",
+        "source_anchor": "P0 指标表「健康检查脚本」行（ls -l /opt/keepalived/scripts/check_nginx.sh；echo $?）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（脚本存在且可执行=正常；缺失/不可执行=CRIT）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.healthcheck.script"],
+        "conflicts": [],
+        "doc_baseline": "从实际配置解析 track_script 引用的脚本；脚本存在且可执行（建议权限 750 或更严格）→ OK；缺失或不可执行 → CRIT。为安全起见巡检只做静态权限检查，不执行现场脚本",
+        "unknown_conditions": "配置不可发现、未找到 script 引用或路径不可判定 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.error_log.key_evidence",
+        "name": "Keepalived 关键日志",
+        "command": "tail -n 1000 {keepalived_log} | egrep -i 'Entering MASTER|Entering BACKUP|Entering FAULT|script.*failed|VRRP'",
+        "timeout_sec": 15,
+        "parser": "parse_keepalived_error_log",
+        "unit": "命中行数 + 事件分布",
+        "source_anchor": "P0 指标表「关键日志」行（tail keepalived.log；egrep Entering MASTER/BACKUP/FAULT/script failed/VRRP）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（无 FAULT/脚本失败且无频繁角色切换=正常）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.error_log.key_evidence"],
+        "conflicts": [],
+        "doc_baseline": "日志末尾 1000 行无 FAULT、健康检查脚本失败且 MASTER/BACKUP 切换不频繁 → OK；发现 FAULT/脚本失败 → CRIT；短时间反复切换 → WARN",
+        "unknown_conditions": "日志路径无法发现、文件不可读或日志尚未配置 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.keepalived.capability.stability",
+        "name": "Keepalived 能力与漂移稳定性",
+        "command": "getcap {keepalived_bin}；systemctl show keepalived-opt -p AmbientCapabilities -p CapabilityBoundingSet；tail -n 50 {keepalived_log}",
+        "timeout_sec": 15,
+        "parser": "parse_keepalived_capability_stability",
+        "unit": "枚举（capability/stability）",
+        "source_anchor": "P1 指标表「Keepalived能力与漂移稳定性」行（getcap、systemctl capability、日志切换/FAULT/脚本失败）；" + _KEEPALIVED_ANCHOR,
+        "threshold_layer": "文档基线（具备 cap_net_admin/cap_net_raw 且无故障切换=正常）",
+        "threshold_rule_ids": [f"{_KEEPALIVED_RULE_PREFIX}:local.keepalived.capability.stability"],
+        "conflicts": [],
+        "doc_baseline": "运行二进制具备 cap_net_admin、cap_net_raw 等网络能力，且最近日志无 FAULT/脚本失败/频繁切换 → OK；能力缺失或故障事件 → CRIT；日志缺失无法判断稳定性 → UNKNOWN",
+        "unknown_conditions": "getcap/systemctl/日志不可用，或运行二进制/日志路径无法发现 → UNKNOWN",
+    },
+]
+
+KEEPALIVED_RULE_PREFIX = _KEEPALIVED_RULE_PREFIX
+METRICS.extend(KEEPALIVED_METRICS)
+
+# --------------------------------------------------------------------------
+# Elasticsearch 中间件指标（elasticsearch-p0-p1-v1）
+# --------------------------------------------------------------------------
+_ELASTICSEARCH_RULE_PREFIX = "elasticsearch-p0-p1-v1"
+_ELASTICSEARCH_ANCHOR = (
+    "安徽农金Elasticsearch运维巡检手册v1.0.docx（P0 表62、P1 表65；"
+    "定位：T5R3/T5R4/T5R5/T5R11/T6R1；Elasticsearch 8.17.0 HTTPS API/9200、"
+    "传输端口9300、/opt/elasticsearch 默认布局）；"
+    + _MANUAL_SHA
+)
+
+
+def _es_metric(metric_id, name, command, parser, unit, baseline, unknown, *, timeout=10):
+    """Create a fully populated metric definition for the ES adapter."""
+    return {
+        "metric_id": metric_id,
+        "name": name,
+        "command": command,
+        "timeout_sec": timeout,
+        "parser": parser,
+        "unit": unit,
+        "source_anchor": _ELASTICSEARCH_ANCHOR,
+        "threshold_layer": "Elasticsearch 文档基线（可由 thresholds-override.yml 覆盖）",
+        "threshold_rule_ids": [f"{_ELASTICSEARCH_RULE_PREFIX}:{metric_id}"],
+        "conflicts": [],
+        "doc_baseline": baseline,
+        "unknown_conditions": unknown,
+    }
+
+
+ELASTICSEARCH_METRICS = [
+    _es_metric("local.elasticsearch.process.present", "Elasticsearch 进程存在性",
+                 "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+(java[[:space:]].*org\\.elasticsearch\\.bootstrap\\.Elasticsearch|elasticsearch[[:space:]])'",
+                "parse_process_present", "布尔（present/absent）+ 匹配行数",
+                "发现运行中的 Elasticsearch JVM/启动脚本 → OK；白名单主机未运行 → CRIT；非白名单主机跳过",
+                "pgrep 不可用或无权限 → UNKNOWN"),
+    _es_metric("local.elasticsearch.version", "Elasticsearch 版本",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/",
+                "parse_elasticsearch_version", "版本号",
+                "通过运行实例 HTTPS 根 API 读取 version.number；命中 inspect.conf elasticsearch_version → OK；不一致 → CRIT",
+                "进程未运行、API 未授权/连接失败、根 API 无 version.number 或未配置版本基线 → UNKNOWN"),
+    _es_metric("local.elasticsearch.cluster.health", "集群健康",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cluster/health?pretty",
+                "parse_elasticsearch_cluster_health", "枚举（green/yellow/red）+ 节点数 + 分片百分比",
+                "status=green、节点数达到 elasticsearch_expected_nodes、active_shards_percent=100 → OK；yellow → WARN；red/节点严重不足 → CRIT",
+                "HTTP 401/403/连接失败、返回非 JSON 或无法发现端点 → UNKNOWN"),
+    _es_metric("local.elasticsearch.nodes.online", "集群在线节点数",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cat/nodes?v&h=name,ip,node.role,master,heap.percent,cpu,load_1m,disk.used_percent",
+                "parse_elasticsearch_nodes", "在线节点数",
+                "在线节点数达到 elasticsearch_expected_nodes → OK；少 1 台 → WARN；少 2 台及以上 → CRIT",
+                "API 未授权、返回为空/格式异常或未配置期望节点数 → UNKNOWN"),
+    _es_metric("local.elasticsearch.nodes.cpu", "Elasticsearch 节点 CPU",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cat/nodes?v&h=name,ip,cpu,load_1m,load_5m,load_15m",
+                "parse_elasticsearch_nodes_cpu", "%（节点最大 CPU）",
+                "节点最大 CPU <80% → OK；80%–90% → WARN；>90% → CRIT",
+                "API 未授权、无节点行或 CPU 字段不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.nodes.memory", "Elasticsearch 节点内存",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cat/nodes?v&h=name,heap.percent,ram.percent",
+                "parse_elasticsearch_nodes_memory", "%（最大 heap/ram）",
+                "heap <75% 且 ram <90% → OK；heap 75%–85% 或 ram 90%–95% → WARN；heap >85% 或 ram >95% → CRIT",
+                "API 未授权、无节点行或 heap/ram 字段不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.nodes.disk", "Elasticsearch 节点磁盘",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cat/allocation?v",
+                "parse_elasticsearch_nodes_disk", "%（节点最大 disk.percent）",
+                "disk.percent <75% → OK；75%–85% → WARN；>85% → CRIT（>95% 有 flood-stage 只读风险）",
+                "API 未授权、无 allocation 行或 disk.percent 不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.disk.watermark", "磁盘水位线",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} 'https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cluster/settings?include_defaults=true&filter_path=**.watermark*'",
+                "parse_elasticsearch_watermark", "水位线配置与当前最高磁盘使用率",
+                "能读取 low/high/flood_stage 配置且当前磁盘未越过 high → OK；接近/超过 high → WARN/CRIT",
+                "API 未授权、设置返回非 JSON 或无法关联磁盘数据 → UNKNOWN"),
+    _es_metric("local.elasticsearch.shards.unassigned", "未分配分片",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cat/shards?v&h=index,shard,prirep,state,node,unassigned.reason",
+                "parse_elasticsearch_shards", "未分配/初始化分片数",
+                "无 UNASSIGNED/持续 INITIALIZING → OK；副本未分配 → WARN；主分片未分配 → CRIT",
+                "API 未授权、返回为空或分片表不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.service.port", "Elasticsearch 服务与端口",
+                "ps -ef | grep '[e]lasticsearch'; ss -tlnp | grep -E ':{elasticsearch_http_port}|:{elasticsearch_transport_port}'",
+                "parse_elasticsearch_service_port", "进程 + HTTP/Transport 端口状态",
+                "运行进程存在且 9200 HTTP、9300 Transport（或 inspect.conf 配置端口）均监听 → OK；任一缺失 → CRIT",
+                "ps/ss 不可用、端口未配置或输出无法核对 → UNKNOWN"),
+    _es_metric("local.elasticsearch.heap.gc", "Elasticsearch Heap/GC",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cat/nodes?v&h=name,heap.percent; tail -n 200 {elasticsearch_gc_log} | grep -Ei 'Pause|Full|OutOfMemory|heap'",
+                "parse_elasticsearch_heap_gc", "最大 heap 百分比 + GC/OOM 命中数",
+                "heap <75% 且无 Full GC/OOM → OK；heap 75%–85% 或 Full GC → WARN；OOM/heap >85% → CRIT",
+                "API/GC 日志不可读或路径无法发现 → UNKNOWN", timeout=15),
+    _es_metric("local.elasticsearch.thread_pool.rejected", "线程池拒绝",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cat/thread_pool/search,write?v&h=node_name,name,active,queue,rejected,completed",
+                "parse_elasticsearch_thread_pool", "rejected/queue 总数",
+                "search/write rejected=0 且 queue=0 → OK；出现排队或拒绝 → WARN；持续大量拒绝 → CRIT",
+                "API 未授权、线程池表为空或字段不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.cluster.settings", "集群动态设置",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} 'https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cluster/settings?flat_settings=true&pretty'",
+                "parse_elasticsearch_cluster_settings", "动态设置检查结果",
+                "不存在 allocation.enable=none/primaries 或临时 rebalance 禁用 → OK；发现遗留限制 → WARN",
+                "API 未授权、返回非 JSON 或无法读取设置 → UNKNOWN"),
+    _es_metric("local.elasticsearch.discovery.config", "集群发现配置",
+                "grep -E 'discovery.seed_hosts|cluster.initial_master_nodes|network.host|node.name' {elasticsearch_conf}",
+                "parse_elasticsearch_discovery_config", "seed_hosts/initial_master_nodes 配置检查",
+                "seed_hosts 覆盖规划节点且集群形成后不再保留 cluster.initial_master_nodes → OK；缺失/漂移 → WARN",
+                "elasticsearch.yml 不存在、不可读或关键项无法解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.indices.health", "索引健康与规模",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} 'https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_cat/indices?v&h=health,index,pri,rep,docs.count,store.size&s=store.size:desc'",
+                "parse_elasticsearch_indices", "索引数 + red/yellow 数",
+                "无 red/yellow 索引 → OK；yellow → WARN；red → CRIT；结果同时展示索引规模",
+                "API 未授权、返回为空或索引表不可解析 → UNKNOWN"),
+    _es_metric("local.elasticsearch.slowlog.key_evidence", "慢查询/写入日志",
+                "ls -1 {elasticsearch_log}/*slowlog* 2>/dev/null; tail -n 100 {elasticsearch_log}/*slowlog* 2>/dev/null",
+                "parse_elasticsearch_slowlog", "慢日志文件数 + 命中行数",
+                "慢日志无持续命中 → OK；发现慢查询/慢写入记录 → WARN；慢日志未启用时明确说明而不误报",
+                "日志目录无法发现、不可读或命令不可用 → UNKNOWN", timeout=15),
+    _es_metric("local.elasticsearch.security.accounts", "安全账号与权限",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_security/user?pretty; curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_security/role?pretty",
+                "parse_elasticsearch_security", "用户/角色数量 + superuser 风险",
+                "无未知高权限账号、应用不使用 elastic 超级用户 → OK；发现非基线 superuser → WARN",
+                "安全 API 未授权或返回非 JSON → UNKNOWN"),
+    _es_metric("local.elasticsearch.certificate.validity", "HTTPS 证书有效期",
+                "openssl x509 -in {elasticsearch_cert} -noout -dates -checkend 2592000",
+                "parse_elasticsearch_certificate", "证书剩余天数",
+                "证书未过期且剩余 ≥30 天 → OK；剩余 <30 天 → WARN；已过期/检查失败 → CRIT",
+                "证书路径无法从进程/config/inspect.conf 发现、openssl 不可用或格式异常 → UNKNOWN"),
+    _es_metric("local.elasticsearch.snapshot.repository", "快照仓库",
+                "curl -sS --connect-timeout {timeout} --max-time {timeout} {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_snapshot/_all?pretty; curl -sS --connect-timeout {timeout} --max-time {timeout} -X POST {elasticsearch_auth} https://{elasticsearch_listener_host}:{elasticsearch_http_port}/_snapshot/{elasticsearch_snapshot_repo}/_verify?pretty",
+                "parse_elasticsearch_snapshot", "仓库数量 + verify 状态",
+                "存在已注册仓库且 _verify 成功 → OK；仓库缺失或 verify 失败 → WARN/CRIT",
+                "API 未授权、仓库名未配置或返回非 JSON → UNKNOWN"),
+    _es_metric("local.elasticsearch.system.parameters", "Elasticsearch 系统参数",
+                "cat /proc/sys/vm/max_map_count; free -m; su - {elasticsearch_system_user} -c 'ulimit -n; ulimit -u; ulimit -l'",
+                "parse_elasticsearch_system_parameters", "max_map_count/swap/nofile/nproc/memlock",
+                "max_map_count=262144、Swap=0、nofile≥65535、nproc≥4096、memlock=unlimited → OK；任一不满足 → WARN/CRIT",
+                "系统文件或运行用户不可读取、命令缺失 → UNKNOWN"),
+]
+
+ELASTICSEARCH_RULE_PREFIX = _ELASTICSEARCH_RULE_PREFIX
+METRICS.extend(ELASTICSEARCH_METRICS)
+
+_METRICS_BY_ID = {m["metric_id"]: m for m in METRICS}
+
+# 注册表字段契约（tests/test_metrics.py 校验每个条目的键集）
+REQUIRED_FIELDS = (
+    "metric_id",
+    "name",
+    "command",
+    "timeout_sec",
+    "parser",
+    "unit",
+    "source_anchor",
+    "threshold_layer",
+    "threshold_rule_ids",
+    "conflicts",
+    "doc_baseline",
+    "unknown_conditions",
+)
+
+ALL_METRIC_IDS = tuple(m["metric_id"] for m in METRICS)
+
+
+def get_metric(metric_id):
+    """按 metric_id 查单条指标定义；不存在返回 None（--info 使用）。"""
+    return _METRICS_BY_ID.get(metric_id)
+
+
+def iter_metrics():
+    """按注册表顺序迭代全部指标定义。"""
+    return iter(METRICS)
+
+
+def count_metrics():
+    """返回已注册指标总数。"""
+    return len(METRICS)

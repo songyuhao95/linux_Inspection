@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "status": "built",
+  "offline": true,
+  "platform": {
+    "os": "linux",
+    "architectures": [
+      "x86_64",
+      "aarch64"
+    ],
+    "glibc": "verify-on-target"
+  },
+  "python": {
+    "path": "bin/python3.12",
+    "version": "3.12.x",
+    "sha256": "8f9781a98200d9ecda7e00464e4c64b1327abae788ae8e6979d5c859311410c7"
+  },
+  "ansible": {
+    "distribution": "ansible-core",
+    "status": "built",
+    "version": "2.18.9",
+    "site_packages": "ansible/site-packages",
+    "collections_path": "ansible/collections",
+    "module": "ansible.cli.playbook",
+    "bundle_sha256": "cbd3a6bcfebbfebffc16658fb7f743cd3ebe53b8720bb37c84ee126ac538a36c"
+  },
+  "notes": "Populate from an approved offline archive; an absent or mismatched runtime fails closed.",
+  "build_version": "3.12.14"
+}

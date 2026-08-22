@@ -1,0 +1,100 @@
+# 文档基线阈值：共同 P0 指标（linux-common-p0-v1）
+#
+# 来源：docs/specs/local-metrics-requirements.md §6 阈值汇总表（G1 批准，sha256
+#       2c85f63b9af455b1ceb1ae9727293db81aa4efcc253b170254a7221f96636d06）。
+#       本文件是 MR §6 汇总表（结合 §5 文档基线列与 docs/reviews/docx-source-conflicts.md
+#       C1-C13 冲突裁决）的逐项转写：每条指标含 OK/WARN/CRIT/UNKNOWN 边界、
+#       source_anchor 与版本标识 linux-common-p0-v1。
+#
+# 转写规则（与 MR §3 一致）：
+#   - 边界文本逐字转录 MR §6 单元格；禁止发明或调整阈值；
+#   - 单元格为“（文档未定义）”的边界 → rule: null（未定义，不参与判定）；
+#   - 无规则/冲突未解决（C3/C5/C8）的边界按 MR 的 UNKNOWN 语义标注
+#     （reason: missing|conflict|none + 单元格原文 note），可被外部配置
+#     thresholds-override.yml（threshold-override-v1 schema）覆盖；
+#   - C1/C2 已裁决差异（resolved）以 reason: none 标注，不改变四状态判定。
+schema: threshold-baseline-v1
+version: linux-common-p0-v1
+scope: local-common-p0-v1
+source_doc: "docs/specs/local-metrics-requirements.md §6 阈值汇总表"
+metrics:
+  local.process.present:
+    name: 进程存在性
+    source_anchor: "9 份运维巡检手册 §三(二)P0必看指标-服务/进程行（如 Kafka 手册 T5R2、Tomcat 手册 T5R1、Redis 手册 T5R1；示例命令 pgrep -fa 'kafka.Kafka'、ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "进程存在", rule_id: "linux-common-p0-v1.process.present.ok", reason: null, note: null }
+      WARN: { rule: "反复重启", rule_id: "linux-common-p0-v1.process.present.warn", reason: null, note: null }
+      CRIT: { rule: "进程缺失（故障）", rule_id: "linux-common-p0-v1.process.present.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无 profile 配置" }
+  local.service.active:
+    name: systemd 服务状态
+    source_anchor: "巡检手册 P0 服务行（Nginx T5R1/T5R4、Redis T5R1、Rabbitmq T5R1、Mysql T5R1、Nacos T5R1）+ 部署规范 systemd 章节（Mysql T11、Redis T13/T24、Rocketmq T18/T19、Tomcat T15、ES T7）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707；部署规范 sha256[:8]: ES=246a0387, Kafka=7021c214, Mysql=e0571b68, Nacos=d3233b50, Nginx=06707079, Rabbitmq=5b5b42a0, Redis=c4b82daf, Rocketmq=8cbcd254, Tomcat=c0046da0"
+    boundaries:
+      OK: { rule: "active", rule_id: "linux-common-p0-v1.service.active.ok", reason: null, note: null }
+      WARN: { rule: "反复重启", rule_id: "linux-common-p0-v1.service.active.warn", reason: null, note: null }
+      CRIT: { rule: "非 active（故障）", rule_id: "linux-common-p0-v1.service.active.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: conflict, note: "unit 名无配置/冲突 C8" }
+  local.port.listening:
+    name: 端口监听
+    source_anchor: "巡检手册 P0 端口行（ES T5R8、Kafka T5R10、Nacos T5R2、Redis T5R3、Rabbitmq T5R3、Rocketmq T5R4、Tomcat T5R2、Nginx T5R3）+ 环境信息端口表；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "监听且进程匹配", rule_id: "linux-common-p0-v1.port.listening.ok", reason: null, note: null }
+      WARN: { rule: "模式外端口开放", rule_id: "linux-common-p0-v1.port.listening.warn", reason: null, note: null }
+      CRIT: { rule: "不监听（故障）", rule_id: "linux-common-p0-v1.port.listening.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "端口/模式无配置" }
+  local.cpu.utilization:
+    name: CPU 使用率
+    source_anchor: "9 份巡检手册 P0 CPU 行（ES T5R3、Kafka T5R7、Mysql T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8、Nginx T5R9、Tomcat T5R6）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "长期<70% 且波动<80%", rule_id: "linux-common-p0-v1.cpu.utilization.ok", reason: null, note: null }
+      WARN: { rule: "持续>80%", rule_id: "linux-common-p0-v1.cpu.utilization.warn", reason: null, note: null }
+      CRIT: { rule: ">90% 且伴随业务证据", rule_id: "linux-common-p0-v1.cpu.utilization.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: none, note: "Nginx/Tomcat 差异 C2" }
+  local.cpu.load_1m:
+    name: 系统负载
+    source_anchor: "9 份巡检手册 P0 CPU 行正常标准“load_1m 不持续高于 CPU 核数”（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "≤核数", rule_id: "linux-common-p0-v1.cpu.load_1m.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "MR §6：（文档未定义）" }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "MR §6：（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "持续>核数 → 缺失 → UNKNOWN" }
+  local.memory.available_percent:
+    name: 可用内存百分比
+    source_anchor: "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、Rabbitmq T5R9、Rocketmq T5R9、Nginx T5R9、Tomcat T5R7、Redis T5R7）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "≥20%", rule_id: "linux-common-p0-v1.memory.available_percent.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "MR §6：（10–20% 未定义 → UNKNOWN）" }
+      CRIT: { rule: "<10%", rule_id: "linux-common-p0-v1.memory.available_percent.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "10–20% 区间 C4" }
+  local.swap.used_percent:
+    name: Swap 使用率
+    source_anchor: "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、Rabbitmq T5R9、Rocketmq T5R9、Tomcat T5R7）；swap=0 为部署基线（ES/部署规范）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "=0 或未配置", rule_id: "linux-common-p0-v1.swap.used_percent.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: conflict, note: "MR §6：（文档未定义）" }
+      CRIT: { rule: null, rule_id: null, reason: conflict, note: "MR §6：（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: conflict, note: ">0 → 冲突 C3 → UNKNOWN" }
+  local.filesystem.used_percent:
+    name: 磁盘使用率
+    source_anchor: "9 份巡检手册 P0 磁盘行（ES T5R5、Kafka T5R9、Mysql T5R9、Nacos T5R9、Rabbitmq T5R10、Redis T5R10、Rocketmq T5R10、Nginx T5R10、Tomcat T5R8）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "<75%（Nginx/Tomcat <80%）", rule_id: "linux-common-p0-v1.filesystem.used_percent.ok", reason: null, note: null }
+      WARN: { rule: "75–85%", rule_id: "linux-common-p0-v1.filesystem.used_percent.warn", reason: null, note: null }
+      CRIT: { rule: ">85%（>95% 故障风险）", rule_id: "linux-common-p0-v1.filesystem.used_percent.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: none, note: "建议线冲突 C1（外部配置覆盖）" }
+  local.filesystem.inode_used_percent:
+    name: inode 使用率
+    source_anchor: "9 份巡检手册 P0 磁盘行（ES T5R5、Kafka T5R9、Mysql T5R9、Nacos T5R9、Rabbitmq T5R10、Redis T5R10、Rocketmq T5R10、Nginx T5R10、Tomcat T5R8）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "<80%", rule_id: "linux-common-p0-v1.filesystem.inode_used_percent.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "MR §6：（文档未定义）" }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "MR §6：（文档未定义）" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "≥80% → 缺失 C5 → UNKNOWN" }
+  local.logs.key_evidence:
+    name: 关键日志证据
+    source_anchor: "9 份巡检手册 P0 关键日志行（ES T5R11、Kafka T5R11、Mysql T5R11、Nacos T5R10、Rabbitmq T5R11、Redis T5R11、Rocketmq T5R11、Nginx T5R11、Tomcat T5R5）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    boundaries:
+      OK: { rule: "无可解释错误", rule_id: "linux-common-p0-v1.logs.key_evidence.ok", reason: null, note: null }
+      WARN: { rule: "隐患级关键词（按产品）", rule_id: "linux-common-p0-v1.logs.key_evidence.warn", reason: null, note: null }
+      CRIT: { rule: "故障级关键词（按产品）", rule_id: "linux-common-p0-v1.logs.key_evidence.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "日志不可读/关键词集无配置" }

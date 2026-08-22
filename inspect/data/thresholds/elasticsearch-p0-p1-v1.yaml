@@ -1,0 +1,166 @@
+# Elasticsearch 文档基线阈值（P0 表62、P1 表65）。
+schema: threshold-baseline-v1
+version: elasticsearch-p0-p1-v1
+scope: elasticsearch-p0-p1-v1
+source_doc: "安徽农金Elasticsearch运维巡检手册v1.0.docx（P0/P1 指标表）"
+metrics:
+  local.elasticsearch.process.present:
+    name: Elasticsearch 进程存在性
+    source_anchor: "P0 服务/进程：ps -eo pid=,comm=,args=；comm=java 且 args 含 org.elasticsearch.bootstrap.Elasticsearch，或 comm=elasticsearch；运行实例进程发现"
+    boundaries:
+      OK: { rule: "发现真实 Elasticsearch JVM/启动进程", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.process.present.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
+      CRIT: { rule: "白名单主机未发现 Elasticsearch 进程", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.process.present.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "pgrep 不可用或无权限" }
+  local.elasticsearch.version:
+    name: Elasticsearch 版本
+    source_anchor: "部署规范 Elasticsearch 8.17.0；从运行实例二进制 --version 读取"
+    boundaries:
+      OK: { rule: "实际版本命中 inspect.conf elasticsearch_version", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.version.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
+      CRIT: { rule: "实际版本与 inspect.conf 版本基线不一致", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.version.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无法发现二进制、版本输出异常或未配置基线" }
+  local.elasticsearch.cluster.health:
+    name: 集群健康
+    source_anchor: "P0 集群健康：/_cluster/health；green/节点数/分片百分比"
+    boundaries:
+      OK: { rule: "status=green、节点数达到期望值、active_shards_percent=100", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.cluster.health.ok", reason: null, note: null }
+      WARN: { rule: "status=yellow 或节点数少于期望但仅少1台", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.cluster.health.warn", reason: null, note: null }
+      CRIT: { rule: "status=red、主分片故障或节点数少2台及以上", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.cluster.health.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权/连接失败/返回非 JSON" }
+  local.elasticsearch.nodes.online:
+    name: 集群在线节点数
+    source_anchor: "P0 节点在线数：/_cat/nodes；规划 3 节点"
+    boundaries:
+      OK: { rule: "在线节点数达到 inspect.conf elasticsearch_expected_nodes", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.online.ok", reason: null, note: null }
+      WARN: { rule: "比期望少1台", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.online.warn", reason: null, note: null }
+      CRIT: { rule: "比期望少2台及以上", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.online.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权、表为空或未配置期望节点数" }
+  local.elasticsearch.nodes.cpu:
+    name: Elasticsearch 节点 CPU
+    source_anchor: "P0 CPU：/_cat/nodes 的 cpu/load_1m/load_5m/load_15m"
+    boundaries:
+      OK: { rule: "最大节点 CPU <80%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.cpu.ok", reason: null, note: null }
+      WARN: { rule: "最大节点 CPU 80%–90%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.cpu.warn", reason: null, note: null }
+      CRIT: { rule: "最大节点 CPU >90%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.cpu.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权或 CPU 字段不可解析" }
+  local.elasticsearch.nodes.memory:
+    name: Elasticsearch 节点内存
+    source_anchor: "P0 内存：/_cat/nodes 的 heap.percent/ram.percent；free -h"
+    boundaries:
+      OK: { rule: "heap <75% 且 ram <90%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.memory.ok", reason: null, note: null }
+      WARN: { rule: "heap 75%–85% 或 ram 90%–95%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.memory.warn", reason: null, note: null }
+      CRIT: { rule: "heap >85% 或 ram >95%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.memory.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权或 heap/ram 字段不可解析" }
+  local.elasticsearch.nodes.disk:
+    name: Elasticsearch 节点磁盘
+    source_anchor: "P0 磁盘：/_cat/allocation 的 disk.percent；数据/日志/备份目录"
+    boundaries:
+      OK: { rule: "最大 disk.percent <75%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.disk.ok", reason: null, note: null }
+      WARN: { rule: "最大 disk.percent 75%–85%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.disk.warn", reason: null, note: null }
+      CRIT: { rule: "最大 disk.percent >85%；>95% 有 flood-stage 风险", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.nodes.disk.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权或 allocation 表不可解析" }
+  local.elasticsearch.disk.watermark:
+    name: 磁盘水位线
+    source_anchor: "P0 磁盘水位线：/_cluster/settings?include_defaults=true"
+    boundaries:
+      OK: { rule: "可读取 low/high/flood_stage，当前磁盘未超过 high", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.disk.watermark.ok", reason: null, note: null }
+      WARN: { rule: "当前磁盘接近或超过 high", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.disk.watermark.warn", reason: null, note: null }
+      CRIT: { rule: "当前磁盘达到 flood_stage 或已有只读风险", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.disk.watermark.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "设置或磁盘数据不可读取" }
+  local.elasticsearch.shards.unassigned:
+    name: 未分配分片
+    source_anchor: "P0 未分配分片：/_cat/shards"
+    boundaries:
+      OK: { rule: "无 UNASSIGNED 且无持续 INITIALIZING", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.shards.unassigned.ok", reason: null, note: null }
+      WARN: { rule: "副本分片 UNASSIGNED 或存在 INITIALIZING", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.shards.unassigned.warn", reason: null, note: null }
+      CRIT: { rule: "主分片 UNASSIGNED", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.shards.unassigned.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权或分片表不可解析" }
+  local.elasticsearch.service.port:
+    name: Elasticsearch 服务与端口
+    source_anchor: "P0 服务/端口：进程检查；ss -tlnp 核对 HTTP 9200、Transport 9300"
+    boundaries:
+      OK: { rule: "进程存在且 HTTP/Transport 端口均 LISTEN", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.service.port.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
+      CRIT: { rule: "进程不存在或任一规划端口未 LISTEN", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.service.port.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "ps/ss 不可用或端口未配置" }
+  local.elasticsearch.heap.gc:
+    name: Elasticsearch Heap/GC
+    source_anchor: "P0 Heap/GC：/_cat/nodes heap.percent；GC 日志 Pause/Full/OOM"
+    boundaries:
+      OK: { rule: "heap <75% 且无 Full GC/OOM", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.heap.gc.ok", reason: null, note: null }
+      WARN: { rule: "heap 75%–85% 或有 Full GC", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.heap.gc.warn", reason: null, note: null }
+      CRIT: { rule: "出现 OutOfMemory 或 heap >85%", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.heap.gc.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API/GC 日志不可读" }
+  local.elasticsearch.thread_pool.rejected:
+    name: 线程池拒绝
+    source_anchor: "P0 线程池：/_cat/thread_pool/search,write"
+    boundaries:
+      OK: { rule: "search/write rejected=0 且 queue=0", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.thread_pool.rejected.ok", reason: null, note: null }
+      WARN: { rule: "出现 queue 或 rejected", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.thread_pool.rejected.warn", reason: null, note: null }
+      CRIT: { rule: "线程池拒绝持续大量增长", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.thread_pool.rejected.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权或表不可解析" }
+  local.elasticsearch.cluster.settings:
+    name: 集群动态设置
+    source_anchor: "P1 动态设置：/_cluster/settings?flat_settings=true"
+    boundaries:
+      OK: { rule: "没有 allocation.enable=none/primaries 或临时 rebalance 禁用", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.cluster.settings.ok", reason: null, note: null }
+      WARN: { rule: "发现遗留分配/再平衡限制", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.cluster.settings.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权或返回非 JSON" }
+  local.elasticsearch.discovery.config:
+    name: 集群发现配置
+    source_anchor: "P1 discovery.seed_hosts/cluster.initial_master_nodes/network.host/node.name"
+    boundaries:
+      OK: { rule: "seed_hosts 覆盖规划节点且集群形成后无 cluster.initial_master_nodes", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.discovery.config.ok", reason: null, note: null }
+      WARN: { rule: "seed_hosts 缺失/漂移或仍保留 cluster.initial_master_nodes", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.discovery.config.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置文件不存在、不可读或关键项无法解析" }
+  local.elasticsearch.indices.health:
+    name: 索引健康与规模
+    source_anchor: "P1 索引规模/增长：/_cat/indices"
+    boundaries:
+      OK: { rule: "无 red/yellow 索引；报告索引数、文档数和 store.size", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.indices.health.ok", reason: null, note: null }
+      WARN: { rule: "存在 yellow 索引", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.indices.health.warn", reason: null, note: null }
+      CRIT: { rule: "存在 red 索引", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.indices.health.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权或索引表不可解析" }
+  local.elasticsearch.slowlog.key_evidence:
+    name: 慢查询/写入日志
+    source_anchor: "P1 慢查询/写入日志：*slowlog*"
+    boundaries:
+      OK: { rule: "慢日志无持续命中；未启用时明确记录未配置", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.slowlog.key_evidence.ok", reason: null, note: null }
+      WARN: { rule: "发现慢查询或慢写入记录", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.slowlog.key_evidence.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "日志目录不可发现或不可读" }
+  local.elasticsearch.security.accounts:
+    name: 安全账号与权限
+    source_anchor: "P1 账号权限：/_security/user、/_security/role"
+    boundaries:
+      OK: { rule: "没有非基线 superuser，应用不使用 elastic 超级用户", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.security.accounts.ok", reason: null, note: null }
+      WARN: { rule: "发现非基线 superuser 或应用使用 elastic 超级用户", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.security.accounts.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "安全 API 未授权或返回非 JSON" }
+  local.elasticsearch.certificate.validity:
+    name: HTTPS 证书有效期
+    source_anchor: "P1 证书有效期：openssl x509 -dates -checkend 2592000"
+    boundaries:
+      OK: { rule: "证书未过期且剩余不少于30天", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.certificate.validity.ok", reason: null, note: null }
+      WARN: { rule: "证书剩余少于30天", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.certificate.validity.warn", reason: null, note: null }
+      CRIT: { rule: "证书已过期或证书检查失败", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.certificate.validity.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "证书路径无法发现或 openssl 不可用" }
+  local.elasticsearch.snapshot.repository:
+    name: 快照仓库
+    source_anchor: "P1 快照仓库：/_snapshot/_all、/_snapshot/<repo>/_verify"
+    boundaries:
+      OK: { rule: "至少一个已注册仓库且 _verify 成功", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.snapshot.repository.ok", reason: null, note: null }
+      WARN: { rule: "仓库缺失、verify 失败或没有近期成功快照证据", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.snapshot.repository.warn", reason: null, note: null }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权、仓库名未配置或返回非 JSON" }
+  local.elasticsearch.system.parameters:
+    name: Elasticsearch 系统参数
+    source_anchor: "P1 系统参数：vm.max_map_count、Swap、ulimit nofile/nproc/memlock"
+    boundaries:
+      OK: { rule: "max_map_count=262144、Swap=0、nofile≥65535、nproc≥4096、memlock=unlimited", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.system.parameters.ok", reason: null, note: null }
+      WARN: { rule: "参数偏离推荐值但未直接造成启动/写入故障", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.system.parameters.warn", reason: null, note: null }
+      CRIT: { rule: "关键参数严重不足并可能导致无法启动或写入", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.system.parameters.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "系统文件、运行用户或命令不可用" }
