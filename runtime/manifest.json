@@ -22,7 +22,7 @@
     "site_packages": "ansible/site-packages",
     "collections_path": "ansible/collections",
     "module": "ansible.cli.playbook",
-    "bundle_sha256": "cbd3a6bcfebbfebffc16658fb7f743cd3ebe53b8720bb37c84ee126ac538a36c"
+    "bundle_sha256": "137c3defa2350da137e8404cf68a4d37b68ea43f3be5104e7e5c1dd3dc179482"
   },
   "notes": "Populate from an approved offline archive; an absent or mismatched runtime fails closed.",
   "build_version": "3.12.14"
