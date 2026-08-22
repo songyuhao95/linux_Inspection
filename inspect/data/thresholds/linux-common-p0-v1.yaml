@@ -63,9 +63,9 @@ metrics:
     source_anchor: "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、Rabbitmq T5R9、Rocketmq T5R9、Nginx T5R9、Tomcat T5R7、Redis T5R7）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
     boundaries:
       OK: { rule: "≥20%", rule_id: "linux-common-p0-v1.memory.available_percent.ok", reason: null, note: null }
-      WARN: { rule: null, rule_id: null, reason: missing, note: "MR §6：（10–20% 未定义 → UNKNOWN）" }
+      WARN: { rule: "10% ≤ available_percent < 20%", rule_id: "linux-common-p0-v1.memory.available_percent.warn", reason: null, note: null }
       CRIT: { rule: "<10%", rule_id: "linux-common-p0-v1.memory.available_percent.crit", reason: null, note: null }
-      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "10–20% 区间 C4" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "free 不可用或解析失败 → UNKNOWN" }
   local.swap.used_percent:
     name: Swap 使用率
     source_anchor: "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、Rabbitmq T5R9、Rocketmq T5R9、Tomcat T5R7）；swap=0 为部署基线（ES/部署规范）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"

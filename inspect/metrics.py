@@ -148,10 +148,9 @@ METRICS = [
         ),
         "threshold_layer": "文档基线 + 外部配置覆盖",
         "threshold_rule_ids": [f"{_RULE_PREFIX}:local.memory.available_percent"],
-        "conflicts": ["C4（10%–20% 区间文档未定义，措辞差异数值一致）"],
-        "doc_baseline": "≥20% → OK；<10% → CRIT（告警）；10%–20% → 缺失 → UNKNOWN"
-                        "（外部配置可覆盖）",
-        "unknown_conditions": "free 不可用、10%–20% 区间无外部配置 → UNKNOWN",
+        "conflicts": [],
+        "doc_baseline": "<10% → CRIT；10% ≤ available_percent < 20% → WARN；≥20% → OK",
+        "unknown_conditions": "free 不可用或解析失败 → UNKNOWN",
     },
     {
         "metric_id": "local.swap.used_percent",

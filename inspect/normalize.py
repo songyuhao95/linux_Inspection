@@ -1496,14 +1496,14 @@ def _judge_memory_available_percent(
 ) -> Dict[str, Any]:
     """可用内存百分比（MR §5.6 / TD §5.2）。
 
-      - ≥20% → OK；<10% → CRIT；10–20% 区间文档未定义（C4）→ UNKNOWN。
+      - ≥20% → OK；10% ≤ available_percent < 20% → WARN；<10% → CRIT。
     """
     pct = parsed["pct"]
     if pct >= 20:
         return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
     if pct < 10:
         return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
-    return _unknown_decision(resolved)
+    return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN)}
 
 
 def _judge_swap_used_percent(
