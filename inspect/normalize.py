@@ -46,6 +46,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from inspect import config as config_mod
 from inspect import metrics as metrics_registry
+from inspect.replay import normalize_replay_command, validate_replay_command, ReplayCommandError
 
 # --------------------------------------------------------------------------
 # 常量
@@ -2433,6 +2434,24 @@ def _scope_for(metric_id: str) -> str:
     return SCOPE
 
 
+# Marker used to preserve legacy documents when no replay field was supplied.
+_REPLAY_NOT_SUPPLIED = object()
+
+
+def _normalized_replay_field(value: Any = _REPLAY_NOT_SUPPLIED) -> Dict[str, Any]:
+    """Return an optional replay field only for an explicit safe value.
+
+    ``evidence.command`` is intentionally not a source here.  Invalid explicit
+    values are dropped fail-closed; an explicit JSON null is preserved as null.
+    """
+    if value is _REPLAY_NOT_SUPPLIED:
+        return {}
+    if value is None:
+        return {"replay_command": None}
+    safe = normalize_replay_command(value)
+    return {"replay_command": safe} if safe is not None else {}
+
+
 def _build_metric_document(
     metric_id: str,
     *,
@@ -2468,6 +2487,7 @@ def _error_metric_document(
     inspection_id: str,
     collected_at: str,
     command: Optional[str] = None,
+    replay_command: Any = _REPLAY_NOT_SUPPLIED,
 ) -> Dict[str, Any]:
     """采集层失败（error 已由 ansible_runner 分类）→ UNKNOWN + error（HR §3.2）。
 
@@ -2480,6 +2500,7 @@ def _error_metric_document(
         "raw_ref": f"raw/{metric_id}.out",
         "sampled_at": collected_at,
     }
+    evidence.update(_normalized_replay_field(replay_command))
     provenance = {
         "config_sources": [],
         "doc_sources": [m["source_anchor"]],
@@ -2511,6 +2532,7 @@ def _judged_metric_document(
     collected_at: str,
     profile: Optional[Dict[str, Any]] = None,
     command: Optional[str] = None,
+    replay_command: Any = _REPLAY_NOT_SUPPLIED,
 ) -> Dict[str, Any]:
     """判定完成 → 组装 threshold/provenance（HR §3 字段语义，REQ-D-04 可追溯）。"""
     status = decision["status"]
@@ -2570,6 +2592,7 @@ def _judged_metric_document(
         "raw_ref": f"raw/{metric_id}.out",
         "sampled_at": collected_at,
     }
+    evidence.update(_normalized_replay_field(replay_command))
     details = _evidence_details(metric_id, parsed, resolved, profile)
     if details is not None:
         evidence["details"] = details
@@ -2779,6 +2802,11 @@ def normalize_host_result(
                         "output_summary": None,
                         "raw_ref": f"raw/{metric_id}.out",
                         "sampled_at": collected_at,
+                        **_normalized_replay_field(
+                            mres["replay_command"]
+                            if "replay_command" in mres
+                            else _REPLAY_NOT_SUPPLIED
+                        ),
                     },
                     "error": {
                         "code": ERROR_PARSE_FAILED,
@@ -2798,6 +2826,11 @@ def normalize_host_result(
                     inspection_id=inspection_id,
                     collected_at=collected_at,
                     command=mres.get("command"),
+                    replay_command=(
+                        mres["replay_command"]
+                        if "replay_command" in mres
+                        else _REPLAY_NOT_SUPPLIED
+                    ),
                 )
             )
             continue
@@ -2815,6 +2848,11 @@ def normalize_host_result(
                     inspection_id=inspection_id,
                     collected_at=collected_at,
                     command=mres.get("command"),
+                    replay_command=(
+                        mres["replay_command"]
+                        if "replay_command" in mres
+                        else _REPLAY_NOT_SUPPLIED
+                    ),
                 )
             )
             continue
@@ -2828,9 +2866,14 @@ def normalize_host_result(
                         "message": f"无阈值解析结果（无文档基线/外部配置）: {metric_id}",
                         "metric_status": METRIC_ERROR_STATUS,
                     },
-                        inspection_id=inspection_id,
-                        collected_at=collected_at,
-                        command=mres.get("command"),
+                    inspection_id=inspection_id,
+                    collected_at=collected_at,
+                    command=mres.get("command"),
+                    replay_command=(
+                        mres["replay_command"]
+                        if "replay_command" in mres
+                        else _REPLAY_NOT_SUPPLIED
+                    ),
                 )
             )
             continue
@@ -2857,6 +2900,13 @@ def normalize_host_result(
                 "raw_ref": f"raw/{metric_id}.out",
                 "sampled_at": collected_at,
             }
+            evidence.update(
+                _normalized_replay_field(
+                    mres["replay_command"]
+                    if "replay_command" in mres
+                    else _REPLAY_NOT_SUPPLIED
+                )
+            )
             details = _evidence_details(metric_id, parsed, resolved, profile)
             if details is not None:
                 evidence["details"] = details
@@ -2894,6 +2944,11 @@ def normalize_host_result(
                 collected_at=collected_at,
                 profile=profile,
                 command=mres.get("command"),
+                    replay_command=(
+                        mres["replay_command"]
+                        if "replay_command" in mres
+                        else _REPLAY_NOT_SUPPLIED
+                    ),
             )
         )
 
@@ -3040,7 +3095,7 @@ METRIC_KEYS = {
 }
 THRESHOLD_KEYS = {"layer", "rule_id", "value", "source_anchor", "notes"}
 EVIDENCE_KEYS = {"command", "output_summary", "raw_ref", "sampled_at"}
-EVIDENCE_OPTIONAL_KEYS = {"details"}
+EVIDENCE_OPTIONAL_KEYS = {"details", "replay_command"}
 ERROR_KEYS = {"code", "message", "metric_status"}
 PROVENANCE_KEYS = {"config_sources", "doc_sources", "notes"}
 
@@ -3199,6 +3254,11 @@ def _validate_evidence(evidence: Any, where: str) -> None:
         _fail(where, "evidence 键集不符")
     if not isinstance(evidence["command"], str):
         _fail(where, "evidence.command 必须为字符串")
+    if "replay_command" in evidence:
+        try:
+            validate_replay_command(evidence["replay_command"])
+        except ReplayCommandError as exc:
+            _fail(where, str(exc))
     for key in ("output_summary", "raw_ref", "sampled_at"):
         if evidence[key] is not None and not isinstance(evidence[key], str):
             _fail(where, f"evidence.{key} 必须为字符串或 null")
@@ -3290,6 +3350,7 @@ __all__ = [
     "mask_ip",
     "mask_output",
     "normalize_host_result",
+    "normalize_replay_command",
     "normalize_run_results",
     "parse_cpu_load_1m",
     "parse_cpu_utilization",

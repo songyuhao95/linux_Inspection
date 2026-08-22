@@ -34,6 +34,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
+from inspect.replay import replay_command_or_fallback
+from inspect.report_fields import format_threshold_rule
+
 # cli-contract §4：渲染失败按执行失败处理
 EXIT_RENDER_ERROR = 10
 
@@ -300,31 +303,8 @@ def _metric_display_name(metric: Mapping[str, Any], detail: Optional[Mapping[str
 def _threshold_rule_text(
     metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]] = None
 ) -> str:
-    """Build the same human-readable threshold_rule text used by Excel."""
-    threshold = metric.get("threshold") or {}
-    parts: List[str] = []
-    if detail:
-        for key, label in (("window", "测量周期"), ("cpu_cores", "CPU核数"),
-                           ("mount", "挂载点"), ("filesystem", "文件系统")):
-            value = detail.get(key)
-            if value is not None and str(value) != "":
-                parts.append(f"{label}：{value}")
-    if not parts:
-        parts.append(f"测量对象：{metric.get('name') or metric.get('metric_id') or '指标'}")
-    value = threshold.get("value")
-    if value is not None and str(value) != "":
-        parts.append("判定规则：" + str(value).replace(">=", "≥").replace("<=", "≤"))
-    else:
-        notes = threshold.get("notes")
-        if notes is not None and str(notes) != "":
-            parts.append(f"判定说明：{notes}")
-        else:
-            layer = threshold.get("layer")
-            parts.append(f"判定层：{layer}" if layer else "判定规则：事实源未提供")
-    rule_id = threshold.get("rule_id")
-    if rule_id is not None and str(rule_id) != "":
-        parts.append(f"规则标识：{rule_id}")
-    return "；".join(str(part) for part in parts)
+    """Build the shared fact-only threshold explanation used by Excel."""
+    return format_threshold_rule(metric, detail)
 
 
 def _metric_card(
@@ -348,7 +328,7 @@ def _metric_card(
         if show_host else ""
     )
     evidence = metric.get("evidence")
-    command = evidence.get("command") if isinstance(evidence, Mapping) else None
+    command = replay_command_or_fallback(evidence)
     detail_value = _detail_value(detail or {}) if detail else None
     has_detail_value = detail is not None and detail_value is not None
     local_fields = {

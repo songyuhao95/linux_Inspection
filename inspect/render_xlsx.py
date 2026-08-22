@@ -37,6 +37,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
+from inspect.replay import replay_command_or_fallback
+from inspect.report_fields import format_threshold_rule
+
 # cli-contract §4：渲染失败（技术）按执行失败处理
 EXIT_RENDER_ERROR = 10
 
@@ -274,44 +277,8 @@ def _metric_rows(metric: Mapping[str, Any]) -> List[Dict[str, Any]]:
 def _threshold_rule_text(
     metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]] = None
 ) -> str:
-    """Build a Chinese, human-readable rule explanation from fact fields."""
-    threshold = metric.get("threshold") or {}
-    parts: List[str] = []
-    if detail:
-        window = detail.get("window")
-        mount = detail.get("mount")
-        filesystem = detail.get("filesystem")
-        cpu_cores = detail.get("cpu_cores")
-        if window is not None and str(window) != "":
-            parts.append(f"测量周期：{window}")
-        if cpu_cores is not None and str(cpu_cores) != "":
-            parts.append(f"CPU核数：{cpu_cores}")
-        if mount is not None and str(mount) != "":
-            parts.append(f"挂载点：{mount}")
-        if filesystem is not None and str(filesystem) != "":
-            parts.append(f"文件系统：{filesystem}")
-    if not parts:
-        parts.append(f"测量对象：{metric.get('name') or metric.get('metric_id') or '指标'}")
-
-    value = threshold.get("value")
-    if value is not None and str(value) != "":
-        display_value = str(value).replace(">=", "≥").replace("<=", "≤")
-        parts.append(f"判定规则：{display_value}")
-    else:
-        notes = threshold.get("notes")
-        if notes is not None and str(notes) != "":
-            parts.append(f"判定说明：{notes}")
-        else:
-            layer = threshold.get("layer")
-            if layer is not None and str(layer) != "":
-                parts.append(f"判定层：{layer}")
-            else:
-                parts.append("判定规则：事实源未提供")
-
-    rule_id = threshold.get("rule_id")
-    if rule_id is not None and str(rule_id) != "":
-        parts.append(f"规则标识：{rule_id}")
-    return "；".join(str(part) for part in parts)
+    """Build the shared fact-only threshold explanation."""
+    return format_threshold_rule(metric, detail)
 
 
 def _local_row_values(
@@ -349,7 +316,7 @@ def _local_row_values(
         "unit": metric.get("unit", ""),
         "status": status,
         "threshold_rule": _threshold_rule_text(metric, detail),
-        "command": (metric.get("evidence") or {}).get("command") or "—",
+        "command": replay_command_or_fallback(metric.get("evidence")),
     }
 
 
@@ -443,13 +410,15 @@ def _write_workbook(
         {"bold": True, "font_color": "#FFFFFF", "bg_color": "#37474F",
          "border": 1, "text_wrap": True, "valign": "vcenter"}
     )
-    cell_fmt = workbook.add_format({"border": 1})
+    cell_fmt = workbook.add_format(
+        {"border": 1, "text_wrap": True, "valign": "top"}
+    )
     note_fmt = workbook.add_format({"italic": True, "font_color": "#616161"})
     # 业务四状态：文字 + 背景色（RR §5）
     status_fmts: Dict[str, Any] = {
         status: workbook.add_format(
             {"bold": True, "font_color": "#FFFFFF", "bg_color": STATUS_COLORS[status],
-             "border": 1}
+             "border": 1, "text_wrap": True, "valign": "top"}
         )
         for status in VALID_STATUSES
     }
@@ -459,7 +428,7 @@ def _write_workbook(
     )
     # CRIT 值红色字体（用户需求：达到告警阈值的值红色字体）
     crit_value_fmt = workbook.add_format(
-        {"font_color": COLOR_CRIT, "border": 1}
+        {"font_color": COLOR_CRIT, "border": 1, "text_wrap": True, "valign": "top"}
     )
 
     first = docs[0]
@@ -607,7 +576,7 @@ def _write_workbook(
             ws.write(r, 3, status, status_fmt)
             ws.write(r, 4, err_code, cell_fmt)
             ws.write(r, 5, message, cell_fmt)
-            ws.write(r, 6, evidence.get("command") or "—", cell_fmt)
+            ws.write(r, 6, replay_command_or_fallback(evidence), cell_fmt)
             ws.write(r, 7, evidence.get("output_summary") or "—", cell_fmt)
             ws.write(r, 8, note, cell_fmt)
             r += 1

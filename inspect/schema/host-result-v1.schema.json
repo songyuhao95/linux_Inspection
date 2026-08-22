@@ -83,6 +83,7 @@
       "required": ["command", "output_summary", "sampled_at"],
       "properties": {
         "command": { "type": "string" },
+        "replay_command": { "type": ["string", "null"], "minLength": 1 },
         "output_summary": { "type": ["string", "null"] },
         "raw_ref": { "type": ["string", "null"] },
         "sampled_at": { "type": ["string", "null"] },

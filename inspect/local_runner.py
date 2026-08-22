@@ -238,6 +238,8 @@ def run_local(
                     },
                 )
             result["command"] = spec.command or ""
+            if spec.replay_command is not None:
+                result["replay_command"] = spec.replay_command
             metric_results.append(result)
             continue
         if spec.command is None:
@@ -262,6 +264,8 @@ def run_local(
                 probe_matrix,
             )
         result["command"] = spec.command
+        if spec.replay_command is not None:
+            result["replay_command"] = spec.replay_command
         metric_results.append(result)
 
     metric_results = runner_mod.select_nginx_metrics(

@@ -251,6 +251,10 @@ class CommandSpec:
     # host, while raw only needs the target's SSH shell.
     module: str = "ansible.builtin.raw"
     task_environment: Dict[str, str] = field(default_factory=dict)
+    # Optional, independently validated report command.  Never infer this
+    # from the collector command template: dynamic middleware commands remain
+    # null unless a concrete context supplies an explicit value.
+    replay_command: Optional[str] = None
 
 
 # 进程发现不能只用 pgrep -fa：Ansible raw 在某些 SSH/TTY 组合下会把
@@ -2216,6 +2220,8 @@ def _fixture_metric_result(
 ) -> Dict[str, Any]:
     def with_command(result: Dict[str, Any]) -> Dict[str, Any]:
         result["command"] = spec.command or ""
+        if spec.replay_command is not None:
+            result["replay_command"] = spec.replay_command
         return result
 
     if spec.command is None and spec.error_code == ERROR_UNSUPPORTED_PROFILE:
@@ -2747,6 +2753,8 @@ def _parse_callback_results(
                                 state["probe_matrix"],
                             )
                         metric_result["command"] = spec.command or ""
+                        if spec.replay_command is not None:
+                            metric_result["replay_command"] = spec.replay_command
                         state["metrics"][spec.metric_id] = metric_result
                     continue
                 if not task_name.startswith("metric:"):
@@ -2777,6 +2785,8 @@ def _parse_callback_results(
                     state["probe_matrix"],
                 )
                 metric_result["command"] = spec.command or ""
+                if spec.replay_command is not None:
+                    metric_result["replay_command"] = spec.replay_command
                 state["metrics"][metric_id] = metric_result
 
     stats = payload.get("stats") or {}
@@ -2812,6 +2822,8 @@ def _parse_callback_results(
                         },
                     )
                 metric_result["command"] = spec.command or ""
+                if spec.replay_command is not None:
+                    metric_result["replay_command"] = spec.replay_command
                 metrics.append(metric_result)
                 continue
             if spec.metric_id in state["metrics"]:
@@ -2830,6 +2842,8 @@ def _parse_callback_results(
                     },
                 )
             metric_result["command"] = spec.command or ""
+            if spec.replay_command is not None:
+                metric_result["replay_command"] = spec.replay_command
             metrics.append(metric_result)
         metrics = select_nginx_metrics(
             metrics,
