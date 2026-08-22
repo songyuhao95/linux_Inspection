@@ -55,13 +55,18 @@ if [ "$is_query" -eq 0 ]; then
 fi
 
 fixture_mode="${INSPECT_FIXTURE_DIR:-}"
-# Prefer the Linux runtime on Linux/WSL. Windows development hosts use the
-# companion project-local embeddable interpreter only for fixture/query runs;
-# neither branch searches or invokes a system Python.
-PY="$RUNTIME_ROOT/bin/python3.12"
-if [ ! -x "$PY" ] && [ -x "$RUNTIME_ROOT/bin/python3.12.exe" ]; then
-  PY="$RUNTIME_ROOT/bin/python3.12.exe"
-fi
+# Select the interpreter by host OS, not by executable bits alone: the Linux
+# binary must be executable after a Git checkout, but that bit must not make a
+# Windows Git Bash host select an ELF binary over the companion .exe.
+HOST_OS="$(uname -s 2>/dev/null || printf '%s' "${OSTYPE:-unknown}")"
+case "$HOST_OS" in
+  MINGW*|MSYS*|CYGWIN*|mingw*|msys*|cygwin*)
+    PY="$RUNTIME_ROOT/bin/python3.12.exe"
+    ;;
+  *)
+    PY="$RUNTIME_ROOT/bin/python3.12"
+    ;;
+esac
 if [ ! -x "$PY" ]; then
   echo "inspect.sh: execution failed: project-local Python 3.12 is missing; system Python fallback is forbidden" >&2
   exit 10
