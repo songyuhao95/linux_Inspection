@@ -86,3 +86,43 @@ metrics:
       WARN: { rule: "上述配置文件缺少 server_tokens off 或 autoindex off；同时采集安全响应头和 request_method 相关配置供复核，缺失项按安全加固要求补齐", rule_id: "nginx-p0-v1.nginx.security.baseline.warn", reason: null, note: null }
       CRIT: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置文件不可读" }
+  local.nginx.http.reachability:
+    name: Nginx HTTP 可达性
+    source_anchor: "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE6-R4"
+    boundaries:
+      OK: { rule: "本地 HTTP 请求返回可解释的 2xx/3xx/401/403 等状态码", rule_id: "nginx-p0-v1.nginx.http.reachability.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义 WARN 边界" }
+      CRIT: { rule: "本地 HTTP 请求明确返回 5xx，表示 Nginx 服务异常", rule_id: "nginx-p0-v1.nginx.http.reachability.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "无法取得 HTTP 响应或 curl 不可用" }
+  local.nginx.stub_status.connections:
+    name: Nginx stub_status 连接状态
+    source_anchor: "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R2"
+    boundaries:
+      OK: { rule: "访问 /nginx_status 返回 Active connections、Reading、Writing、Waiting 四类 stub_status 字段", rule_id: "nginx-p0-v1.nginx.stub_status.connections.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义 WARN 边界" }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义 CRIT 边界" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "未开启 stub_status、状态 URL 不可访问或 curl 不可用" }
+  local.nginx.proxy.upstream.config:
+    name: Nginx upstream/proxy 配置证据
+    source_anchor: "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R4"
+    boundaries:
+      OK: { rule: "采集并保留 upstream、proxy_pass、proxy_set_header 配置事实；不表示容量或上游健康结论", rule_id: "nginx-p0-v1.nginx.proxy.upstream.config.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义 WARN 边界" }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义 CRIT 边界" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "配置文件不可读或 nginx -T 无输出" }
+  local.nginx.fd.process.limits:
+    name: Nginx 文件描述符与进程限制
+    source_anchor: "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R7"
+    boundaries:
+      OK: { rule: "采集并保留 Nginx master 的 nofile 与 max_processes 限制事实；不发明容量阈值", rule_id: "nginx-p0-v1.nginx.fd.process.limits.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义 WARN 边界" }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义 CRIT 边界" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "Nginx master 或 /proc 限制输出不可读" }
+  local.nginx.https.certificate:
+    name: Nginx HTTPS 证书
+    source_anchor: "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R9"
+    boundaries:
+      OK: { rule: "采集并保留 ssl_certificate 路径与 notAfter 到期事实；不发明有效期阈值", rule_id: "nginx-p0-v1.nginx.https.certificate.ok", reason: null, note: null }
+      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义 WARN 边界" }
+      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义 CRIT 边界" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "证书路径不可发现、openssl 不可用或 notAfter 缺失" }

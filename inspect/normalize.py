@@ -725,6 +725,96 @@ def parse_nginx_security_baseline(output: str) -> Dict[str, Any]:
     }
 
 
+_NGINX_PROXY_UPSTREAM_RE = re.compile(
+    r"\bupstream\s+([A-Za-z0-9_.:-]+)\s*\{", re.IGNORECASE
+)
+_NGINX_PROXY_PASS_RE = re.compile(
+    r"\bproxy_pass\s+([^;\s]+)\s*;", re.IGNORECASE
+)
+_NGINX_PROXY_HEADER_RE = re.compile(
+    r"\bproxy_set_header\s+([^;]+?)\s*;", re.IGNORECASE
+)
+
+
+def parse_nginx_http_reachability(output: str) -> Dict[str, Any]:
+    """Parse the first HTTP response status emitted by a local Nginx probe."""
+    match = _NGINX_HTTP_STATUS_RE.search(output or "")
+    if match is None:
+        raise ParseError("Nginx HTTP 响应缺少状态码")
+    status = int(match.group("status"))
+    return {
+        "reachable": True,
+        "http_status": status,
+        "summary": [mask_output(ln) for ln in _content_lines(output)[:3]],
+    }
+
+
+def parse_nginx_stub_status_connections(output: str) -> Dict[str, Any]:
+    """Parse the Nginx v2 stub_status fact using the existing parser contract."""
+    return parse_nginx_connections_status(output)
+
+
+def parse_nginx_proxy_upstream_config(output: str) -> Dict[str, Any]:
+    """Extract upstream/proxy directives from an ``nginx -T`` evidence stream."""
+    text = output or ""
+    upstreams = list(dict.fromkeys(_NGINX_PROXY_UPSTREAM_RE.findall(text)))
+    proxy_passes = list(dict.fromkeys(_NGINX_PROXY_PASS_RE.findall(text)))
+    proxy_set_headers = [
+        item.strip() for item in _NGINX_PROXY_HEADER_RE.findall(text) if item.strip()
+    ]
+    if not upstreams and not proxy_passes and not proxy_set_headers:
+        raise ParseError("Nginx upstream/proxy 配置缺少可解析证据")
+    return {
+        "upstreams": upstreams,
+        "proxy_passes": proxy_passes,
+        "proxy_set_headers": list(dict.fromkeys(proxy_set_headers)),
+        "rows": [mask_output(ln) for ln in _content_lines(text)[:20]],
+    }
+
+
+def parse_nginx_fd_process_limits(output: str) -> Dict[str, Any]:
+    """Extract Nginx master nofile and process-limit facts."""
+    text = output or ""
+    nofile_match = re.search(r"LimitNOFILE\s*=\s*(\d+)", text, re.IGNORECASE)
+    if nofile_match is None:
+        nofile_match = re.search(r"Max open files\s+(\d+)", text, re.IGNORECASE)
+    process_match = re.search(r"Max processes\s+(\d+)", text, re.IGNORECASE)
+    if nofile_match is None or process_match is None:
+        raise ParseError("Nginx 文件描述符或进程限制缺少可解析证据")
+    return {
+        "nofile": int(nofile_match.group(1)),
+        "max_processes": int(process_match.group(1)),
+        "rows": [mask_output(ln) for ln in _content_lines(text)[:10]],
+    }
+
+
+def parse_nginx_https_certificate(output: str) -> Dict[str, Any]:
+    """Extract certificate paths and OpenSSL ``notAfter`` evidence."""
+    text = output or ""
+    certificates = list(
+        dict.fromkeys(
+            re.findall(r"\bssl_certificate\s+([^;\s]+)\s*;", text, re.IGNORECASE)
+        )
+    )
+    not_after = list(
+        dict.fromkeys(
+            m.group(1).strip()
+            for m in re.finditer(
+                r"\bnotAfter\s*=\s*(.+?)\s*$",
+                text,
+                re.IGNORECASE | re.MULTILINE,
+            )
+        )
+    )
+    if not certificates and not not_after:
+        raise ParseError("Nginx HTTPS 证书缺少证书路径或 notAfter 证据")
+    return {
+        "certificates": certificates,
+        "not_after": not_after,
+        "rows": [mask_output(ln) for ln in _content_lines(text)[:10]],
+    }
+
+
 # -- local.keepalived.* ------------------------------------------------------
 
 
@@ -1296,6 +1386,11 @@ PARSERS: Dict[str, Any] = {
     "local.nginx.access_log.status_codes": parse_nginx_access_log_status_codes,
     "local.nginx.config.baseline": parse_nginx_config_baseline,
     "local.nginx.security.baseline": parse_nginx_security_baseline,
+    "local.nginx.http.reachability": parse_nginx_http_reachability,
+    "local.nginx.stub_status.connections": parse_nginx_stub_status_connections,
+    "local.nginx.proxy.upstream.config": parse_nginx_proxy_upstream_config,
+    "local.nginx.fd.process.limits": parse_nginx_fd_process_limits,
+    "local.nginx.https.certificate": parse_nginx_https_certificate,
     "local.keepalived.process.present": parse_process_present,
     "local.keepalived.version": parse_keepalived_version,
     "local.keepalived.vip.bound": parse_keepalived_vip_bound,
@@ -1684,6 +1779,48 @@ def _judge_nginx_security_baseline(
     }
 
 
+def _judge_nginx_http_reachability(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """A response is reachable; explicit HTTP 5xx is a service failure."""
+    status = parsed.get("http_status")
+    if not parsed.get("reachable") or status is None:
+        return _unknown_decision(resolved, extra_note="无法取得 HTTP 状态码")
+    if int(status) >= 500:
+        return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
+def _judge_nginx_stub_status_connections(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """stub_status availability is factual; no capacity threshold is invented."""
+    if not parsed.get("configured"):
+        return _unknown_decision(resolved, extra_note="stub_status 未配置或不可访问")
+    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
+
+
+def _judge_nginx_proxy_upstream_config(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Keep upstream/proxy evidence without inventing health thresholds."""
+    return _unknown_decision(resolved, extra_note="upstream/proxy 配置边界未定义")
+
+
+def _judge_nginx_fd_process_limits(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Keep limit facts without inventing capacity thresholds."""
+    return _unknown_decision(resolved, extra_note="文件描述符/进程限制边界未定义")
+
+
+def _judge_nginx_https_certificate(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Keep certificate evidence without inventing validity-age thresholds."""
+    return _unknown_decision(resolved, extra_note="HTTPS 证书有效期边界未定义")
+
+
 # -- local.keepalived.* 判定（keepalived-p0-v1） -----------------------------
 
 
@@ -1953,6 +2090,11 @@ JUDGERS: Dict[str, Any] = {
     "local.nginx.access_log.status_codes": _judge_nginx_access_log_status_codes,
     "local.nginx.config.baseline": _judge_nginx_config_baseline,
     "local.nginx.security.baseline": _judge_nginx_security_baseline,
+    "local.nginx.http.reachability": _judge_nginx_http_reachability,
+    "local.nginx.stub_status.connections": _judge_nginx_stub_status_connections,
+    "local.nginx.proxy.upstream.config": _judge_nginx_proxy_upstream_config,
+    "local.nginx.fd.process.limits": _judge_nginx_fd_process_limits,
+    "local.nginx.https.certificate": _judge_nginx_https_certificate,
     "local.keepalived.process.present": _judge_process_present,
     "local.keepalived.version": _judge_keepalived_version,
     "local.keepalived.vip.bound": _judge_keepalived_vip_bound,
@@ -2114,6 +2256,22 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
     if metric_id == "local.nginx.security.baseline":
         return (f"server_tokens_off={parsed['server_tokens_off']};"
                 f"autoindex_off={parsed['autoindex_off']}")
+    if metric_id == "local.nginx.http.reachability":
+        return f"reachable={parsed['reachable']};http_status={parsed['http_status']}"
+    if metric_id == "local.nginx.stub_status.connections":
+        if not parsed["configured"]:
+            return "not_configured"
+        return (f"active={parsed['active']};reading={parsed['reading']};"
+                f"writing={parsed['writing']};waiting={parsed['waiting']}")
+    if metric_id == "local.nginx.proxy.upstream.config":
+        return (f"upstreams={','.join(parsed['upstreams'])};"
+                f"proxy_passes={','.join(parsed['proxy_passes'])};"
+                f"proxy_set_headers={','.join(parsed['proxy_set_headers'])}")
+    if metric_id == "local.nginx.fd.process.limits":
+        return f"nofile={parsed['nofile']};max_processes={parsed['max_processes']}"
+    if metric_id == "local.nginx.https.certificate":
+        return (f"certificates={','.join(parsed['certificates'])};"
+                f"not_after={','.join(parsed['not_after'])}")
     if metric_id == "local.keepalived.process.present":
         return "present" if parsed["present"] else "absent"
     if metric_id == "local.keepalived.version":
@@ -2340,6 +2498,22 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
     if metric_id == "local.nginx.security.baseline":
         return (f"server_tokens off={parsed['server_tokens_off']}；"
                 f"autoindex off={parsed['autoindex_off']}")
+    if metric_id == "local.nginx.http.reachability":
+        return f"reachable={parsed['reachable']}；http_status={parsed['http_status']}"
+    if metric_id == "local.nginx.stub_status.connections":
+        if not parsed["configured"]:
+            return "stub_status 未配置或 URL 不可访问；记录为未配置"
+        return (f"active={parsed['active']} reading={parsed['reading']} "
+                f"writing={parsed['writing']} waiting={parsed['waiting']}")
+    if metric_id == "local.nginx.proxy.upstream.config":
+        return (f"upstreams={','.join(parsed['upstreams'])}；"
+                f"proxy_pass={','.join(parsed['proxy_passes'])}；"
+                f"proxy_set_header={','.join(parsed['proxy_set_headers'])}")
+    if metric_id == "local.nginx.fd.process.limits":
+        return f"nofile={parsed['nofile']}；max_processes={parsed['max_processes']}"
+    if metric_id == "local.nginx.https.certificate":
+        return (f"certificates={','.join(parsed['certificates'])}；"
+                f"notAfter={','.join(parsed['not_after'])}")
     if metric_id == "local.keepalived.process.present":
         if not parsed["present"]:
             return "未匹配到 Keepalived 进程（absent）"
@@ -3365,6 +3539,11 @@ __all__ = [
     "parse_nginx_connections_status",
     "parse_nginx_error_log",
     "parse_nginx_port_listening",
+    "parse_nginx_http_reachability",
+    "parse_nginx_stub_status_connections",
+    "parse_nginx_proxy_upstream_config",
+    "parse_nginx_fd_process_limits",
+    "parse_nginx_https_certificate",
     "parse_nginx_security_baseline",
     "parse_nginx_version",
     "parse_keepalived_capability_stability",

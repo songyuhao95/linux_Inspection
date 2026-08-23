@@ -244,6 +244,7 @@ _NGINX_ANCHOR = (
     "配置有效性/端口与本地访问/关键日志；P1 关注指标表：连接状态/访问日志状态码/"
     "配置基线/安全配置基线）；" + _MANUAL_SHA
 )
+_NGINX_DOCX = "安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
 
 NGINX_METRICS = [
     {
@@ -419,6 +420,78 @@ NGINX_METRICS = [
         "conflicts": [],
         "doc_baseline": "server_tokens off 且 autoindex off → OK；缺失 → WARN（记录风险，按安全加固要求补齐）",
         "unknown_conditions": "配置文件不可读 → UNKNOWN",
+    },
+    # Nginx v2 facts use canonical DOCX anchors. Undefined capacity and
+    # certificate-age boundaries remain gaps rather than invented thresholds.
+    {
+        "metric_id": "local.nginx.http.reachability",
+        "name": "Nginx HTTP 可达性",
+        "command": "curl -sS --connect-timeout 3 -I http://{nginx_listener_host}:{nginx_port}/ | head -n 1",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_http_reachability",
+        "unit": "布尔（reachable）+ HTTP 状态码",
+        "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE6-R4",
+        "threshold_layer": "文档基线（本地 HTTP 可达性与状态码）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.http.reachability"],
+        "conflicts": [],
+        "doc_baseline": "返回 2xx/3xx/401/403 等可解释状态 → OK；明确 5xx → CRIT",
+        "unknown_conditions": "无法取得 HTTP 响应、连接失败或 curl 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.stub_status.connections",
+        "name": "Nginx stub_status 连接状态",
+        "command": "curl -sS --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/nginx_status",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_stub_status_connections",
+        "unit": "连接数（active/reading/writing/waiting）",
+        "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE7-R2",
+        "threshold_layer": "文档基线（stub_status 配置与事实采集）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.stub_status.connections"],
+        "conflicts": [],
+        "doc_baseline": "返回 Active connections、Reading、Writing、Waiting 字段 → OK",
+        "unknown_conditions": "未开启 stub_status、状态 URL 不可访问或 curl 不可用 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.proxy.upstream.config",
+        "name": "Nginx upstream/proxy 配置证据",
+        "command": "{nginx_bin} -T -c {nginx_conf} 2>&1 | grep -E '(^|[[:space:]])upstream[[:space:]]|proxy_pass|proxy_set_header'",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_proxy_upstream_config",
+        "unit": "upstream、proxy_pass、proxy_set_header 指令集合",
+        "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE7-R4",
+        "threshold_layer": "文档基线（配置证据采集；容量边界未定义）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.proxy.upstream.config"],
+        "conflicts": [],
+        "doc_baseline": "保留 upstream、proxy_pass、proxy_set_header 配置事实；WARN/CRIT 边界未定义",
+        "unknown_conditions": "配置文件不可读或 nginx -T 无输出 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.fd.process.limits",
+        "name": "Nginx 文件描述符与进程限制",
+        "command": "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+nginx[[:space:]]+nginx: master process'",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_fd_process_limits",
+        "unit": "nofile/max_processes 限制值",
+        "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE7-R7",
+        "threshold_layer": "文档基线（限制事实采集；容量边界未定义）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.fd.process.limits"],
+        "conflicts": [],
+        "doc_baseline": "保留 nofile 与 max_processes 限制事实；WARN/CRIT 边界未定义",
+        "unknown_conditions": "Nginx master 或 /proc 限制输出不可读 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.nginx.https.certificate",
+        "name": "Nginx HTTPS 证书",
+        "command": "{nginx_bin} -T -c {nginx_conf} 2>&1 | grep -E 'ssl_certificate|notAfter'",
+        "timeout_sec": 10,
+        "parser": "parse_nginx_https_certificate",
+        "unit": "证书路径 + notAfter 到期证据",
+        "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE7-R9",
+        "threshold_layer": "文档基线（证书事实采集；有效期边界未定义）",
+        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.https.certificate"],
+        "conflicts": [],
+        "doc_baseline": "保留 HTTPS 证书路径与 notAfter 事实；WARN/CRIT 有效期边界未定义",
+        "unknown_conditions": "证书路径不可发现、openssl 不可用或 notAfter 缺失 → UNKNOWN",
     },
 ]
 
