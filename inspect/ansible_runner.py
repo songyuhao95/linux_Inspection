@@ -369,7 +369,7 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
     },
     "local.nginx.port.listening": {
         "command": (
-            "ss -tlnp | grep ':{nginx_port}'; "
+            "netstat -lntp | grep ':{nginx_port}'; "
             "curl -sS -I --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/ | head -n 1"
         ),
         "profile_keys": ("nginx_port",),
@@ -667,7 +667,7 @@ def _substitute_template(
 
 
 _NGINX_GENERATED_ALLOWED_BINARIES = (
-    "pgrep", "ps", "sed", "head", "tail", "grep", "ss", "curl", "ls",
+    "pgrep", "ps", "sed", "head", "tail", "grep", "netstat", "ss", "curl", "ls",
     "openssl",
 )
 _NGINX_UNSAFE_GENERATED_TOKENS = re.compile(
@@ -1105,7 +1105,7 @@ def _build_nginx_metric_command(
         ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))
         return (
             _nginx_discovery_prefix(profile, include_dump=True)
-            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_ports\" || test -z \"$nginx_listener_host\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do ss -tlnp | grep :$port; curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://$nginx_listener_host:$port/\" | head -n 1; done; fi"
+            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_listener_host\"; then nginx_listener_host=127.0.0.1; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do netstat -lntp | grep :$port; curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://$nginx_listener_host:$port/\" | head -n 1; done; fi"
         )
     if metric_id == "local.nginx.error_log.key_evidence":
         return (

@@ -609,14 +609,18 @@ _NGINX_HTTP_STATUS_RE = re.compile(r"\bHTTP/[0-9.]+[ \t]+(?P<status>[1-5][0-9]{2
 
 
 def parse_nginx_port_listening(output: str) -> Dict[str, Any]:
-    """ss + curl 输出 → 端口监听状态与本地 HTTP 状态（P0 端口与本地访问）。
+    """netstat + curl output → 端口监听状态与本地 HTTP 状态。
 
-    输入基准：ss LISTEN 行 + curl -I 的 `HTTP/1.1 200 OK` 状态行。
+    ``netstat -lntp`` is the Nginx-specific collector contract.  Keep accepting
+    the historical ``ss`` LISTEN row so old replay fixtures remain valid.
     """
     if _has_nginx_missing_marker(output, "INSPECT_NGINX_PORT_NOT_FOUND"):
         raise ParseError("未发现 Nginx 配置中的 listen 端口，且 inspect.conf 没有可用端口候选")
     lines = _content_lines(output)
-    listening = any(ln.lstrip().startswith("LISTEN") for ln in lines)
+    listening = any(
+        re.search(r"(?:^|\s)LISTEN(?:\s|$)", ln, re.IGNORECASE)
+        for ln in lines
+    )
     http_status: Optional[int] = None
     for ln in lines:
         m = _NGINX_HTTP_STATUS_RE.search(ln)
@@ -1807,11 +1811,58 @@ def _judge_nginx_proxy_upstream_config(
     return _unknown_decision(resolved, extra_note="upstream/proxy 配置边界未定义")
 
 
+_NGINX_FD_NOFILE_OK = 65535
+_NGINX_FD_NOFILE_WARN = 32768
+_NGINX_MAX_PROCESSES_OK = 4096
+_NGINX_MAX_PROCESSES_WARN = 2048
+_NGINX_FD_PROCESS_PRODUCT_NOTE = (
+    "产品补充阈值（用户授权；非 DOCX-derived）："
+    "nofile >=65535 OK、32768..65534 WARN、<32768 CRIT；"
+    "max_processes >=4096 OK、2048..4095 WARN、<2048 CRIT；"
+    "两维按最高严重度聚合。"
+)
+
+
 def _judge_nginx_fd_process_limits(
     parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Keep limit facts without inventing capacity thresholds."""
-    return _unknown_decision(resolved, extra_note="文件描述符/进程限制边界未定义")
+    """Apply the user-authorized product thresholds to both limit dimensions."""
+    nofile = parsed.get("nofile")
+    max_processes = parsed.get("max_processes")
+    if (
+        not isinstance(nofile, int)
+        or isinstance(nofile, bool)
+        or not isinstance(max_processes, int)
+        or isinstance(max_processes, bool)
+        or nofile < 0
+        or max_processes < 0
+    ):
+        return _unknown_decision(
+            resolved,
+            extra_note=_NGINX_FD_PROCESS_PRODUCT_NOTE + "；字段缺失或无效，无法判定。",
+        )
+
+    def _status(value: int, ok_floor: int, warn_floor: int) -> str:
+        if value >= ok_floor:
+            return STATUS_OK
+        if value >= warn_floor:
+            return STATUS_WARN
+        return STATUS_CRIT
+
+    statuses = [
+        _status(nofile, _NGINX_FD_NOFILE_OK, _NGINX_FD_NOFILE_WARN),
+        _status(max_processes, _NGINX_MAX_PROCESSES_OK, _NGINX_MAX_PROCESSES_WARN),
+    ]
+    severity = {STATUS_OK: 0, STATUS_WARN: 1, STATUS_CRIT: 2}
+    status = max(statuses, key=lambda item: severity[item])
+    return {
+        "status": status,
+        "rule": _baseline_rule(resolved, status),
+        "note": (
+            f"{_NGINX_FD_PROCESS_PRODUCT_NOTE} "
+            f"当前 nofile={nofile}、max_processes={max_processes}。"
+        ),
+    }
 
 
 def _judge_nginx_https_certificate(

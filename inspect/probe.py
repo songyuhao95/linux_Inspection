@@ -38,6 +38,7 @@ PROBE_COMMANDS = (
     "pgrep",
     "ps",
     "ss",
+    "netstat",
     "free",
     "df",
     "top",
@@ -157,7 +158,7 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     # a real target without sed emits the explicit UNKNOWN marker instead of
     # being silently treated as healthy.
     "local.nginx.config.valid": ("bash", "ps", "grep", "head"),
-    "local.nginx.port.listening": ("bash", "ps", "grep", "ss", "curl", "head"),
+    "local.nginx.port.listening": ("bash", "ps", "grep", "netstat", "curl", "head"),
     "local.nginx.error_log.key_evidence": ("bash", "ps", "grep", "tail", "head"),
     "local.nginx.connections.status": ("bash", "ps", "grep", "curl", "head"),
     "local.nginx.access_log.status_codes": ("bash", "ps", "grep", "tail", "head"),

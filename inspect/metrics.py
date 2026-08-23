@@ -302,21 +302,21 @@ NGINX_METRICS = [
         "metric_id": "local.nginx.port.listening",
         "name": "Nginx 端口监听与本地访问",
         "command": (
-            "ss -tlnp | grep ':{nginx_port}'; "
+            "netstat -lntp | grep ':{nginx_port}'; "
             "curl -sS -I --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/ | head -n 1"
         ),
         "timeout_sec": 10,
         "parser": "parse_nginx_port_listening",
         "unit": "枚举（listening/reachable）+ 本地 HTTP 状态",
         "source_anchor": (
-            "P0 指标表「Nginx端口与本地访问」行（ss -tlnp | grep ':8010'；"
+            "P0 指标表「Nginx端口与本地访问」行（netstat -lntp | grep ':8010'；"
             "curl -sS -I --connect-timeout 3 http://{nginx_listener_host}:8010/）；" + _NGINX_ANCHOR
         ),
         "threshold_layer": "文档基线（监听且本地可访问=正常；不监听/连接失败/5xx=CRIT）",
         "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.port.listening"],
         "conflicts": [],
         "doc_baseline": "端口 LISTEN 且本地 HTTP 返回 200/302/401/403 等可解释状态 → OK；端口不监听、连接超时/拒绝或持续 5xx → CRIT（故障）",
-        "unknown_conditions": "ss/curl 不可用或无法读取 → UNKNOWN",
+        "unknown_conditions": "netstat/curl 不可用或无法读取 → UNKNOWN",
     },
     {
         "metric_id": "local.nginx.error_log.key_evidence",
@@ -473,11 +473,11 @@ NGINX_METRICS = [
         "parser": "parse_nginx_fd_process_limits",
         "unit": "nofile/max_processes 限制值",
         "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE7-R7",
-        "threshold_layer": "文档基线（限制事实采集；容量边界未定义）",
+        "threshold_layer": "用户授权的产品补充阈值（非 DOCX-derived）：nofile >=65535/32768、max_processes >=4096/2048，按最高严重度聚合",
         "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.fd.process.limits"],
         "conflicts": [],
-        "doc_baseline": "保留 nofile 与 max_processes 限制事实；WARN/CRIT 边界未定义",
-        "unknown_conditions": "Nginx master 或 /proc 限制输出不可读 → UNKNOWN",
+        "doc_baseline": "用户授权的产品补充阈值（非 DOCX-derived）：nofile >=65535 OK、32768..65534 WARN、<32768 CRIT；max_processes >=4096 OK、2048..4095 WARN、<2048 CRIT；两维按最高严重度聚合",
+        "unknown_conditions": "Nginx master 或 /proc 限制输出不可读，或 nofile/max_processes 缺失/无效 → UNKNOWN",
     },
     {
         "metric_id": "local.nginx.https.certificate",

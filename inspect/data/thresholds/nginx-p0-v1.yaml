@@ -8,7 +8,8 @@
 # 转写规则（与 MR §3 一致）：
 #   - 边界文本逐字转录手册单元格；禁止发明或调整阈值；
 #   - 单元格为“（文档未定义）”的边界 → rule: null（未定义，不参与判定）；
-#   - 无法判定的边界按 UNKNOWN 语义标注（reason: missing|conflict|none + 原文 note）。
+#   - fd/process limits use a user-authorized product supplementation; those
+#     numeric boundaries are not DOCX-derived and are labeled in threshold.notes.
 schema: threshold-baseline-v1
 version: nginx-p0-v1
 scope: nginx-p0-v1
@@ -40,12 +41,12 @@ metrics:
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "nginx 可执行文件不可用或无权限读取配置" }
   local.nginx.port.listening:
     name: Nginx 端口监听与本地访问
-    source_anchor: "P0 指标表「Nginx端口与本地访问」行（ss -tlnp | grep ':8010'；curl -sS -I --connect-timeout 3 http://127.0.0.1:8010/）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
+    source_anchor: "P0 指标表「Nginx端口与本地访问」行（netstat -lntp | grep ':8010'；curl -sS -I --connect-timeout 3 http://127.0.0.1:8010/）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
     boundaries:
-      OK: { rule: "优先从实际 Nginx 配置的 listen 指令提取端口；无法提取时按 inspect.conf 的 nginx_port 候选；ss -tlnp 确认每个端口处于 LISTEN，且 curl 访问 http://127.0.0.1:端口/ 返回可解释的 HTTP 状态", rule_id: "nginx-p0-v1.nginx.port.listening.ok", reason: null, note: null }
+      OK: { rule: "优先从实际 Nginx 配置的 listen 指令提取端口；无法提取时按 inspect.conf 的 nginx_port 候选；netstat -lntp 确认每个端口处于 LISTEN，且 curl 访问 http://127.0.0.1:端口/ 返回可解释的 HTTP 状态", rule_id: "nginx-p0-v1.nginx.port.listening.ok", reason: null, note: null }
       WARN: { rule: null, rule_id: null, reason: missing, note: "（文档未定义）" }
       CRIT: { rule: "对实际配置 listen 端口（无法解析时为 inspect.conf nginx_port 候选）检查；端口未 LISTEN、curl 连接超时/拒绝，或本地 HTTP 返回 5xx 时为 CRIT", rule_id: "nginx-p0-v1.nginx.port.listening.crit", reason: null, note: null }
-      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "ss/curl 不可用" }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "netstat/curl 不可用" }
   local.nginx.error_log.key_evidence:
     name: Nginx 关键日志
     source_anchor: "P0 指标表「关键日志」行（tail -n 100 error.log；egrep -i 'emerg|alert|crit|error|permission denied|bind(|connect() failed|upstream timed out'）；安徽农金Nginx、Keepalived运维巡检手册v1.0.docx"
@@ -114,10 +115,10 @@ metrics:
     name: Nginx 文件描述符与进程限制
     source_anchor: "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R7"
     boundaries:
-      OK: { rule: "采集并保留 Nginx master 的 nofile 与 max_processes 限制事实；不发明容量阈值", rule_id: "nginx-p0-v1.nginx.fd.process.limits.ok", reason: null, note: null }
-      WARN: { rule: null, rule_id: null, reason: missing, note: "文档未定义 WARN 边界" }
-      CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义 CRIT 边界" }
-      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "Nginx master 或 /proc 限制输出不可读" }
+      OK: { rule: "用户授权的产品补充阈值：nofile >=65535 且 max_processes >=4096；两维均达到 OK 下限", rule_id: "nginx-p0-v1.nginx.fd.process.limits.ok", reason: null, note: null }
+      WARN: { rule: "用户授权的产品补充阈值：nofile 为 32768..65534 或 max_processes 为 2048..4095，且另一维不低于 WARN 下限；两维按最高严重度聚合", rule_id: "nginx-p0-v1.nginx.fd.process.limits.warn", reason: null, note: null }
+      CRIT: { rule: "用户授权的产品补充阈值：nofile <32768 或 max_processes <2048；任一维达到 CRIT 即聚合为 CRIT", rule_id: "nginx-p0-v1.nginx.fd.process.limits.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "nofile 或 max_processes 缺失/无效；产品补充阈值为用户授权且非 DOCX-derived" }
   local.nginx.https.certificate:
     name: Nginx HTTPS 证书
     source_anchor: "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R9"
