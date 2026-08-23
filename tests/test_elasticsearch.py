@@ -2,6 +2,7 @@ from pathlib import Path
 
 from inspect import ansible_runner as ar
 from inspect import config
+from inspect import metrics
 from inspect import normalize
 from inspect.modules import default_registry, middleware_module_ids
 
@@ -197,3 +198,40 @@ def test_elasticsearch_system_parameters_parse_process_limits():
     assert parsed["nofile"] == 65535
     assert parsed["nproc"] == 4096
     assert parsed["memlock"] == "unlimited"
+
+
+def test_elasticsearch_fact_source_uses_document_command_not_runtime_bundle():
+    metric_id = "local.elasticsearch.cluster.health"
+    document_command = metrics.get_metric(metric_id)["command"]
+    host_result = {
+        "host": "node-es",
+        "ip": "192.0.2.101",
+        "probe": {},
+        "probe_status": "ok",
+        "host_error": None,
+        "execution_status": "SUCCESS",
+        "metrics": [{
+            "metric_id": metric_id,
+            "command": "runtime discovery shell bundle must not be reported",
+            "stdout": (
+                '{"status":"green","number_of_nodes":3,'
+                '"active_shards_percent_as_number":100}\\n'
+                "INSPECT_ELASTICSEARCH_HTTP_STATUS=200"
+            ),
+            "stderr": "",
+            "rc": 0,
+            "error": None,
+        }],
+        "summary": {"total": 1, "executed": 1, "failed": 0},
+        "duration_sec": 0.1,
+    }
+    doc = normalize.normalize_host_result(
+        host_result,
+        run_id="run-test-es-command",
+        inspection_id="insp-20260823120000-node-es",
+        collected_at="2026-08-23T12:00:00+08:00",
+        profile={"elasticsearch_expected_nodes": ["3"]},
+        resolved_thresholds=config.build_resolved_thresholds(),
+    )
+    assert doc["metrics"][0]["evidence"]["command"] == document_command
+    assert "runtime discovery shell bundle" not in doc["metrics"][0]["evidence"]["command"]

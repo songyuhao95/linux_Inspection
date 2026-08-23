@@ -32,7 +32,8 @@
 
 - 首版三 Sheet（Overview / Local / Errors-Evidence），后续按产品 profile 增加 Sheet。
 - 文件名：`<inspection-id>.xlsx`（`--excel PATH` 可覆盖路径）。
-- Local Sheet 不聚合多值指标：负载的 1 分钟、5 分钟、15 分钟分别成行；磁盘使用率和 inode 使用率按每个挂载点分别成行。每行的 command 仅用于运维复现，报表渲染不执行该命令。
+- Local Sheet 不聚合多值指标：负载的 1 分钟、5 分钟、15 分钟分别成行；磁盘使用率和 inode 使用率按每个挂载点分别成行。每行的 command 取指标注册表中的文档采集命令，仅用于运维复现，报表渲染不执行该命令。
+- `threshold_rule` 固定输出六行：测量对象、规范值、单位、判定规则、声明状态、指标作用影响；明细窗口/挂载点作为测量对象上下文展示。
 
 ## 4. HTML 报表（离线单文件）
 
@@ -61,7 +62,7 @@
 
 1. 所有报表由同一份 JSON 渲染；同一 inspection 的三类报表状态计数必须一致。
 2. -UNKNOWN- 必须在报表中可见（不得静默过滤）；-ERROR-/技术失败必须可见（Errors-Evidence）。
-3. Local Sheet 的 threshold_rule 使用可读中文解释，command 保留事实源中的指标取值命令；source_anchor/evidence_summary/provenance 不作为 Local Sheet 或 HTML 正文列重复展示。
+3. Local Sheet 的 threshold_rule 固定使用六行中文模板，command 保留指标注册表中的文档取值命令；source_anchor/evidence_summary/provenance 不作为 Local Sheet 或 HTML 正文列重复展示。
 4. host-result-v1 JSON 继续按脱敏契约保存 `<IP>`。Excel Local Sheet 是经 CLI inventory 解析得到的运维展示例外：运行时将 inventory 中的 ansible_host 映射到 ip 列，但不回写 JSON、事件或 HTML 事实源；凭据仍不进入任何报表。
 
 ## 7. 路线（后续版本，非本合同交付）

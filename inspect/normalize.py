@@ -2475,7 +2475,7 @@ def _error_metric_document(
     """
     m = _metric_definition(metric_id)
     evidence = {
-        "command": command or m["command"],
+        "command": m["command"],
         "output_summary": None,
         "raw_ref": f"raw/{metric_id}.out",
         "sampled_at": collected_at,
@@ -2522,6 +2522,13 @@ def _judged_metric_document(
     # resolved.provenance.notes：外部配置回退文档基线等判定链注记
     # （_fallback_to_baseline），notes 空时透传到 metric 层保证可追溯
     resolved_notes = resolved.get("provenance", {}).get("notes")
+    report_note = note or resolved_notes
+    if resolved.get("layer") == LAYER_DOCUMENT_BASELINE:
+        doc_baseline = _metric_definition(metric_id).get("doc_baseline")
+        if doc_baseline and "文档基线：" not in str(report_note or ""):
+            report_note = (
+                f"{report_note}；" if report_note else ""
+            ) + f"文档基线：{doc_baseline}"
 
     if status == STATUS_UNKNOWN:
         threshold = {
@@ -2529,12 +2536,12 @@ def _judged_metric_document(
             "rule_id": None,
             "value": None,
             "source_anchor": doc_sources[0] if doc_sources else None,
-            "notes": note,
+            "notes": report_note or note,
         }
         provenance = {
             "config_sources": config_sources,
             "doc_sources": doc_sources,
-            "notes": note or resolved_notes,
+            "notes": report_note or note,
         }
     elif rule is not None:
         threshold = {
@@ -2542,12 +2549,12 @@ def _judged_metric_document(
             "rule_id": rule["rule_id"],
             "value": rule["rule"],
             "source_anchor": doc_sources[0] if doc_sources else None,
-            "notes": note,
+            "notes": report_note,
         }
         provenance = {
             "config_sources": config_sources,
             "doc_sources": doc_sources,
-            "notes": note or resolved_notes,
+            "notes": report_note,
         }
     else:
         # 基线未定义该边界（防御；本基线 10 指标 OK/WARN/CRIT 均有定义）
@@ -2556,16 +2563,16 @@ def _judged_metric_document(
             "rule_id": None,
             "value": None,
             "source_anchor": doc_sources[0] if doc_sources else None,
-            "notes": note or unknown.get("note") or "文档基线未定义该边界",
+            "notes": report_note or unknown.get("note") or "文档基线未定义该边界",
         }
         provenance = {
             "config_sources": config_sources,
             "doc_sources": doc_sources,
-            "notes": note or unknown.get("note") or resolved_notes,
+            "notes": report_note or unknown.get("note") or "文档基线未定义该边界",
         }
 
     evidence = {
-        "command": command or _metric_definition(metric_id)["command"],
+        "command": _metric_definition(metric_id)["command"],
         "output_summary": mask_output(_output_summary(metric_id, parsed)),
         "raw_ref": f"raw/{metric_id}.out",
         "sampled_at": collected_at,
@@ -2852,7 +2859,7 @@ def normalize_host_result(
                 "notes": rule.get("note"),
             }
             evidence = {
-                "command": mres.get("command") or _metric_definition(metric_id)["command"],
+                "command": _metric_definition(metric_id)["command"],
                 "output_summary": mask_output(_output_summary(metric_id, parsed)),
                 "raw_ref": f"raw/{metric_id}.out",
                 "sampled_at": collected_at,

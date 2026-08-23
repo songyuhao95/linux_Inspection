@@ -728,6 +728,29 @@ class TestRenderWithStubXlsxwriter:
         for row in unk_rows:
             assert errors.cells[(row, 8)][0]  # note 非空
 
+    def test_threshold_rule_uses_fixed_six_line_template(self):
+        metric = make_metric(
+            "local.elasticsearch.cluster.health",
+            "WARN",
+            "yellow",
+            None,
+            unit="枚举（green/yellow/red）",
+            name="集群健康",
+            value="status=yellow 或节点数少于期望但仅少1台",
+            threshold_notes="集群存在副本分配风险",
+        )
+        text = rx._threshold_rule_text(metric)
+        lines = text.splitlines()
+        assert len(lines) == 6
+        assert [line.split("：", 1)[0] for line in lines] == [
+            "测量对象", "规范值", "单位", "判定规则", "声明状态", "指标作用影响",
+        ]
+        assert lines[0] == "测量对象：集群健康"
+        assert lines[2] == "单位：枚举（green/yellow/red）"
+        assert lines[3].endswith("status=yellow 或节点数少于期望但仅少1台")
+        assert lines[4] == "声明状态：WARN"
+        assert lines[5].split("：", 1)[1]
+
 
 # --------------------------------------------------------------------------
 # 8. 实际渲染（xlsxwriter 可用时；openpyxl 只读校验，TD §8）

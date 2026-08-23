@@ -271,47 +271,79 @@ def _metric_rows(metric: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return rows or [dict(metric=metric, detail=None)]
 
 
+def _marked_note(value: Any, label: str) -> Optional[str]:
+    """Extract a labelled clause from the free-form fact-source note."""
+    marker = f"{label}："
+    text = str(value or "")
+    if marker not in text:
+        return None
+    result = text.split(marker, 1)[1].strip()
+    return result or None
+
+
 def _threshold_rule_text(
     metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]] = None
 ) -> str:
-    """Build a Chinese, human-readable rule explanation from fact fields."""
+    """Build the fixed six-line threshold explanation for report consumers.
+
+    The renderer does not evaluate thresholds.  It only combines the current
+    fact-source rule, status, unit, and detail context into the report contract.
+    """
     threshold = metric.get("threshold") or {}
-    parts: List[str] = []
+    metric_id = str(metric.get("metric_id") or "")
+    name = str(metric.get("name") or metric_id or "指标")
+    context: List[str] = []
     if detail:
-        window = detail.get("window")
-        mount = detail.get("mount")
-        filesystem = detail.get("filesystem")
-        cpu_cores = detail.get("cpu_cores")
-        if window is not None and str(window) != "":
-            parts.append(f"测量周期：{window}")
-        if cpu_cores is not None and str(cpu_cores) != "":
-            parts.append(f"CPU核数：{cpu_cores}")
-        if mount is not None and str(mount) != "":
-            parts.append(f"挂载点：{mount}")
-        if filesystem is not None and str(filesystem) != "":
-            parts.append(f"文件系统：{filesystem}")
-    if not parts:
-        parts.append(f"测量对象：{metric.get('name') or metric.get('metric_id') or '指标'}")
+        for key, label in (
+            ("window", "测量周期"),
+            ("cpu_cores", "CPU核数"),
+            ("mount", "挂载点"),
+            ("filesystem", "文件系统"),
+        ):
+            value = detail.get(key)
+            if value is not None and str(value) != "":
+                context.append(f"{label}：{value}")
+    measured = name if not context else f"{name}（{'；'.join(context)}）"
 
     value = threshold.get("value")
+    notes = threshold.get("notes")
+    layer = threshold.get("layer")
     if value is not None and str(value) != "":
-        display_value = str(value).replace(">=", "≥").replace("<=", "≤")
-        parts.append(f"判定规则：{display_value}")
+        rule = str(value).replace(">=", "≥").replace("<=", "≤")
+        standard = _marked_note(notes, "文档基线") or rule
+    elif notes is not None and str(notes) != "":
+        standard = str(notes)
+        rule = str(notes)
+    elif layer is not None and str(layer) != "":
+        standard = f"{layer}（文档未给出可执行边界）"
+        rule = "事实源未提供判定规则"
     else:
-        notes = threshold.get("notes")
-        if notes is not None and str(notes) != "":
-            parts.append(f"判定说明：{notes}")
-        else:
-            layer = threshold.get("layer")
-            if layer is not None and str(layer) != "":
-                parts.append(f"判定层：{layer}")
-            else:
-                parts.append("判定规则：事实源未提供")
+        standard = "文档未提供规范值"
+        rule = "事实源未提供判定规则"
 
-    rule_id = threshold.get("rule_id")
-    if rule_id is not None and str(rule_id) != "":
-        parts.append(f"规则标识：{rule_id}")
-    return "；".join(str(part) for part in parts)
+    status = str(metric.get("status") or "UNKNOWN")
+    impact = _metric_impact(metric_id, name)
+    return "\n".join(
+        (
+            f"测量对象：{measured}",
+            f"规范值：{standard}",
+            f"单位：{metric.get('unit') or '未声明'}",
+            f"判定规则：{rule}",
+            f"声明状态：{status}",
+            f"指标作用影响：{impact}",
+        )
+    )
+
+
+def _metric_impact(metric_id: str, name: str) -> str:
+    """Return a conservative, non-evaluating purpose/impact description."""
+    if metric_id.startswith("local.elasticsearch."):
+        return f"用于评估{name}；异常可能影响 Elasticsearch 的稳定性、可用性或数据安全。"
+    if metric_id.startswith("local.nginx."):
+        return f"用于评估{name}；异常可能影响 Web 服务可用性或访问安全。"
+    if metric_id.startswith("local.keepalived."):
+        return f"用于评估{name}；异常可能影响高可用切换和业务连续性。"
+    return f"用于评估{name}；异常可能影响主机资源、服务稳定性或业务可用性。"
 
 
 def _local_row_values(
@@ -443,7 +475,7 @@ def _write_workbook(
         {"bold": True, "font_color": "#FFFFFF", "bg_color": "#37474F",
          "border": 1, "text_wrap": True, "valign": "vcenter"}
     )
-    cell_fmt = workbook.add_format({"border": 1})
+    cell_fmt = workbook.add_format({"border": 1, "text_wrap": True, "valign": "top"})
     note_fmt = workbook.add_format({"italic": True, "font_color": "#616161"})
     # 业务四状态：文字 + 背景色（RR §5）
     status_fmts: Dict[str, Any] = {
