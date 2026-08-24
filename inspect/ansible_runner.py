@@ -764,6 +764,39 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             key, suffix = spec, None
         value = _additional_profile_value(profile, key)
         command = command.replace(placeholder, _derive_additional_path(value, suffix))
+    typed_prefixes = (
+        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.",
+    )
+    typed_keepalived = {
+        "local.keepalived.vip.present",
+        "local.keepalived.vrrp.role",
+        "local.keepalived.health_check.status",
+        "local.keepalived.failover.config",
+    }
+    if metric_id.startswith(typed_prefixes) or metric_id in typed_keepalived:
+        module_id = metric_id.split(".", 2)[1]
+        gate_specs = {
+            "keepalived": (r"keepalived", "keepalived_conf"),
+            "kafka": (r"kafka\.Kafka|QuorumPeerMain|zookeeper", "kafka_conf"),
+            "mysql": (r"mysqld", "mysql_conf"),
+            "nacos": (r"com\.alibaba\.nacos|nacos", "nacos_home"),
+            "rabbitmq": (r"beam\.smp|rabbitmq-server", "rabbitmq_conf"),
+            "redis": (r"redis-server", "redis_conf"),
+            "rocketmq": (r"NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker", "rocketmq_conf"),
+            "tomcat": (r"org\.apache\.catalina\.startup\.Bootstrap", "tomcat_conf"),
+        }
+        pattern, config_key = gate_specs[module_id]
+        # Resolve the module's configured path to select/validate the gate,
+        # but do not require that path to appear in a process command line.
+        # Java/native service managers commonly keep the config in an
+        # environment or unit file rather than argv.
+        _additional_profile_value(profile, config_key)
+        gate = (
+            f"if ! pgrep -fa '{pattern}' >/dev/null 2>&1; then printf '%s\\n' "
+            f"INSPECT_MIDDLEWARE_NOT_RUNNING={module_id}; exit 0; fi"
+        )
+        command = f"{gate}; {command}"
     return command
 
 
@@ -2490,6 +2523,36 @@ KEEPALIVED_METRIC_PREFIX = "local.keepalived."
 KEEPALIVED_PROCESS_METRIC = "local.keepalived.process.present"
 ELASTICSEARCH_METRIC_PREFIX = "local.elasticsearch."
 ELASTICSEARCH_PROCESS_METRIC = "local.elasticsearch.process.present"
+MIDDLEWARE_METRIC_PREFIXES = (
+    "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+    "local.redis.", "local.rocketmq.", "local.tomcat.",
+    "local.keepalived.",
+)
+
+
+def select_middleware_metrics(
+    metric_results: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Drop every metric in a module when its process gate reports stopped."""
+    results = list(metric_results)
+    stopped_modules = set()
+    for item in results:
+        metric_id = str(item.get("metric_id", ""))
+        if not metric_id.startswith(MIDDLEWARE_METRIC_PREFIXES):
+            continue
+        stdout = str(item.get("stdout") or "")
+        match = re.search(r"INSPECT_MIDDLEWARE_NOT_RUNNING=([a-z0-9_]+)", stdout)
+        if match:
+            stopped_modules.add(match.group(1))
+    if not stopped_modules:
+        return results
+    return [
+        item for item in results
+        if not any(
+            str(item.get("metric_id", "")).startswith(f"local.{module_id}.")
+            for module_id in stopped_modules
+        )
+    ]
 
 
 def _nginx_process_present(metric_result: Dict[str, Any]) -> bool:
@@ -2710,6 +2773,7 @@ def _execute_fixture(plan: RunPlan, fixture_dir: Path) -> Dict[str, Any]:
             host_ip=str(host.ip),
             elasticsearch_whitelist=plan.elasticsearch_whitelist,
         )
+        metric_results = select_middleware_metrics(metric_results)
         host_results.append(
             build_host_result(
                 host,
@@ -3252,6 +3316,7 @@ def _parse_callback_results(
             host_ip=str(state["host"].ip),
             elasticsearch_whitelist=plan.elasticsearch_whitelist,
         )
+        metrics = select_middleware_metrics(metrics)
         results.append(
             build_host_result(
                 state["host"],
@@ -3485,5 +3550,6 @@ __all__ = [
     "select_nginx_metrics",
     "select_keepalived_metrics",
     "select_elasticsearch_metrics",
+    "select_middleware_metrics",
     "validate_command_specs",
 ]

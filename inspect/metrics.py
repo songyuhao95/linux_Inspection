@@ -786,12 +786,47 @@ def _middleware_metric(
     retained as evidence/report source text; execution still goes through the
     independent runner allow-list.
     """
+    typed_prefixes = (
+        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.",
+    )
+    typed_keepalived = {
+        "local.keepalived.vip.present",
+        "local.keepalived.vrrp.role",
+        "local.keepalived.health_check.status",
+        "local.keepalived.failover.config",
+    }
+    numeric_units = {
+        "local.kafka.under_replicated_partitions": "分区数",
+        "local.kafka.under_min_isr": "分区数",
+        "local.kafka.zookeeper.latency": "毫秒",
+        "local.mysql.replication.lag": "秒",
+        "local.mysql.connection.pressure": "百分比",
+        "local.nacos.core_ports.health": "端口数",
+        "local.nacos.cluster.nodes": "节点数",
+        "local.nacos.error_log": "条数",
+        "local.rabbitmq.cluster.nodes": "节点数",
+        "local.rabbitmq.queue.backlog": "消息数",
+        "local.rabbitmq.connection.pressure": "数量",
+        "local.rocketmq.consumer.lag": "消息数",
+        "local.rocketmq.core_ports.health": "端口数",
+        "local.tomcat.http.health": "端口数",
+        "local.tomcat.access_log.errors": "条数",
+        "local.tomcat.jvm.memory": "MB",
+        "local.tomcat.thread_pool.pressure": "文件句柄数",
+    }
+    is_typed = metric_id.startswith(typed_prefixes) or metric_id in typed_keepalived
+    if is_typed:
+        parser = "parse_" + metric_id.removeprefix("local.").replace(".", "_")
+        unit = numeric_units.get(metric_id, "布尔")
+    else:
+        parser = "parse_middleware_text"
     return {
         "metric_id": metric_id,
         "name": name,
         "command": command,
         "timeout_sec": 15 if "日志" in name or "log" in metric_id else 10,
-        "parser": "parse_middleware_text",
+        "parser": parser,
         "unit": unit,
         "source_anchor": f"DOCX:{manual}:{priority}",
         "threshold_layer": "document-baseline",

@@ -838,7 +838,18 @@ def build_resolved_thresholds(
         try:
             from inspect import metrics as metrics_catalog
             for metric in metrics_catalog.METRICS:
-                if metric.get("parser") != "parse_middleware_text":
+                if (
+                    metric.get("parser") != "parse_middleware_text"
+                    and not metric.get("metric_id", "").startswith((
+                        "local.kafka.", "local.mysql.", "local.nacos.",
+                        "local.rabbitmq.", "local.redis.", "local.rocketmq.",
+                        "local.tomcat.",
+                        "local.keepalived.vip.present",
+                        "local.keepalived.vrrp.role",
+                        "local.keepalived.health_check.status",
+                        "local.keepalived.failover.config",
+                    ))
+                ):
                     continue
                 metric_id = metric["metric_id"]
                 baseline.setdefault(metric_id, {

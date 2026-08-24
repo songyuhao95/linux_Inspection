@@ -1396,6 +1396,316 @@ def parse_middleware_text(output: str) -> Dict[str, Any]:
     }
 
 
+# The seven newly-added middleware families use typed facts.  These parsers
+# intentionally return only a value and a bounded semantic summary; command
+# output is never retained as raw_value/normalized_value.
+_TYPED_MIDDLEWARE_PREFIXES = (
+    "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+    "local.redis.", "local.rocketmq.", "local.tomcat.",
+)
+_TYPED_KEEPALIVED_METRIC_IDS = frozenset(
+    {
+        "local.keepalived.vip.present",
+        "local.keepalived.vrrp.role",
+        "local.keepalived.health_check.status",
+        "local.keepalived.failover.config",
+    }
+)
+
+
+def _is_typed_middleware_metric(metric_id: str) -> bool:
+    return metric_id.startswith(_TYPED_MIDDLEWARE_PREFIXES) or metric_id in _TYPED_KEEPALIVED_METRIC_IDS
+
+
+def _typed_middleware_lines(output: str) -> List[str]:
+    lines = _content_lines(output)
+    if not lines:
+        raise ParseError("中间件命令无输出")
+    if any(line.startswith("INSPECT_MIDDLEWARE_NOT_RUNNING=") for line in lines):
+        raise ParseError("中间件服务进程未运行")
+    return lines
+
+
+def _typed_bool(output: str, positive: str, *, negative: str = "") -> Dict[str, Any]:
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if negative and re.search(negative, text, re.IGNORECASE):
+        value = False
+    elif re.search(positive, text, re.IGNORECASE):
+        value = True
+    else:
+        raise ParseError("中间件健康事实缺少可判定标记")
+    return {"value": value, "summary": f"typed_health={str(value).lower()}"}
+
+
+def _typed_number(output: str, pattern: str, *, cast=float, summary: str) -> Dict[str, Any]:
+    lines = _typed_middleware_lines(output)
+    match = re.search(pattern, "\n".join(lines), re.IGNORECASE | re.MULTILINE)
+    if not match:
+        raise ParseError("中间件数值事实缺失")
+    try:
+        value = cast(match.group(1))
+    except (TypeError, ValueError):
+        raise ParseError("中间件数值事实非法") from None
+    return {"value": value, "summary": summary.format(value=value)}
+
+
+def _typed_count(output: str, pattern: str, *, summary: str) -> Dict[str, Any]:
+    lines = _typed_middleware_lines(output)
+    matched_lines = [line for line in lines if re.search(pattern, line, re.IGNORECASE)]
+    if not matched_lines:
+        raise ParseError("中间件计数事实缺失或格式非法")
+    count = len(matched_lines)
+    return {"value": count, "summary": summary.format(value=count)}
+
+
+def parse_kafka_zookeeper_health(output):
+    return _typed_bool(output, r"\bimok\b|\bleader\b|\bfollower\b|\bzkServer\b", negative=r"connection refused|no leader|failed|error")
+
+
+def parse_kafka_broker_health(output):
+    return _typed_bool(output, r"kafka\.Kafka|\bLISTEN\b|started", negative=r"connection refused|not found|failed|error")
+
+
+def parse_kafka_controller_health(output):
+    return _typed_bool(output, r"controller|brokerid|controllerid", negative=r"no controller|null|failed|error")
+
+
+def parse_kafka_under_replicated_partitions(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if not re.search(r"\bTopic\b.*\bPartition\b|^\s*Topic:", text, re.IGNORECASE | re.MULTILINE):
+        raise ParseError("Kafka 未充分复制分区输出格式非法")
+    value = sum(1 for line in lines if re.search(r"^\s*Topic:", line, re.IGNORECASE))
+    return {"value": value, "summary": f"under_replicated_partitions={value}"}
+
+
+def parse_kafka_under_min_isr(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if re.search(r"no (?:under[-_ ]min|unavailable)|none|empty", text, re.IGNORECASE):
+        value = 0
+    elif not re.search(r"\bunder[-_ ]min\b|\bunavailable\b|\bTopic\b.*\bPartition\b|^\s*Topic:", text, re.IGNORECASE | re.MULTILINE):
+        raise ParseError("Kafka ISR 输出格式非法")
+    else:
+        value = sum(1 for line in lines if re.search(r"^\s*Topic:|under[-_ ]min|unavailable", line, re.IGNORECASE))
+    return {"value": value, "summary": f"under_min_isr={value}"}
+
+
+def parse_kafka_zookeeper_latency(output):
+    return _typed_number(output, r"zk_max_latency\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)", cast=float, summary="zk_max_latency={value}ms")
+
+
+def parse_mysql_service_health(output):
+    return _typed_bool(output, r"mysqld|\bLISTEN\b|active", negative=r"connection refused|inactive|not found|failed|error")
+
+
+def parse_mysql_login_version(output):
+    return _typed_bool(output, r"\b\d+\.\d+(?:\.\d+)?\b.*\b(?:3306|localhost|127\.0\.0\.1)\b|@@version", negative=r"access denied|error|failed")
+
+
+def parse_mysql_role_gtid(output):
+    return _typed_bool(output, r"server_id.*(?:ON|1)|gtid_mode.*ON.*enforce_gtid_consistency.*ON", negative=r"OFF|error|failed")
+
+
+def parse_mysql_replica_threads(output):
+    return _typed_bool(output, r"Replica_IO_Running\s*:\s*Yes.*Replica_SQL_Running\s*:\s*Yes|Replica_SQL_Running\s*:\s*Yes.*Replica_IO_Running\s*:\s*Yes", negative=r"Replica_(?:IO|SQL)_Running\s*:\s*No|Last_(?:IO|SQL)_Errno\s*:\s*[1-9]")
+
+
+def parse_mysql_replication_lag(output):
+    return _typed_number(output, r"Seconds_Behind_Source\s*:\s*(\d+)", cast=int, summary="replication_lag={value}s")
+
+
+def parse_mysql_connection_pressure(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    used = re.search(r"Max_used_connections\s+([0-9]+)", text, re.IGNORECASE)
+    limit = re.search(r"max_connections\s+([0-9]+)", text, re.IGNORECASE)
+    if not used or not limit or int(limit.group(1)) <= 0:
+        raise ParseError("MySQL 连接压力数值缺失")
+    value = round(int(used.group(1)) * 100.0 / int(limit.group(1)), 2)
+    return {"value": value, "summary": f"connection_pressure={value}%"}
+
+
+def parse_nacos_service_health(output):
+    return _typed_bool(output, r"com\.alibaba\.nacos|nacos\.home|startup|active", negative=r"inactive|failed|error|not found")
+
+
+def parse_nacos_core_ports_health(output):
+    return _typed_count(output, r":(?:8848|9848|9849|7848)\b.*LISTEN", summary="nacos_listening_ports={value}")
+
+
+def parse_nacos_http_health(output):
+    return _typed_bool(output, r"\bUP\b|HTTP/1\.[01]\s+200|\"status\"\s*:\s*\"UP\"", negative=r"HTTP/1\.[01]\s+5|connection refused|timeout|failed")
+
+
+def parse_nacos_cluster_nodes(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if not re.search(r"\"?alive\"?\s*[:=]\s*(?:true|false|1|0)", text, re.IGNORECASE):
+        raise ParseError("Nacos 集群节点输出格式非法")
+    value = sum(1 for line in lines if re.search(r"\"?alive\"?\s*[:=]\s*(?:true|1)", line, re.IGNORECASE))
+    return {"value": value, "summary": f"nacos_alive_nodes={value}"}
+
+
+def parse_nacos_mysql_connectivity(output):
+    return _typed_bool(output, r"spring\.sql\.init\.platform|db\.url\.0|succeeded|open", negative=r"connection refused|failed|error|not found")
+
+
+def parse_nacos_error_log(output):
+    return _typed_count(output, r"OutOfMemory|No DataSource|SQLException|Connection refused|FATAL|\bERROR\b|raft.*failed", summary="nacos_error_log_hits={value}")
+
+
+def parse_rabbitmq_service_health(output):
+    return _typed_bool(output, r"beam\.smp|rabbitmq-server|\bactive\b", negative=r"inactive|failed|not found|error")
+
+
+def parse_rabbitmq_node_health(output):
+    return _typed_bool(output, r"Ping succeeded|pong|running_applications|rabbit", negative=r"timeout|failed|error|not running")
+
+
+def parse_rabbitmq_cluster_nodes(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if not re.search(r"rabbit@[-A-Za-z0-9_.]+|running_nodes", text, re.IGNORECASE):
+        raise ParseError("RabbitMQ 集群节点输出格式非法")
+    value = len(set(re.findall(r"rabbit@[-A-Za-z0-9_.]+", text, re.IGNORECASE)))
+    return {"value": value, "summary": f"rabbitmq_running_nodes={value}"}
+
+
+def parse_rabbitmq_alarm_partition(output):
+    return _typed_bool(output, r"no alarms|partitions\s*:\s*\[?\s*\]?", negative=r"memory alarm|disk alarm|partition|\balarm\b")
+
+
+def parse_rabbitmq_queue_backlog(output):
+    lines = _typed_middleware_lines(output)
+    values = [int(x) for x in re.findall(r"(?:messages(?:_ready|_unacknowledged)?|backlog)\s*[=:]?\s*([0-9]+)", "\n".join(lines), re.IGNORECASE)]
+    if not values:
+        raise ParseError("RabbitMQ 队列积压数值缺失")
+    value = max(values)
+    return {"value": value, "summary": f"rabbitmq_queue_backlog={value}"}
+
+
+def parse_rabbitmq_connection_pressure(output):
+    lines = _typed_middleware_lines(output)
+    values = [int(x) for x in re.findall(r"(?:send_pend|messages_unacknowledged)\s*[=:]?\s*([0-9]+)", "\n".join(lines), re.IGNORECASE)]
+    if not values:
+        raise ParseError("RabbitMQ 连接压力数值缺失")
+    value = max(values)
+    return {"value": value, "summary": f"rabbitmq_connection_pressure={value}"}
+
+
+def parse_redis_service_health(output):
+    return _typed_bool(output, r"redis-server|\bactive\b", negative=r"inactive|failed|not found|error")
+
+
+def parse_redis_ping_version(output):
+    return _typed_bool(output, r"\bPONG\b|redis_version:", negative=r"NOAUTH|connection refused|timeout|error")
+
+
+def parse_redis_replication_health(output):
+    return _typed_bool(output, r"role:(?:master|slave)|master_link_status:up", negative=r"master_link_status:down|fail|error")
+
+
+def parse_redis_sentinel_health(output):
+    return _typed_bool(output, r"master|sentinel_masters|num-slaves", negative=r"s_down|o_down|disconnected|fail")
+
+
+def parse_redis_cluster_health(output):
+    return _typed_bool(output, r"cluster_state:ok|cluster_slots_ok:16384", negative=r"fail|noaddr|cluster_state:fail")
+
+
+def parse_redis_persistence_health(output):
+    return _typed_bool(output, r"loading:0|aof_enabled:1|appendfsync.*everysec", negative=r"aof_last_write_status:err|error|failed")
+
+
+def parse_rocketmq_namesrv_health(output):
+    return _typed_bool(output, r"NamesrvStartup|mqnamesrv|start(?:ed|up)", negative=r"inactive|failed|error")
+
+
+def parse_rocketmq_broker_health(output):
+    return _typed_bool(output, r"BrokerStartup|mqbroker|start(?:ed|up)", negative=r"FATAL|\bERROR\b|failed")
+
+
+def parse_rocketmq_core_ports_health(output):
+    return _typed_count(output, r":(?:9876|9877|10911|10912)\b.*LISTEN", summary="rocketmq_listening_ports={value}")
+
+
+def parse_rocketmq_cluster_registration(output):
+    return _typed_bool(output, r"BrokerName|Master|clusterName", negative=r"broker.*missing|failed|error")
+
+
+def parse_rocketmq_controller_sync_set(output):
+    return _typed_bool(output, r"leader|SyncStateSet|controller", negative=r"no leader|failed|error")
+
+
+def parse_rocketmq_consumer_lag(output):
+    lines = _typed_middleware_lines(output)
+    values = [int(x) for x in re.findall(r"(?:diff|lag|behind)\s*[=:]?\s*([0-9]+)", "\n".join(lines), re.IGNORECASE)]
+    if not values:
+        raise ParseError("RocketMQ 消费堆积数值缺失")
+    value = max(values)
+    return {"value": value, "summary": f"rocketmq_consumer_lag={value}"}
+
+
+def parse_tomcat_service_health(output):
+    return _typed_bool(output, r"org\.apache\.catalina\.startup\.Bootstrap|active", negative=r"failed|inactive|not found")
+
+
+def parse_tomcat_http_health(output):
+    return _typed_count(output, r":(?:8080|8443|8005)\b.*LISTEN", summary="tomcat_listening_ports={value}")
+
+
+def parse_tomcat_access_log_errors(output):
+    return _typed_count(output, r"SEVERE|Exception|OutOfMemoryError|Address already in use", summary="tomcat_error_log_hits={value}")
+
+
+def parse_tomcat_jvm_memory(output):
+    lines = _typed_middleware_lines(output)
+    match = re.search(r"^\s*\d+\s+(\d+)\s+\d+\s+[0-9.]+\s+", "\n".join(lines), re.MULTILINE)
+    if not match:
+        match = re.search(r"rss\s*[=:]\s*(\d+)", "\n".join(lines), re.IGNORECASE)
+    if not match:
+        raise ParseError("Tomcat JVM RSS 数值缺失")
+    value = round(int(match.group(1)) / 1024.0, 2)
+    return {"value": value, "summary": f"tomcat_rss={value}MB"}
+
+
+def parse_tomcat_thread_pool_pressure(output):
+    return _typed_number(output, r"\bfd\s*=\s*(\d+)", cast=int, summary="tomcat_open_fds={value}")
+
+
+def parse_tomcat_security_baseline(output):
+    return _typed_bool(
+        output,
+        r"<Server|<Connector|autoDeploy\s*=\s*[\"']?false|deployOnStartup\s*=\s*[\"']?false|server\s*=",
+        negative=r"autoDeploy\s*=\s*[\"']?true|deployOnStartup\s*=\s*[\"']?true|failed|error",
+    )
+
+
+def parse_keepalived_vip_present(output):
+    return _typed_bool(output, r"\bUP\b.*\b(?:inet|[0-9]{1,3}(?:\.[0-9]{1,3}){3})\b|virtual_ipaddress", negative=r"\bDOWN\b|missing|not found|error")
+
+
+def parse_keepalived_vrrp_role(output):
+    return _typed_bool(output, r"\b(?:MASTER|BACKUP)\b.*(?:priority|interface|virtual_router_id)|state\s+(?:MASTER|BACKUP)", negative=r"\bFAULT\b|double master|error")
+
+
+def parse_keepalived_health_check_status(output):
+    return _typed_bool(output, r"track_script|healthcheck|script", negative=r"not found|failed|permission denied|error")
+
+
+def parse_keepalived_failover_config(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    markers = ("notify_master", "notify_backup", "virtual_ipaddress", "track_script")
+    present = [marker for marker in markers if re.search(marker, text, re.IGNORECASE)]
+    if not present:
+        raise ParseError("Keepalived 故障切换配置输出格式非法")
+    value = len(present) == len(markers)
+    return {"value": value, "summary": f"keepalived_failover_config={str(value).lower()}"}
+
+
 # --------------------------------------------------------------------------
 # 解析器注册表（metrics.py parser 字段名 ↔ 函数；TD §5.2 按名注册）
 # --------------------------------------------------------------------------
@@ -1456,8 +1766,11 @@ PARSERS: Dict[str, Any] = {
 }
 
 for _metric in metrics_registry.METRICS:
-    if _metric.get("parser") == "parse_middleware_text":
+    _parser_name = _metric.get("parser")
+    if _parser_name == "parse_middleware_text":
         PARSERS[_metric["metric_id"]] = parse_middleware_text
+    elif _parser_name in globals():
+        PARSERS[_metric["metric_id"]] = globals()[_parser_name]
 
 # parser 字段名与注册表一一对应（tests 机械校验）
 PARSER_NAMES = {m["metric_id"]: m["parser"] for m in metrics_registry.METRICS}
@@ -2164,6 +2477,52 @@ def _judge_middleware_text(parsed, resolved, profile=None):
     return {"status": status, "rule": _baseline_rule(resolved, status)}
 
 
+_MIDDLEWARE_NUMERIC_THRESHOLDS = {
+    "local.kafka.under_replicated_partitions": (0, 2),
+    "local.kafka.under_min_isr": (0, 0),
+    "local.kafka.zookeeper.latency": (50, 200),
+    "local.mysql.replication.lag": (0, 30),
+    "local.mysql.connection.pressure": (80, 95),
+    "local.nacos.cluster.nodes": (2, 1),
+    "local.nacos.core_ports.health": (4, 2),
+    "local.rocketmq.core_ports.health": (4, 2),
+    "local.tomcat.http.health": (3, 2),
+    "local.nacos.error_log": (0, 10),
+    "local.tomcat.access_log.errors": (0, 10),
+    "local.rabbitmq.cluster.nodes": (3, 2),
+    "local.rabbitmq.queue.backlog": (100, 1000),
+    "local.rabbitmq.connection.pressure": (100, 1000),
+    "local.rocketmq.consumer.lag": (0, 100),
+    "local.tomcat.jvm.memory": (2048, 4096),
+    "local.tomcat.thread_pool.pressure": (10000, 50000),
+}
+
+
+def _judge_typed_middleware(parsed, resolved, profile=None):
+    value = parsed.get("value")
+    metric_id = parsed.get("metric_id")
+    if isinstance(value, bool):
+        status = STATUS_OK if value else STATUS_CRIT
+    else:
+        thresholds = _MIDDLEWARE_NUMERIC_THRESHOLDS.get(metric_id)
+        if thresholds is None:
+            status = STATUS_UNKNOWN
+        else:
+            ok_limit, warn_limit = thresholds
+            if metric_id in {
+                "local.nacos.cluster.nodes",
+                "local.nacos.core_ports.health",
+                "local.rocketmq.core_ports.health",
+                "local.tomcat.http.health",
+            }:
+                status = STATUS_OK if value >= ok_limit else STATUS_WARN if value >= warn_limit else STATUS_CRIT
+            elif metric_id == "local.rabbitmq.cluster.nodes":
+                status = STATUS_OK if value >= ok_limit else STATUS_WARN if value >= warn_limit else STATUS_CRIT
+            else:
+                status = STATUS_OK if value <= ok_limit else STATUS_WARN if value <= warn_limit else STATUS_CRIT
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
 # 指标 → 判定函数（数值边界全部来自 MR §5/§6 已批准基线）
 JUDGERS: Dict[str, Any] = {
     "local.process.present": _judge_process_present,
@@ -2224,6 +2583,22 @@ for _metric in metrics_registry.METRICS:
     if _metric.get("parser") == "parse_middleware_text":
         JUDGERS[_metric["metric_id"]] = _judge_middleware_text
 
+
+def _typed_judger(metric_id):
+    def judge(parsed, resolved, profile=None):
+        typed = dict(parsed)
+        typed["metric_id"] = metric_id
+        return _judge_typed_middleware(typed, resolved, profile)
+    return judge
+
+
+for _metric in metrics_registry.METRICS:
+    if (
+        _is_typed_middleware_metric(_metric.get("metric_id", ""))
+        and _metric.get("parser") != "parse_middleware_text"
+    ):
+        JUDGERS[_metric["metric_id"]] = _typed_judger(_metric["metric_id"])
+
 # 数值化指标（normalized_value 非 null，可参与外部配置数值规则；MR §5）
 NUMERIC_METRIC_IDS = frozenset(
     {
@@ -2250,6 +2625,18 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.elasticsearch.security.accounts",
         "local.elasticsearch.certificate.validity",
         "local.elasticsearch.system.parameters",
+        "local.kafka.under_replicated_partitions",
+        "local.kafka.under_min_isr",
+        "local.kafka.zookeeper.latency",
+        "local.mysql.replication.lag",
+        "local.mysql.connection.pressure",
+        "local.nacos.cluster.nodes",
+        "local.rabbitmq.cluster.nodes",
+        "local.rabbitmq.queue.backlog",
+        "local.rabbitmq.connection.pressure",
+        "local.rocketmq.consumer.lag",
+        "local.tomcat.jvm.memory",
+        "local.tomcat.thread_pool.pressure",
     }
 )
 
@@ -2307,11 +2694,9 @@ def _normalized_value(metric_id: str, parsed: Dict[str, Any]) -> Optional[float]
         return float(parsed["days_remaining"])
     if metric_id == "local.elasticsearch.system.parameters":
         return float(parsed["max_map_count"])
-    if metric_id in PARSERS and metric_id.startswith((
-        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
-        "local.redis.", "local.rocketmq.", "local.tomcat.",
-    )):
-        return float(parsed.get("line_count", 0))
+    if _is_typed_middleware_metric(metric_id):
+        value = parsed.get("value")
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
     return None
 
 
@@ -2395,11 +2780,8 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
         return f"net_admin={parsed['has_net_admin']};net_raw={parsed['has_net_raw']}"
     if metric_id == "local.elasticsearch.process.present":
         return "present" if parsed["present"] else "absent"
-    if metric_id.startswith((
-        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
-        "local.redis.", "local.rocketmq.", "local.tomcat.",
-    )):
-        return parsed.get("text", "")
+    if _is_typed_middleware_metric(metric_id):
+        return parsed.get("value")
     if metric_id == "local.elasticsearch.version":
         return parsed["version"]
     if metric_id == "local.elasticsearch.cluster.health":
@@ -2695,11 +3077,8 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
             return f"仓库数量={parsed['repository_count']}；verify={parsed['verify_ok']}"
         if metric_id == "local.elasticsearch.system.parameters":
             return f"max_map_count={parsed['max_map_count']}；swap_used={parsed['swap_used']}；nofile={parsed['nofile']}；nproc={parsed['nproc']}；memlock={parsed['memlock']}"
-    if metric_id.startswith((
-        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
-        "local.redis.", "local.rocketmq.", "local.tomcat.",
-    )):
-        return parsed.get("text", "")
+    if _is_typed_middleware_metric(metric_id):
+        return parsed.get("summary", "")
     return ""
 
 
@@ -2974,7 +3353,7 @@ def _error_host_document(
         "run_id": run_id,
         "inspection_id": inspection_id,
         "host": {
-            "name": host_result["host"],
+            "name": host_result.get("host", host_result.get("name", "")),
             "ip": mask_output(str(host_result.get("ip", ""))),
             "inventory_source": inventory_source,
             "product_profiles": product_profiles,
@@ -3261,7 +3640,7 @@ def normalize_host_result(
         "run_id": run_id,
         "inspection_id": inspection_id,
         "host": {
-            "name": host_result["host"],
+            "name": host_result.get("host", host_result.get("name", "")),
             "ip": mask_output(str(host_result.get("ip", ""))),
             "inventory_source": inventory_source,
             "product_profiles": product_profiles,
@@ -3361,7 +3740,7 @@ def normalize_run_results(
                 meta=meta,
             )
         )
-        host_errors[host_result["host"]] = host_result.get("host_error")
+        host_errors[host_result.get("host", host_result.get("name", ""))] = host_result.get("host_error")
     return {
         "documents": documents,
         "host_errors": host_errors,

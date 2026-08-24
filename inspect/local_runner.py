@@ -283,6 +283,7 @@ def run_local(
         host_ip=str(host.ip),
         elasticsearch_whitelist=elasticsearch_whitelist,
     )
+    metric_results = runner_mod.select_middleware_metrics(metric_results)
     host_result = runner_mod.build_host_result(
         host,
         probe_matrix,
