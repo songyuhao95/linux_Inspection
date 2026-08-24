@@ -541,48 +541,48 @@ _ADDITIONAL_COMMANDS = {
     "local.keepalived.vrrp.role": "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>",
     "local.keepalived.health_check.status": "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>",
     "local.keepalived.failover.config": "grep -E 'notify_master|notify_backup|notify_fault|virtual_ipaddress|track_script' <KEEPALIVED_CONF>",
-    "local.kafka.zookeeper.health": "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181; zkServer.sh status <zoo.cfg>",
-    "local.kafka.broker.health": "pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'",
-    "local.kafka.controller.health": "zookeeper-shell.sh <ZK_CONNECT> get /controller",
-    "local.kafka.under_replicated_partitions": "kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions",
-    "local.kafka.under_min_isr": "kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions; kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions",
-    "local.kafka.zookeeper.latency": "echo mntr | nc -w 3 127.0.0.1 2181 | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections'",
-    "local.mysql.service.health": "pgrep -fa 'mysqld.*defaults-file=/opt/mysql/conf/my.cnf'; ss -tlnp | grep ':3306'",
-    "local.mysql.login.version": "mysql --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@version,@@hostname,@@port;\"",
-    "local.mysql.role.gtid": "mysql -u<USER> -p -e \"SELECT @@server_id,@@gtid_mode,@@enforce_gtid_consistency,@@read_only,@@super_read_only;\"",
-    "local.mysql.replica.threads": "mysql -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'",
-    "local.mysql.replication.lag": "mysql -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Seconds_Behind_Source|Read_Source_Log_Pos|Exec_Source_Log_Pos'",
-    "local.mysql.connection.pressure": "mysql -u<USER> -p -e \"SHOW GLOBAL STATUS LIKE 'Threads_connected'; SHOW GLOBAL STATUS LIKE 'Max_used_connections'; SHOW VARIABLES LIKE 'max_connections';\"",
-    "local.nacos.service.health": "pgrep -fa 'com.alibaba.nacos|nacos.home|/opt/nacos'",
+    "local.kafka.zookeeper.health": "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181; <ZOOKEEPER_TOOL> status <ZOOKEEPER_CONF>",
+    "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'; tail -n 50 <KAFKA_LOG>/server.log",
+    "local.kafka.controller.health": "<ZOOKEEPER_SHELL> <ZK_CONNECT> get /controller",
+    "local.kafka.under_replicated_partitions": "<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions",
+    "local.kafka.under_min_isr": "<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions; <KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions",
+    "local.kafka.zookeeper.latency": "echo mntr | nc -w 3 127.0.0.1 2181 | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections'; tail -n 50 <ZOOKEEPER_LOG>/zookeeper.log",
+    "local.mysql.service.health": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -e \"SELECT 1;\"; test -r <MYSQL_CONF>; ls -ld <MYSQL_LOG>",
+    "local.mysql.login.version": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@version,@@hostname,@@port;\"",
+    "local.mysql.role.gtid": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@server_id,@@gtid_mode,@@enforce_gtid_consistency,@@read_only,@@super_read_only;\"",
+    "local.mysql.replica.threads": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'",
+    "local.mysql.replication.lag": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Seconds_Behind_Source|Read_Source_Log_Pos|Exec_Source_Log_Pos'",
+    "local.mysql.connection.pressure": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SHOW GLOBAL STATUS LIKE 'Threads_connected'; SHOW GLOBAL STATUS LIKE 'Max_used_connections'; SHOW VARIABLES LIKE 'max_connections';\"",
+    "local.nacos.service.health": "test -x <NACOS_BIN>; pgrep -fa 'com.alibaba.nacos|nacos.home|<NACOS_HOME>'; tail -n 50 <NACOS_LOG>/start.out",
     "local.nacos.core_ports.health": "ss -tlnp | egrep ':8848|:9848|:9849|:7848'",
     "local.nacos.http.health": "curl -sS --connect-timeout 3 http://127.0.0.1:8848/nacos/actuator/health",
     "local.nacos.cluster.nodes": "curl -sS 'http://127.0.0.1:8848/nacos/v2/core/cluster/node/list?accessToken=<TOKEN>'",
-    "local.nacos.mysql.connectivity": "grep -E '^(spring.sql.init.platform|db.num|db.url.0|db.user.0)' /opt/nacos/conf/application.properties; nc -vz <MYSQL_HOST> 3306",
-    "local.nacos.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|No DataSource|SQLException|Connection refused|raft|failed' /opt/nacos/logs | tail -80",
-    "local.rabbitmq.service.health": "pgrep -fa 'beam.smp|rabbitmq-server'; systemctl is-active rabbitmq",
-    "local.rabbitmq.node.health": "rabbitmq-diagnostics ping; rabbitmq-diagnostics status",
-    "local.rabbitmq.cluster.nodes": "rabbitmqctl cluster_status",
-    "local.rabbitmq.alarm.partition": "rabbitmq-diagnostics check_local_alarms; rabbitmqctl cluster_status | egrep -i 'alarms|partitions|running_nodes'",
-    "local.rabbitmq.queue.backlog": "rabbitmqctl list_queues -p / name state messages messages_ready messages_unacknowledged consumers",
-    "local.rabbitmq.connection.pressure": "rabbitmqctl list_connections state channels send_pend; rabbitmqctl list_channels messages_unacknowledged",
-    "local.redis.service.health": "pgrep -fa 'redis-server.*(6379|16379|7000)'; systemctl is-active redis",
-    "local.redis.ping.version": "redis-cli -h 127.0.0.1 -p <PORT> PING; redis-cli -h 127.0.0.1 -p <PORT> INFO server",
-    "local.redis.replication.health": "redis-cli -p <PORT> INFO replication",
-    "local.redis.sentinel.health": "redis-cli -p 26379 INFO sentinel; redis-cli -p 26379 SENTINEL masters",
-    "local.redis.cluster.health": "redis-cli -p 7000 CLUSTER INFO; redis-cli -p 7000 CLUSTER NODES",
-    "local.redis.persistence.health": "redis-cli -p <PORT> INFO persistence; redis-cli -p <PORT> CONFIG GET appendonly appendfsync dir",
-    "local.rocketmq.namesrv.health": "pgrep -fa 'NamesrvStartup|mqnamesrv'; tail -n 50 /opt/rocketmq/logs/rocketmqlogs/namesrv.log",
-    "local.rocketmq.broker.health": "pgrep -fa 'BrokerStartup|mqbroker'; tail -n 50 /opt/rocketmq/logs/rocketmqlogs/broker.log",
+    "local.nacos.mysql.connectivity": "grep -E '^(spring.sql.init.platform|db.num|db.url.0|db.user.0)' <NACOS_CONF>; nc -vz <MYSQL_HOST> 3306",
+    "local.nacos.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|No DataSource|SQLException|Connection refused|raft|failed' <NACOS_LOG> | tail -80",
+    "local.rabbitmq.service.health": "test -r <RABBITMQ_CONF>; test -x <RABBITMQ_BIN>; pgrep -fa 'beam.smp|rabbitmq-server'; systemctl is-active rabbitmq; tail -n 50 <RABBITMQ_LOG>/rabbit.log",
+    "local.rabbitmq.node.health": "<RABBITMQ_DIAGNOSTICS> ping; <RABBITMQ_DIAGNOSTICS> status",
+    "local.rabbitmq.cluster.nodes": "<RABBITMQCTL> cluster_status",
+    "local.rabbitmq.alarm.partition": "<RABBITMQ_DIAGNOSTICS> check_local_alarms; <RABBITMQCTL> cluster_status | egrep -i 'alarms|partitions|running_nodes'",
+    "local.rabbitmq.queue.backlog": "<RABBITMQCTL> list_queues -p / name state messages messages_ready messages_unacknowledged consumers",
+    "local.rabbitmq.connection.pressure": "<RABBITMQCTL> list_connections state channels send_pend; <RABBITMQCTL> list_channels messages_unacknowledged",
+    "local.redis.service.health": "test -x <REDIS_BIN>; test -r <REDIS_CONF>; pgrep -fa 'redis-server.*(6379|16379|7000)'; systemctl is-active redis; ls -ld <REDIS_LOG>",
+    "local.redis.ping.version": "<REDIS_CLI> -h 127.0.0.1 -p <PORT> PING; <REDIS_CLI> -h 127.0.0.1 -p <PORT> INFO server",
+    "local.redis.replication.health": "<REDIS_CLI> -p <PORT> INFO replication",
+    "local.redis.sentinel.health": "<REDIS_CLI> -p 26379 INFO sentinel; <REDIS_CLI> -p 26379 SENTINEL masters",
+    "local.redis.cluster.health": "<REDIS_CLI> -p 7000 CLUSTER INFO; <REDIS_CLI> -p 7000 CLUSTER NODES",
+    "local.redis.persistence.health": "<REDIS_CLI> -p <PORT> INFO persistence; <REDIS_CLI> -p <PORT> CONFIG GET appendonly appendfsync dir",
+    "local.rocketmq.namesrv.health": "test -d <ROCKETMQ_CONF>; pgrep -fa 'NamesrvStartup|mqnamesrv'; tail -n 50 <ROCKETMQ_LOG>/rocketmqlogs/namesrv.log 2>/dev/null; tail -n 50 <ROCKETMQ_HOME>/logs/rocketmqlogs/namesrv.log",
+    "local.rocketmq.broker.health": "test -d <ROCKETMQ_CONF>; pgrep -fa 'BrokerStartup|mqbroker'; tail -n 50 <ROCKETMQ_LOG>/rocketmqlogs/broker.log 2>/dev/null; tail -n 50 <ROCKETMQ_HOME>/logs/rocketmqlogs/broker.log",
     "local.rocketmq.core_ports.health": "ss -tlnp | egrep ':9876|:9877|:10911|:10912'",
-    "local.rocketmq.cluster.registration": "mqadmin clusterList -n <NAMESRV_ADDR>",
-    "local.rocketmq.controller.sync_set": "mqadmin getControllerMetaData -a <CONTROLLER_ADDR>; mqadmin getSyncStateSet -a <CONTROLLER_ADDR> -b <BROKER>",
-    "local.rocketmq.consumer.lag": "mqadmin consumerProgress -n <NAMESRV_ADDR>; mqadmin statsAll -n <NAMESRV_ADDR>",
-    "local.tomcat.service.health": "ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'",
+    "local.rocketmq.cluster.registration": "<MQADMIN> clusterList -n <NAMESRV_ADDR>",
+    "local.rocketmq.controller.sync_set": "<MQADMIN> getControllerMetaData -a <CONTROLLER_ADDR>; <MQADMIN> getSyncStateSet -a <CONTROLLER_ADDR> -b <BROKER>",
+    "local.rocketmq.consumer.lag": "<MQADMIN> consumerProgress -n <NAMESRV_ADDR>; <MQADMIN> statsAll -n <NAMESRV_ADDR>",
+    "local.tomcat.service.health": "test -x <TOMCAT_BIN>; ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'",
     "local.tomcat.http.health": "ss -lntp | egrep '(:8080|:8443|:8005)\\b'",
-    "local.tomcat.access_log.errors": "tail -200 /opt/tomcat/logs/catalina.out | egrep -i 'Server startup in|SEVERE|Exception|OutOfMemoryError|Address already in use'",
+    "local.tomcat.access_log.errors": "tail -200 <TOMCAT_LOG>/catalina.out | egrep -i 'Server startup in|SEVERE|Exception|OutOfMemoryError|Address already in use'",
     "local.tomcat.jvm.memory": "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); ps -o pid,rss,vsz,%mem,etime,cmd -p \"$PID\"; free -h",
     "local.tomcat.thread_pool.pressure": "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); echo fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); echo threads=$(ls /proc/$PID/task 2>/dev/null | wc -l); cat /proc/$PID/limits 2>/dev/null | egrep 'Max open files|Max processes'",
-    "local.tomcat.security.baseline": "egrep -n '(<Server port=|<Connector|autoDeploy=|deployOnStartup=|server=)' /opt/tomcat/conf/server.xml",
+    "local.tomcat.security.baseline": "egrep -n '(<Server port=|<Connector|autoDeploy=|deployOnStartup=|server=)' <TOMCAT_CONF>",
 }
 for _middleware_metric_id, _middleware_command in _ADDITIONAL_COMMANDS.items():
     _COMMAND_TEMPLATES[_middleware_metric_id] = {
@@ -593,53 +593,124 @@ for _middleware_metric_id, _middleware_command in _ADDITIONAL_COMMANDS.items():
     }
 
 _ADDITIONAL_PLACEHOLDER_KEYS = {
-    "local.keepalived.vip.present": {"<KEEPALIVED_CONF>": "keepalived_conf"},
-    "local.keepalived.vrrp.role": {"<KEEPALIVED_CONF>": "keepalived_conf"},
+    "local.keepalived.vip.present": {"<KEEPALIVED_CONF>": ("keepalived_conf", "keepalived.conf")},
+    "local.keepalived.vrrp.role": {"<KEEPALIVED_CONF>": ("keepalived_conf", "keepalived.conf")},
     "local.keepalived.health_check.status": {
-        "<KEEPALIVED_CONF>": "keepalived_conf",
+        "<KEEPALIVED_CONF>": ("keepalived_conf", "keepalived.conf"),
         "<HEALTHCHECK_SCRIPT>": "keepalived_healthcheck_script",
     },
-    "local.keepalived.failover.config": {"<KEEPALIVED_CONF>": "keepalived_conf"},
-    "local.kafka.zookeeper.health": {"<zoo.cfg>": "kafka_zookeeper_conf"},
-    "local.kafka.controller.health": {"<ZK_CONNECT>": "kafka_zookeeper_connect"},
+    "local.keepalived.failover.config": {"<KEEPALIVED_CONF>": ("keepalived_conf", "keepalived.conf")},
+    "local.kafka.zookeeper.health": {
+        "<ZOOKEEPER_TOOL>": ("zookeeper_bin", "zkServer.sh"),
+        "<ZOOKEEPER_CONF>": "zookeeper_conf",
+    },
+    "local.kafka.broker.health": {"<KAFKA_LOG>": "kafka_log", "<KAFKA_CONF>": "kafka_conf"},
+    "local.kafka.controller.health": {
+        "<ZOOKEEPER_SHELL>": ("zookeeper_bin", "zookeeper-shell.sh"),
+        "<ZK_CONNECT>": "kafka_zookeeper_connect",
+    },
     "local.kafka.under_replicated_partitions": {
+        "<KAFKA_TOPICS>": ("kafka_bin", "kafka-topics.sh"),
         "<BOOTSTRAP>": "kafka_bootstrap", "<SSL_CONFIG>": "kafka_ssl_config",
     },
     "local.kafka.under_min_isr": {
+        "<KAFKA_TOPICS>": ("kafka_bin", "kafka-topics.sh"),
         "<BOOTSTRAP>": "kafka_bootstrap", "<SSL_CONFIG>": "kafka_ssl_config",
     },
-    "local.mysql.login.version": {"<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user"},
-    "local.mysql.role.gtid": {"<USER>": "mysql_user"},
-    "local.mysql.replica.threads": {"<USER>": "mysql_user"},
-    "local.mysql.replication.lag": {"<USER>": "mysql_user"},
-    "local.mysql.connection.pressure": {"<USER>": "mysql_user"},
-    "local.nacos.cluster.nodes": {"<TOKEN>": "nacos_token"},
-    "local.nacos.mysql.connectivity": {"<MYSQL_HOST>": "mysql_host"},
-    "local.redis.ping.version": {"<PORT>": "redis_port"},
-    "local.redis.replication.health": {"<PORT>": "redis_port"},
-    "local.redis.persistence.health": {"<PORT>": "redis_port"},
-    "local.rocketmq.cluster.registration": {"<NAMESRV_ADDR>": "rocketmq_namesrv_addr"},
-    "local.rocketmq.controller.sync_set": {
-        "<CONTROLLER_ADDR>": "rocketmq_controller_addr", "<BROKER>": "rocketmq_broker",
+    "local.kafka.zookeeper.latency": {
+        "<ZOOKEEPER_LOG>": "zookeeper_log",
     },
-    "local.rocketmq.consumer.lag": {"<NAMESRV_ADDR>": "rocketmq_namesrv_addr"},
+    "local.mysql.service.health": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket",
+        "<MYSQL_CONF>": "mysql_conf", "<MYSQL_LOG>": "mysql_log",
+        "<USER>": "mysql_user",
+    },
+    "local.mysql.login.version": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.mysql.role.gtid": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.mysql.replica.threads": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.mysql.replication.lag": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.mysql.connection.pressure": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.nacos.service.health": {
+        "<NACOS_BIN>": "nacos_bin", "<NACOS_HOME>": "nacos_home", "<NACOS_LOG>": "nacos_log",
+    },
+    "local.nacos.cluster.nodes": {"<TOKEN>": "nacos_token"},
+    "local.nacos.mysql.connectivity": {"<NACOS_CONF>": "nacos_conf", "<MYSQL_HOST>": "mysql_host"},
+    "local.nacos.error_log": {"<NACOS_LOG>": "nacos_log"},
+    "local.rabbitmq.service.health": {
+        "<RABBITMQ_CONF>": "rabbitmq_conf", "<RABBITMQ_BIN>": "rabbitmq_bin", "<RABBITMQ_LOG>": "rabbitmq_log",
+    },
+    "local.rabbitmq.node.health": {"<RABBITMQ_DIAGNOSTICS>": ("rabbitmq_bin", "rabbitmq-diagnostics")},
+    "local.rabbitmq.cluster.nodes": {"<RABBITMQCTL>": ("rabbitmq_bin", "rabbitmqctl")},
+    "local.rabbitmq.alarm.partition": {
+        "<RABBITMQ_DIAGNOSTICS>": ("rabbitmq_bin", "rabbitmq-diagnostics"),
+        "<RABBITMQCTL>": ("rabbitmq_bin", "rabbitmqctl"),
+    },
+    "local.rabbitmq.queue.backlog": {"<RABBITMQCTL>": ("rabbitmq_bin", "rabbitmqctl")},
+    "local.rabbitmq.connection.pressure": {"<RABBITMQCTL>": ("rabbitmq_bin", "rabbitmqctl")},
+    "local.redis.service.health": {
+        "<REDIS_BIN>": "redis_bin", "<REDIS_CONF>": ("redis_conf", "redis.conf"), "<REDIS_LOG>": "redis_log",
+    },
+    "local.redis.ping.version": {"<REDIS_CLI>": ("redis_bin", "redis-cli"), "<PORT>": "redis_port"},
+    "local.redis.replication.health": {"<REDIS_CLI>": ("redis_bin", "redis-cli"), "<PORT>": "redis_port"},
+    "local.redis.sentinel.health": {"<REDIS_CLI>": ("redis_bin", "redis-cli")},
+    "local.redis.cluster.health": {"<REDIS_CLI>": ("redis_bin", "redis-cli")},
+    "local.redis.persistence.health": {"<REDIS_CLI>": ("redis_bin", "redis-cli"), "<PORT>": "redis_port"},
+    "local.rocketmq.namesrv.health": {"<ROCKETMQ_CONF>": "rocketmq_conf", "<ROCKETMQ_LOG>": "rocketmq_log", "<ROCKETMQ_HOME>": "rocketmq_home"},
+    "local.rocketmq.broker.health": {"<ROCKETMQ_CONF>": "rocketmq_conf", "<ROCKETMQ_LOG>": "rocketmq_log", "<ROCKETMQ_HOME>": "rocketmq_home"},
+    "local.rocketmq.cluster.registration": {"<MQADMIN>": ("rocketmq_bin", "mqadmin"), "<NAMESRV_ADDR>": "rocketmq_namesrv_addr"},
+    "local.rocketmq.controller.sync_set": {
+        "<MQADMIN>": ("rocketmq_bin", "mqadmin"), "<CONTROLLER_ADDR>": "rocketmq_controller_addr", "<BROKER>": "rocketmq_broker",
+    },
+    "local.rocketmq.consumer.lag": {"<MQADMIN>": ("rocketmq_bin", "mqadmin"), "<NAMESRV_ADDR>": "rocketmq_namesrv_addr"},
+    "local.tomcat.service.health": {"<TOMCAT_BIN>": ("tomcat_bin", "catalina.sh")},
+    "local.tomcat.access_log.errors": {"<TOMCAT_LOG>": "tomcat_log"},
+    "local.tomcat.security.baseline": {"<TOMCAT_CONF>": ("tomcat_conf", "server.xml")},
 }
 
 _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
-    "keepalived_conf": "/etc/keepalived/keepalived.conf",
+    "keepalived_conf": "/opt/keepalived/conf/keepalived.conf",
     "keepalived_healthcheck_script": "/etc/keepalived/check.sh",
     "kafka_zookeeper_conf": "/opt/zookeeper/conf/zoo.cfg",
+    "zookeeper_bin": "/opt/redis/bin/redis-server",
+    "zookeeper_log": "/opt/zookeeper/logs",
+    "kafka_log": "/opt/kafka/logs/",
     "kafka_zookeeper_connect": "127.0.0.1:2181",
     "kafka_bootstrap": "127.0.0.1:9093",
     "kafka_ssl_config": "/opt/kafka/config/client.properties",
-    "mysql_socket": "/opt/mysql/data/mysql.sock",
+    "mysql_socket": "/opt/mysql/tmp/mysql.sock",
+    "mysql_bin": "/opt/mysql/bin/mysql",
+    "mysql_conf": "/opt/mysql/conf/my.cnf",
+    "mysql_log": "/opt/mysql/logs",
     "mysql_user": "root",
     "mysql_host": "127.0.0.1",
     "nacos_token": "CHANGE_ME",
+    "nacos_home": "/opt/nacos",
+    "nacos_bin": "/opt/nacos/bin/startup.sh",
+    "nacos_conf": "/opt/nacos/conf/application.properties",
+    "nacos_log": "/opt/nacos/logs",
+    "rabbitmq_bin": "/opt/rabbitmq/sbin/rabbitmq-server",
+    "rabbitmq_log": "/opt/rabbitmq/logs",
+    "redis_bin": "/opt/redis/bin/redis-server",
+    "redis_conf": "/opt/redis/conf",
+    "redis_log": "/opt/redis/logs",
     "redis_port": "6379",
     "rocketmq_namesrv_addr": "127.0.0.1:9876",
     "rocketmq_controller_addr": "127.0.0.1:9877",
     "rocketmq_broker": "broker-a",
+    "rocketmq_log": "/opt/rabbitmq/logs",
+    "tomcat_bin": "/opt/tomcat/bin",
+    "tomcat_conf": "/opt/tomcat/conf",
+    "tomcat_log": "/opt/tomcat/logs",
 }
 _SAFE_ADDITIONAL_VALUE = re.compile(r"[A-Za-z0-9_./:@%+=,-]+")
 _ADDITIONAL_GENERATED_ALLOWED_BINARIES = (
@@ -655,7 +726,7 @@ _ADDITIONAL_UNSAFE_GENERATED_TOKENS = re.compile(
 
 
 def _additional_profile_value(profile: Dict[str, Any], key: str) -> str:
-    raw = profile.get(key, _ADDITIONAL_PLACEHOLDER_DEFAULTS[key])
+    raw = profile[key] if key in profile else _ADDITIONAL_PLACEHOLDER_DEFAULTS[key]
     if isinstance(raw, list):
         raw = raw[0] if raw else _ADDITIONAL_PLACEHOLDER_DEFAULTS[key]
     value = str(raw)
@@ -664,10 +735,35 @@ def _additional_profile_value(profile: Dict[str, Any], key: str) -> str:
     return value
 
 
+def _derive_additional_path(value: str, suffix: Optional[str]) -> str:
+    """Derive a sibling tool/file from a configured absolute path safely."""
+    if not suffix:
+        return value
+    if not value.startswith("/") or not _SAFE_ADDITIONAL_VALUE.fullmatch(value):
+        raise CommandConfigError(f"additional middleware path 非法: {value!r}")
+    base = value.rstrip("/")
+    sibling_tools = {
+        "kafka-topics.sh", "zkServer.sh", "zookeeper-shell.sh",
+        "rabbitmq-diagnostics", "rabbitmqctl", "redis-cli", "mqadmin",
+    }
+    if suffix in sibling_tools:
+        parent = base.rsplit("/", 1)[0]
+        return f"{parent}/{suffix}"
+    if value.endswith("/") or "." not in base.rsplit("/", 1)[-1]:
+        return f"{base}/{suffix}"
+    parent = base.rsplit("/", 1)[0]
+    return f"{parent}/{suffix}"
+
+
 def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
     command = _COMMAND_TEMPLATES[metric_id]["command"]
-    for placeholder, key in _ADDITIONAL_PLACEHOLDER_KEYS.get(metric_id, {}).items():
-        command = command.replace(placeholder, _additional_profile_value(profile, key))
+    for placeholder, spec in _ADDITIONAL_PLACEHOLDER_KEYS.get(metric_id, {}).items():
+        if isinstance(spec, tuple):
+            key, suffix = spec
+        else:
+            key, suffix = spec, None
+        value = _additional_profile_value(profile, key)
+        command = command.replace(placeholder, _derive_additional_path(value, suffix))
     return command
 
 
@@ -735,7 +831,7 @@ def _validate_profile_value(key: str, value: Any) -> str:
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
             raise CommandConfigError(f"profile nginx_port 必须为 1..65535 整数: {value!r}")
         return str(value)
-    if key in ("nginx_conf", "nginx_error_log", "nginx_access_log"):
+    if key in ("nginx_conf", "nginx_log", "nginx_error_log", "nginx_access_log"):
         if not isinstance(value, str) or not _SAFE_PATH.fullmatch(value):
             raise CommandConfigError(
                 f"profile {key} 路径非法（需绝对路径，仅限安全字符）: {value!r}"
@@ -851,7 +947,7 @@ def _nginx_candidates(profile: Dict[str, Any], key: str) -> List[str]:
                 raise CommandConfigError(f"inspect.conf nginx_port 必须为数字: {item!r}")
             _validate_profile_value(key, int(item))
             result.append(item)
-        elif key in {"nginx_bin", "nginx_conf", "nginx_error_log", "nginx_access_log"}:
+        elif key in {"nginx_bin", "nginx_conf", "nginx_log", "nginx_error_log", "nginx_access_log"}:
             result.append(_validate_profile_value(key, item))
         else:
             raise CommandConfigError(f"不支持的 Nginx 候选参数: {key}")
@@ -863,6 +959,27 @@ def _nginx_shell_words(values: Sequence[str]) -> str:
     return " ".join(values)
 
 
+def _nginx_path_candidates(
+    profile: Dict[str, Any], key: str, filename: Optional[str] = None
+) -> List[str]:
+    """Expand directory defaults such as ``/opt/nginx/conf/`` safely.
+
+    The user-facing inspect.conf value remains unchanged.  Commands that need
+    a concrete file receive the conventional filename only when the configured
+    value is a directory; an explicit file path is preserved verbatim.
+    """
+    values = _nginx_candidates(profile, key)
+    if not filename:
+        return values
+    expanded: List[str] = []
+    for value in values:
+        if value.endswith("/"):
+            expanded.append(value.rstrip("/") + "/" + filename)
+        else:
+            expanded.append(value)
+    return expanded
+
+
 def _is_runtime_nginx_profile(profile: Dict[str, Any]) -> bool:
     """Identify the list-shaped profile loaded from inspect.conf.
 
@@ -872,7 +989,7 @@ def _is_runtime_nginx_profile(profile: Dict[str, Any]) -> bool:
     configured, so production execution always uses auto-discovery.
     """
     keys = (
-        "nginx_bin", "nginx_conf", "nginx_error_log", "nginx_access_log",
+        "nginx_bin", "nginx_conf", "nginx_log", "nginx_error_log", "nginx_access_log",
         "nginx_port", "nginx_version",
     )
     return any(key in profile for key in keys) and all(
@@ -905,6 +1022,19 @@ def _keepalived_candidates(profile: Dict[str, Any], key: str) -> List[str]:
 
 def _keepalived_shell_words(values: Sequence[str]) -> str:
     return " ".join(values)
+
+
+def _keepalived_path_candidates(
+    profile: Dict[str, Any], key: str, filename: Optional[str] = None
+) -> List[str]:
+    """Expand configured Keepalived directories to concrete files."""
+    values = _keepalived_candidates(profile, key)
+    if not filename:
+        return values
+    return [
+        value.rstrip("/") + "/" + filename if value.endswith("/") else value
+        for value in values
+    ]
 
 
 def _is_runtime_keepalived_profile(profile: Dict[str, Any]) -> bool:
@@ -1177,9 +1307,15 @@ def _nginx_discovery_prefix(profile: Dict[str, Any], *, include_dump: bool) -> s
     passed the strict path/port validator above.
     """
     bins = _nginx_shell_words(_nginx_candidates(profile, "nginx_bin"))
-    confs = _nginx_shell_words(_nginx_candidates(profile, "nginx_conf"))
-    errors = _nginx_shell_words(_nginx_candidates(profile, "nginx_error_log"))
-    accesses = _nginx_shell_words(_nginx_candidates(profile, "nginx_access_log"))
+    confs = _nginx_shell_words(_nginx_path_candidates(profile, "nginx_conf", "nginx.conf"))
+    errors_configured = _nginx_candidates(profile, "nginx_error_log")
+    if not errors_configured:
+        errors_configured = _nginx_path_candidates(profile, "nginx_log", "error.log")
+    accesses_configured = _nginx_candidates(profile, "nginx_access_log")
+    if not accesses_configured:
+        accesses_configured = _nginx_path_candidates(profile, "nginx_log", "access.log")
+    errors = _nginx_shell_words(errors_configured)
+    accesses = _nginx_shell_words(accesses_configured)
     # An empty candidate list must remain valid shell syntax.  ':' is only a
     # harmless loop item and is never accepted by the -x/-f checks.
     bins_loop = bins or ":"
@@ -1310,7 +1446,7 @@ def _nginx_replay_command(metric_id: str, profile: Dict[str, Any]) -> Optional[s
         return None
     if metric_id == "local.nginx.proxy.upstream.config":
         bins = _nginx_candidates(profile, "nginx_bin")
-        confs = _nginx_candidates(profile, "nginx_conf")
+        confs = _nginx_path_candidates(profile, "nginx_conf", "nginx.conf")
         if bins and confs:
             return f"{bins[0]} -T -c {confs[0]}"
         return None
@@ -1323,8 +1459,12 @@ def _nginx_replay_command(metric_id: str, profile: Dict[str, Any]) -> Optional[s
 def _keepalived_discovery_prefix(profile: Dict[str, Any], *, include_log: bool = False) -> str:
     """Discover Keepalived's running binary/config before using fallbacks."""
     bins = _keepalived_shell_words(_keepalived_candidates(profile, "keepalived_bin"))
-    confs = _keepalived_shell_words(_keepalived_candidates(profile, "keepalived_conf"))
-    logs = _keepalived_shell_words(_keepalived_candidates(profile, "keepalived_log"))
+    confs = _keepalived_shell_words(
+        _keepalived_path_candidates(profile, "keepalived_conf", "keepalived.conf")
+    )
+    logs = _keepalived_shell_words(
+        _keepalived_path_candidates(profile, "keepalived_log", "keepalived.log")
+    )
     bins_loop = bins or ":"
     confs_loop = confs or ":"
     logs_loop = logs or ":"
