@@ -22,6 +22,51 @@ REPLAY_FALLBACK = "不可复制（未提供安全的复现命令）"
 REPLAY_COMMAND_FALLBACK = REPLAY_FALLBACK
 
 
+def manual_command_for_report(metric: Any) -> str:
+    """Return the redacted source command for the report ``command`` column.
+
+    This is intentionally separate from ``select_replay_command``: the report
+    documents which manual command produced a fact, while replay remains a
+    fail-closed, copy/paste-safe convenience.  Implementation placeholders are
+    converted to human labels and never reveal credentials.
+    """
+    metric_id = metric.get("metric_id") if isinstance(metric, Mapping) else metric
+    try:
+        from inspect import metrics as catalog
+        definition = catalog.get_metric(str(metric_id))
+    except (ImportError, AttributeError):
+        definition = None
+    command = definition.get("command") if isinstance(definition, Mapping) else None
+    if not isinstance(command, str) or not command.strip():
+        return REPLAY_FALLBACK
+    replacements = {
+        "{nginx_bin}": "<可执行文件>", "{nginx_conf}": "<配置文件>",
+        "{nginx_error_log}": "<日志文件>", "{nginx_access_log}": "<日志文件>",
+        "{nginx_port}": "<端口>", "{nginx_listener_host}": "<主机>",
+        "{keepalived_bin}": "<可执行文件>", "{keepalived_conf}": "<配置文件>",
+        "{keepalived_log}": "<日志文件>", "{keepalived_vip}": "<VIP>",
+        "{keepalived_port}": "<端口>", "{timeout}": "<超时秒数>",
+        "{elasticsearch_listener_host}": "<主机>", "{elasticsearch_http_port}": "<端口>",
+        "{elasticsearch_auth}": "<认证参数>", "{elasticsearch_cert}": "<证书路径>",
+    }
+    for source, replacement in replacements.items():
+        command = command.replace(source, replacement)
+    # Do not publish implementation placeholders or credential-bearing values.
+    command = re.sub(r"\{[A-Za-z_][A-Za-z0-9_]*\}", "<参数>", command)
+    command = command.replace("CHANGE_ME", "<密码>")
+    return command.strip()
+
+# This is a public, versioned projection catalog.  It contains only concrete
+# commands that are safe to show to an operator; collector templates remain in
+# metrics.py and are never copied here.  Metrics without an approved mapping
+# intentionally use REPLAY_FALLBACK.
+REPLAY_CATALOG_VERSION = "replay-v1"
+REPLAY_CATALOG = {
+    "local.nginx.config.valid": "nginx -t -c <配置文件>",
+    "local.port.listening": "ss -tlnp",
+}
+
+
 class ReplayCommandError(ValueError):
     """Raised when a supplied replay command is not safe to publish."""
 
@@ -32,6 +77,7 @@ _SHELL_OPERATOR_RE = re.compile(r"(?:&&|\|\||[;&|<>`$()])")
 _PLACEHOLDER_RE = re.compile(
     r"(?:\{\{?[^{}\r\n]+\}?\}|<[^>\r\n]+>)"
 )
+_HUMAN_PLACEHOLDER_RE = re.compile(r"<(?:路径|配置文件|账户|密码)>")
 _SYNTAX_WORD_RE = re.compile(
     r"(?<![A-Za-z0-9_])(?:if|then|else|elif|fi|for|in|do|done|while|until|"
     r"case|esac|function)(?![A-Za-z0-9_])"
@@ -64,14 +110,43 @@ def _has_control_character(value: str) -> bool:
     )
 
 
+def _command_code(value: str) -> str:
+    """Return executable text, excluding a trailing human shell comment."""
+    quote: Optional[str] = None
+    escaped = False
+    for index, char in enumerate(value):
+        if quote is not None:
+            if quote == '"' and char == "\\" and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = None
+            escaped = False
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == "#":
+            return value[:index].rstrip()
+    return value
+
+
 def _invalid_reason(value: str) -> Optional[str]:
+    code = _command_code(value)
     if _has_control_character(value):
         return "命令包含控制字符或换行"
-    if _SHELL_OPERATOR_RE.search(value):
-        return "命令包含 shell 变量、替换或连接器"
-    if _PLACEHOLDER_RE.search(value):
+
+    # Human replacement markers are the only permitted angle-bracket text.
+    # Remove them before checking redirection syntax, but reject every other
+    # unresolved implementation placeholder.
+    unapproved = _PLACEHOLDER_RE.search(
+        _HUMAN_PLACEHOLDER_RE.sub("PLACEHOLDER", code)
+    )
+    if unapproved:
         return "命令包含未解析的 profile 占位符"
-    if _SYNTAX_WORD_RE.search(value) or _FUNCTION_RE.search(value):
+    safe_code = _HUMAN_PLACEHOLDER_RE.sub("PLACEHOLDER", code)
+    if _SHELL_OPERATOR_RE.search(safe_code):
+        return "命令包含 shell 变量、替换或连接器"
+    if _SYNTAX_WORD_RE.search(code) or _FUNCTION_RE.search(code):
         return "命令包含 shell 条件、循环或函数语法"
     if _URL_USERINFO_RE.search(value):
         return "命令包含 URL 用户信息"
@@ -80,7 +155,7 @@ def _invalid_reason(value: str) -> Optional[str]:
     # A command must contain some non-whitespace text.  This check is kept
     # here as well as in validate_replay_command so callers using this helper
     # cannot accidentally accept an empty value.
-    if not value.strip():
+    if not code.strip():
         return "命令不能为空"
     return None
 
@@ -139,13 +214,38 @@ def select_replay_command(value: Any) -> str:
     """Return the safe replay command or the stable non-command fallback.
 
     ``value`` may be an evidence mapping or a complete metric mapping.  The
-    implementation intentionally never reads a mapping's ``command`` key.
+    implementation intentionally never publishes a mapping's ordinary
+    ``command`` key.  A complete metric may use the static catalog only when
+    its evidence does not contain collector-only ``command`` text.
     """
     evidence = value
+    metric_id = None
     if isinstance(value, Mapping) and "evidence" in value:
+        metric_id = value.get("metric_id")
         evidence = value.get("evidence")
     command = replay_command_from_evidence(evidence)
-    return command if command is not None else REPLAY_FALLBACK
+    if command is not None:
+        return command
+    if metric_id is not None and (
+        not isinstance(evidence, Mapping) or "command" not in evidence
+    ):
+        return build_replay_command(metric_id)
+    return REPLAY_FALLBACK
+
+
+def build_replay_command(metric_id: Any) -> str:
+    """Build a safe public replay command from a registered metric ID.
+
+    The lookup is deliberately independent of collector evidence.  A missing
+    or invalid catalog entry is stable and fail-closed, so an ordinary
+    ``evidence.command`` can never become a public replay command.
+    """
+    if not isinstance(metric_id, str):
+        return REPLAY_FALLBACK
+    command = REPLAY_CATALOG.get(metric_id)
+    if command is None:
+        return REPLAY_FALLBACK
+    return normalize_replay_command(command) or REPLAY_FALLBACK
 
 
 def replay_command_or_fallback(value: Any) -> str:
@@ -160,10 +260,14 @@ def safe_replay_command(value: Any) -> Optional[str]:
 
 __all__ = [
     "REPLAY_COMMAND_FALLBACK",
+    "REPLAY_CATALOG",
+    "REPLAY_CATALOG_VERSION",
     "REPLAY_FALLBACK",
     "ReplayCommandError",
+    "manual_command_for_report",
     "is_safe_replay_command",
     "normalize_replay_command",
+    "build_replay_command",
     "replay_command_from_evidence",
     "replay_command_or_fallback",
     "safe_replay_command",

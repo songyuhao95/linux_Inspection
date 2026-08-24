@@ -35,6 +35,8 @@ PROBE_TIMEOUT_SEC = 15
 # TD §5.1 能力探测命令集合（逐字转写；命令顺序即输出行顺序）
 PROBE_COMMANDS = (
     "bash",
+    "timeout",
+    "cat",
     "pgrep",
     "ps",
     "ss",
@@ -205,7 +207,21 @@ def metric_required_commands(metric_id: str) -> Tuple[str, ...]:
 
     未知指标返回空元组（防御：normalize 等下游不依赖本映射）。
     """
-    return _METRIC_REQUIRED_COMMANDS.get(metric_id, ())
+    required = _METRIC_REQUIRED_COMMANDS.get(metric_id)
+    if required is not None:
+        return required
+    if metric_id.startswith((
+        "local.keepalived.vip.", "local.keepalived.vrrp.",
+        "local.keepalived.health_check.", "local.keepalived.failover.",
+        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.",
+    )):
+        # The manual command itself remains the source of truth.  A minimal
+        # probe gate keeps PATH-specific middleware binaries from turning a
+        # whole host into a false connection error; the command result is
+        # still classified by the runner and normalized as UNKNOWN on failure.
+        return ("bash",)
+    return ()
 
 
 def all_probed_commands() -> Tuple[str, ...]:

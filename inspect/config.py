@@ -831,6 +831,28 @@ def build_resolved_thresholds(
         baseline.update(load_nginx_baseline())
         baseline.update(load_keepalived_baseline())
         baseline.update(load_elasticsearch_baseline())
+        # Additional middleware facts are catalog-driven.  Their manual rows
+        # often describe the healthy/error evidence but do not give numeric
+        # WARN/CRIT cut-offs, so use an explicit product-supplement baseline
+        # and retain the catalog anchor as provenance.
+        try:
+            from inspect import metrics as metrics_catalog
+            for metric in metrics_catalog.METRICS:
+                if metric.get("parser") != "parse_middleware_text":
+                    continue
+                metric_id = metric["metric_id"]
+                baseline.setdefault(metric_id, {
+                    "name": metric["name"],
+                    "source_anchor": metric["source_anchor"],
+                    "boundaries": {
+                        "OK": {"rule": "命令输出无明确异常标记 → OK", "rule_id": f"{metric_id}:supplement.ok", "reason": None, "note": "产品补充阈值"},
+                        "WARN": {"rule": "命令输出含告警/积压/偏离证据 → WARN", "rule_id": f"{metric_id}:supplement.warn", "reason": None, "note": "产品补充阈值"},
+                        "CRIT": {"rule": "命令输出含故障/不可用/严重错误证据 → CRIT", "rule_id": f"{metric_id}:supplement.crit", "reason": None, "note": "产品补充阈值"},
+                        "UNKNOWN": {"rule": None, "rule_id": None, "reason": "missing", "note": metric.get("unknown_conditions")},
+                    },
+                })
+        except ImportError:
+            pass
 
     if override is None:
         override_doc: Dict[str, Any] = {}
@@ -933,6 +955,7 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "keepalived_bin": [],
     "keepalived_conf": [],
     "keepalived_log": [],
+    "keepalived_healthcheck_script": ["/etc/keepalived/check.sh"],
     "keepalived_vip": [],
     "keepalived_port": [],
     "keepalived_version": [],
@@ -958,6 +981,59 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "elasticsearch_cert": [],
     "elasticsearch_snapshot_repo": [],
     "elasticsearch_whitelist": [],
+    # Kafka/Zookeeper
+    "kafka_bin": ["/opt/kafka/bin"],
+    "kafka_conf": ["/opt/kafka/config/server.properties"],
+    "kafka_zookeeper_conf": ["/opt/zookeeper/conf/zoo.cfg"],
+    "kafka_zookeeper_connect": ["127.0.0.1:2181"],
+    "kafka_bootstrap": ["127.0.0.1:9093"],
+    "kafka_ssl_config": ["/opt/kafka/config/client.properties"],
+    "kafka_port": ["9093"],
+    "kafka_zookeeper_port": ["2181"],
+    # MySQL
+    "mysql_bin": ["/usr/bin/mysql"],
+    "mysql_conf": ["/opt/mysql/conf/my.cnf"],
+    "mysql_socket": ["/opt/mysql/data/mysql.sock"],
+    "mysql_port": ["3306"],
+    "mysql_user": ["root"],
+    "mysql_host": ["127.0.0.1"],
+    # Nacos
+    "nacos_home": ["/opt/nacos"],
+    "nacos_conf": ["/opt/nacos/conf/application.properties"],
+    "nacos_endpoint": ["http://127.0.0.1:8848"],
+    "nacos_http_port": ["8848"],
+    "nacos_grpc_port": ["9848"],
+    "nacos_grpc_port_offset": ["9849"],
+    "nacos_raft_port": ["7848"],
+    "nacos_log": ["/opt/nacos/logs"],
+    "nacos_token": ["CHANGE_ME"],
+    # RabbitMQ
+    "rabbitmq_bin": ["/usr/sbin"],
+    "rabbitmq_unit": ["rabbitmq"],
+    "rabbitmq_expected_nodes": ["3"],
+    # Redis
+    "redis_bin": ["/usr/bin"],
+    "redis_conf": ["/etc/redis/redis.conf"],
+    "redis_port": ["6379"],
+    "redis_sentinel_port": ["26379"],
+    "redis_cluster_port": ["7000"],
+    # RocketMQ
+    "rocketmq_home": ["/opt/rocketmq"],
+    "rocketmq_bin": ["/opt/rocketmq/bin"],
+    "rocketmq_broker_conf": ["/opt/rocketmq/conf/broker.conf"],
+    "rocketmq_namesrv_conf": ["/opt/rocketmq/conf/namesrv.properties"],
+    "rocketmq_namesrv_port": ["9876"],
+    "rocketmq_controller_port": ["9877"],
+    "rocketmq_broker_port": ["10911"],
+    "rocketmq_broker_ha_port": ["10912"],
+    "rocketmq_namesrv_addr": ["127.0.0.1:9876"],
+    "rocketmq_controller_addr": ["127.0.0.1:9877"],
+    "rocketmq_broker": ["broker-a"],
+    # Tomcat
+    "tomcat_home": ["/opt/tomcat"],
+    "tomcat_conf": ["/opt/tomcat/conf/server.xml"],
+    "tomcat_log": ["/opt/tomcat/logs/catalina.out"],
+    "tomcat_port": ["8080"],
 }
 
 _CONF_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -1186,6 +1262,21 @@ def load_elasticsearch_config(path: Optional[Union[str, Path]] = None) -> Dict[s
     )} | {"whitelist": list(data.get("elasticsearch_whitelist", []))}
 
 
+def load_middleware_config(
+    module_id: str, path: Optional[Union[str, Path]] = None
+) -> Dict[str, List[str]]:
+    """Return all inspect.conf defaults for one additional middleware.
+
+    This keeps the configuration contract extensible without teaching the
+    parser a new syntax for each adapter.  Unknown keys remain rejected only
+    when their identifier is malformed; values are always returned as the
+    existing candidate lists.
+    """
+    data = load_inspect_conf(path)
+    prefix = module_id.lower().replace("/", "_") + "_"
+    return {key: list(values) for key, values in data.items() if key.startswith(prefix)}
+
+
 __all__ = [
     "ConfigError",
     "DOC_BASELINE_VERSION",
@@ -1211,6 +1302,7 @@ __all__ = [
     "load_nginx_config",
     "load_keepalived_config",
     "load_elasticsearch_config",
+    "load_middleware_config",
     "load_override",
     "validate_override_document",
 ]

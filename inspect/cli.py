@@ -86,10 +86,13 @@ _HELP_EPILOG = """主机选择示例:
   INSPECT_FIXTURE_DIR 为两种模式共用的零连接调试路径。
 
 中间件选择:
-  默认巡检全部已注册中间件（当前：Nginx、Keepalived、Elasticsearch）+ Linux 主机基础指标；
+  默认巡检全部已注册中间件（Nginx、Keepalived、Elasticsearch、Kafka/Zookeeper、MySQL、
+  Nacos、RabbitMQ、Redis、RocketMQ、Tomcat）+ Linux 主机基础指标；
   --nginx 只巡检 Nginx 中间件 + Linux 主机基础指标；
   --keepalived 只巡检 Keepalived 中间件 + Linux 主机基础指标；
   --elasticsearch 只巡检 Elasticsearch 中间件 + Linux 主机基础指标；
+  --kafka/--mysql/--nacos/--rabbitmq/--redis/--rocketmq/--tomcat 分别只巡检对应中间件
+  + Linux 主机基础指标；
   Nginx 进程发现：未运行且不在 inspect.conf 白名单 → 跳过该主机 Nginx 指标；
   白名单内未运行 → CRIT「未运行」。
 
@@ -137,6 +140,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--elasticsearch", action="store_true",
         help="只巡检 Elasticsearch 中间件（默认巡检全部已注册中间件）",
     )
+    for _module_id, _label in (
+        ("kafka", "Kafka/Zookeeper"), ("mysql", "MySQL"),
+        ("nacos", "Nacos"), ("rabbitmq", "RabbitMQ"),
+        ("redis", "Redis"), ("rocketmq", "RocketMQ"), ("tomcat", "Tomcat"),
+    ):
+        parser.add_argument(
+            f"--{_module_id}", action="store_true",
+            help=f"只巡检 {_label} 中间件（默认巡检全部已注册中间件）",
+        )
     parser.add_argument("--all", action="store_true", help="inventory 全部主机")
     parser.add_argument(
         "--list-metrics", action="store_true", help="列出已实现指标，不采集",
@@ -177,11 +189,13 @@ def validate_args(ns: argparse.Namespace) -> List[str]:
     if ns.local and ns.parallel not in (1, runner_mod.DEFAULT_PARALLEL_HOSTS):
         errors.append("--parallel 仅用于远程巡检，不能与 --local 搭配")
     middleware_flags = [
-        flag for flag in (getattr(ns, "nginx", False), getattr(ns, "keepalived", False),
-                          getattr(ns, "elasticsearch", False)) if flag
+        name for name in (
+            "nginx", "keepalived", "elasticsearch", "kafka", "mysql", "nacos",
+            "rabbitmq", "redis", "rocketmq", "tomcat",
+        ) if getattr(ns, name, False)
     ]
     if len(middleware_flags) > 1:
-        errors.append("--nginx、--keepalived、--elasticsearch 互斥，请三选一")
+        errors.append("中间件选择参数互斥，请只选择一个")
     query = ns.list_metrics or bool(ns.info)
     if query and (
         ns.hosts or ns.inventory or ns.local or ns.limit or ns.all
@@ -278,9 +292,8 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     步骤：
       1. 配置加载（inspect.yml 可选，缺省 out_dir=out）与阈值合并（文档基线）；
       2. 主机选择解析（inventory.py；-H/-i/--limit/--all，用法错误 2 / 执行失败 10）；
-      3. 指标命令规格：默认选择 linux_basic + 全部已注册中间件（当前 nginx、
-         keepalived、elasticsearch）；未选择的模块不进入执行计划；
-         --nginx/--keepalived/--elasticsearch 只选择对应模块；
+      3. 指标命令规格：默认选择 linux_basic + 全部已注册中间件；未选择的模块不进入执行计划；
+         每个中间件选择开关只选择对应模块；
       4. 执行：--local 走 local_runner 直接执行本机 shell，完全不调用
          Ansible；-H/--hosts 与 -i/--inventory 走 ansible_runner 的项目内
          Ansible；INSPECT_FIXTURE_DIR 两种模式均为零连接调试路径；
@@ -318,6 +331,15 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
         selected_modules = ("linux_basic", "keepalived")
     elif getattr(ns, "elasticsearch", False):
         selected_modules = ("linux_basic", "elasticsearch")
+    elif any(getattr(ns, _name, False) for _name in (
+        "kafka", "mysql", "nacos", "rabbitmq", "redis", "rocketmq", "tomcat",
+    )):
+        _selected = next(
+            _name for _name in (
+                "kafka", "mysql", "nacos", "rabbitmq", "redis", "rocketmq", "tomcat",
+            ) if getattr(ns, _name, False)
+        )
+        selected_modules = ("linux_basic", _selected)
     else:
         selected_modules = ("linux_basic",) + tuple(middleware_module_ids())
     specs = runner_mod.build_metric_command_specs(

@@ -115,6 +115,13 @@ def _build_default_registry() -> ModuleRegistry:
     from .keepalived import MODULE as KEEPALIVED_MODULE
     from .nginx import MODULE as NGINX_MODULE
     from .elasticsearch import MODULE as ELASTICSEARCH_MODULE
+    from .kafka import MODULE as KAFKA_MODULE
+    from .mysql import MODULE as MYSQL_MODULE
+    from .nacos import MODULE as NACOS_MODULE
+    from .rabbitmq import MODULE as RABBITMQ_MODULE
+    from .redis import MODULE as REDIS_MODULE
+    from .rocketmq import MODULE as ROCKETMQ_MODULE
+    from .tomcat import MODULE as TOMCAT_MODULE
 
     registry = ModuleRegistry()
     registry.register(COMMON_MODULE)
@@ -122,6 +129,13 @@ def _build_default_registry() -> ModuleRegistry:
     registry.register(NGINX_MODULE)
     registry.register(KEEPALIVED_MODULE)
     registry.register(ELASTICSEARCH_MODULE)
+    registry.register(KAFKA_MODULE)
+    registry.register(MYSQL_MODULE)
+    registry.register(NACOS_MODULE)
+    registry.register(RABBITMQ_MODULE)
+    registry.register(REDIS_MODULE)
+    registry.register(ROCKETMQ_MODULE)
+    registry.register(TOMCAT_MODULE)
     return registry
 
 

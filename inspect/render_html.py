@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
-from inspect.replay import replay_command_or_fallback
+from inspect.replay import manual_command_for_report
 from inspect.report_fields import format_threshold_rule
 
 # cli-contract §4：渲染失败按执行失败处理
@@ -233,6 +233,13 @@ _MIDDLEWARE_PREFIXES: tuple = (
     ("local.nginx.", "nginx"),
     ("local.keepalived.", "keepalived"),
     ("local.elasticsearch.", "elasticsearch"),
+    ("local.kafka.", "kafka"),
+    ("local.mysql.", "mysql"),
+    ("local.nacos.", "nacos"),
+    ("local.rabbitmq.", "rabbitmq"),
+    ("local.redis.", "redis"),
+    ("local.rocketmq.", "rocketmq"),
+    ("local.tomcat.", "tomcat"),
 )
 
 
@@ -328,7 +335,7 @@ def _metric_card(
         if show_host else ""
     )
     evidence = metric.get("evidence")
-    command = replay_command_or_fallback(evidence)
+    command = manual_command_for_report(metric)
     detail_value = _detail_value(detail or {}) if detail else None
     has_detail_value = detail is not None and detail_value is not None
     local_fields = {

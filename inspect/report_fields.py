@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, List, Optional
 
+from . import metrics
+
 
 _MISSING = object()
 
@@ -27,111 +29,159 @@ def _text(value: Any) -> str:
         return "；".join(
             f"{key}={_text(item)}" for key, item in value.items()
         )
-    return str(value)
+    return str(value).replace("\r", " ").replace("\n", " ")
 
 
 def _append(parts: List[str], label: str, value: Any) -> None:
-    """Append a labelled field only when the fact actually supplies it."""
-    text = _text(value)
-    if text != "":
-        parts.append(f"{label}：{text}")
+    """Append a labelled field, retaining the label for empty facts."""
+    parts.append(f"{label}：{_text(value)}")
 
 
-def _status(metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]]) -> Any:
-    """Read a declared status; never derive one from values or thresholds."""
-    metric_status = metric.get("status")
-    # A top-level UNKNOWN is an explicit fact-source declaration.  Do not let
-    # an expanded detail row make it look like the renderer recomputed a
-    # business status.
-    if metric_status == "UNKNOWN":
-        return metric_status
-    if isinstance(detail, Mapping) and "status" in detail:
-        return detail.get("status")
-    return metric_status
+def _mapping(value: Any) -> Mapping[str, Any]:
+    """Return a mapping value or an empty read-only view."""
+    return value if isinstance(value, Mapping) else {}
 
 
-def _detail_context(detail: Optional[Mapping[str, Any]]) -> List[str]:
-    if not isinstance(detail, Mapping):
-        return []
-    parts: List[str] = []
+def _first_value(mapping: Mapping[str, Any], keys: tuple[str, ...]) -> Any:
+    """Return the first present, non-empty fact from *mapping*."""
+    for key in keys:
+        if key not in mapping:
+            continue
+        value = mapping.get(key)
+        if value is not None and _text(value) != "":
+            return value
+    return None
+
+
+def _measurement_object(
+    metric: Mapping[str, Any], detail: Mapping[str, Any]
+) -> Any:
+    """Build one measurement-object value from already recorded context."""
+    subject = _first_value(
+        detail,
+        ("measurement", "measurement_object", "object", "target", "name"),
+    )
+    if subject is None:
+        subject = _first_value(metric, ("name", "metric_id"))
+
+    context: List[str] = []
     for key, label in (
+        ("filesystem", "文件系统"),
+        ("mount", "挂载点"),
         ("window", "测量周期"),
         ("cpu_cores", "CPU核数"),
-        ("mount", "挂载点"),
-        ("filesystem", "文件系统"),
+        ("interface", "网卡"),
+        ("device", "设备"),
+        ("path", "路径"),
     ):
-        _append(parts, label, detail.get(key))
-    return parts
+        value = detail.get(key)
+        if value is not None and _text(value) != "":
+            context.append(f"{label}={_text(value)}")
+
+    subject_text = _text(subject)
+    if context:
+        context_text = "；".join(context)
+        return f"{subject_text}（{context_text}）" if subject_text else context_text
+    return subject
+
+
+def _approved_impact(
+    metric: Mapping[str, Any],
+    detail: Mapping[str, Any],
+    threshold: Mapping[str, Any],
+) -> Any:
+    """Read impact text only from notes or explicitly nested metadata.
+
+    ``metric['impact']`` is intentionally not a host-result-v1 field and is
+    never consulted.  The nested metadata spellings are accepted only as
+    already-present facts; this helper does not add them to the schema.
+    """
+    notes = threshold.get("notes")
+    if notes is not None and _text(notes) != "":
+        return notes
+
+    metadata_sources = [
+        threshold.get("metadata"),
+        detail.get("metadata"),
+        metric.get("metadata"),
+        _mapping(metric.get("provenance")).get("metadata"),
+    ]
+    for metadata in metadata_sources:
+        metadata_map = _mapping(metadata)
+        value = _first_value(
+            metadata_map,
+            (
+                "impact",
+                "impact_description",
+                "effect",
+                "作用影响",
+                "指标作用影响",
+            ),
+        )
+        if value is not None:
+            return value
+
+    # provenance.notes is an approved, closed-schema note and is the
+    # compatibility fallback for older facts that stored the explanation there.
+    provenance_notes = _mapping(metric.get("provenance")).get("notes")
+    return provenance_notes
+
+
+def _status(metric: Mapping[str, Any], detail: Mapping[str, Any]) -> Any:
+    """Read a declared status; never derive one from values or thresholds."""
+    # The metric status is the fact-source declaration.  Keep it verbatim when
+    # present, including UNKNOWN and an explicitly empty value; a detail row is
+    # only a fallback for legacy facts that have no metric-level status.
+    if "status" in metric:
+        return metric.get("status")
+    return detail.get("status")
+
+
+def _catalog_doc_baseline(metric: Mapping[str, Any]) -> Any:
+    """Return the approved normative baseline for a registered metric.
+
+    ``normalized_value`` is an observation and must not be presented as the
+    documented norm.  Unknown metrics deliberately render an empty value rather
+    than borrowing an observed value or a collector threshold.
+    """
+    metric_id = metric.get("metric_id")
+    if not isinstance(metric_id, str):
+        return None
+    definition = metrics.get_metric(metric_id)
+    if not isinstance(definition, Mapping):
+        return None
+    baseline = definition.get("doc_baseline")
+    return baseline if baseline is not None and _text(baseline) != "" else None
 
 
 def format_threshold_rule(
     metric: Mapping[str, Any], detail: Optional[Mapping[str, Any]] = None
 ) -> str:
-    """Format a detailed threshold explanation from fact fields only.
+    """Format exactly six declarative sections from recorded facts.
 
-    Included fields are deliberately declarative: detail context, raw and
-    normalized values/unit, threshold metadata, declared status, impact,
-    provenance, and error.  No numeric comparison, status inference, or
-    threshold lookup occurs here.  Newlines make long explanations naturally
-    pre-wrappable in HTML and wrap-friendly in Excel.
+    ``raw_value`` and ``normalized_value`` are never compared here.  The
+    catalog's documented baseline is displayed under ``规范值``, while the
+    recorded threshold rule is displayed verbatim under ``判定规则``.
+    Audit fields such as rule IDs, provenance, and errors remain outside this
+    projection.  Every label is emitted, including when its value is empty.
     """
-    metric = metric if isinstance(metric, Mapping) else {}
-    threshold = metric.get("threshold")
-    threshold = threshold if isinstance(threshold, Mapping) else {}
-    provenance = metric.get("provenance")
-    provenance = provenance if isinstance(provenance, Mapping) else provenance
-    error = metric.get("error")
-
-    parts: List[str] = _detail_context(detail)
-    if not parts:
-        _append(parts, "测量对象", metric.get("name") or metric.get("metric_id") or "指标")
-
-    # Detail values, when explicitly present, describe that expanded fact row.
-    # Otherwise use the metric-level fields exactly as declared by the source.
+    metric_map = metric if isinstance(metric, Mapping) else {}
     detail_map = detail if isinstance(detail, Mapping) else {}
-    raw = detail_map.get("raw_value", metric.get("raw_value"))
-    normalized = detail_map.get("normalized_value", metric.get("normalized_value"))
-    _append(parts, "原始值", raw)
-    _append(parts, "规范值", normalized)
-    _append(parts, "单位", metric.get("unit"))
+    threshold = _mapping(metric_map.get("threshold"))
 
-    # Include every supplied threshold fact field, rather than choosing a
-    # preferred rule representation or rebuilding a rule from the value.
-    threshold_value = threshold.get("value")
-    if threshold_value is not None and str(threshold_value) != "":
-        # Keep the historical label while retaining the source value verbatim
-        # (the symbol replacement is presentation-only, never a comparison).
-        display_value = str(threshold_value).replace(">=", "≥").replace("<=", "≤")
-        parts.append(f"判定规则：{display_value}")
-    elif threshold.get("notes") is not None and str(threshold.get("notes")) != "":
-        parts.append(f"判定说明：{threshold.get('notes')}")
-    elif threshold.get("layer") is not None and str(threshold.get("layer")) != "":
-        parts.append(f"判定层：{threshold.get('layer')}")
-    else:
-        parts.append("判定规则：事实源未提供")
-    _append(parts, "规则标识", threshold.get("rule_id"))
-    _append(parts, "阈值层", threshold.get("layer"))
-    _append(parts, "来源锚点", threshold.get("source_anchor"))
-    # When notes already served as the historical 判定说明, still expose the
-    # explicit threshold metadata label for the detailed report contract.
-    _append(parts, "阈值说明", threshold.get("notes"))
+    normative_baseline = _catalog_doc_baseline(metric_map)
+    unit = detail_map.get("unit", metric_map.get("unit"))
+    threshold_rule = threshold.get("value")
+    declared_status = _status(metric_map, detail_map)
+    impact = _approved_impact(metric_map, detail_map, threshold)
 
-    declared_status = _status(metric, detail)
+    parts: List[str] = []
+    _append(parts, "测量对象", _measurement_object(metric_map, detail_map))
+    _append(parts, "规范值", normative_baseline)
+    _append(parts, "单位", unit)
+    _append(parts, "判定规则", threshold_rule)
     _append(parts, "声明状态", declared_status)
-    _append(parts, "影响", metric.get("impact"))
-    _append(parts, "溯源", provenance)
-
-    if error is not None:
-        _append(parts, "技术错误", error)
-
-    # UNKNOWN is a fact-source declaration.  Explain why it remains UNKNOWN,
-    # but do not infer a different status from raw/normalized values.
-    if declared_status == "UNKNOWN":
-        if error is not None:
-            parts.append("说明：技术失败，保留事实源声明 UNKNOWN，未重新判定")
-        else:
-            parts.append("说明：数据不足或阈值规则未解析，保留事实源声明 UNKNOWN，未重新判定")
-
+    _append(parts, "指标作用影响", impact)
     return "；\n".join(parts)
 
 

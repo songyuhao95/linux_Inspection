@@ -766,6 +766,99 @@ ELASTICSEARCH_METRICS = [
 ELASTICSEARCH_RULE_PREFIX = _ELASTICSEARCH_RULE_PREFIX
 METRICS.extend(ELASTICSEARCH_METRICS)
 
+# --------------------------------------------------------------------------
+# Additional middleware P0/P1 facts
+# --------------------------------------------------------------------------
+
+def _middleware_metric(
+    metric_id: str,
+    name: str,
+    command: str,
+    manual: str,
+    priority: str,
+    baseline: str,
+    *,
+    unit: str = "原始命令输出",
+) -> dict:
+    """Build one document-backed fact without duplicating Linux basics.
+
+    The command is the redacted text from the corresponding manual.  It is
+    retained as evidence/report source text; execution still goes through the
+    independent runner allow-list.
+    """
+    return {
+        "metric_id": metric_id,
+        "name": name,
+        "command": command,
+        "timeout_sec": 15 if "日志" in name or "log" in metric_id else 10,
+        "parser": "parse_middleware_text",
+        "unit": unit,
+        "source_anchor": f"DOCX:{manual}:{priority}",
+        "threshold_layer": "document-baseline",
+        "threshold_rule_ids": [f"{metric_id}:document-baseline"],
+        "conflicts": [],
+        "doc_baseline": baseline,
+        "unknown_conditions": "命令、权限、认证或返回数据不可用 → UNKNOWN；不以主机通用资源指标替代本指标",
+    }
+
+
+_ADDITIONAL_MIDDLEWARE_METRICS = [
+    _middleware_metric("local.keepalived.vip.present", "Keepalived VIP 存在性", "ip -brief addr; grep -E 'virtual_ipaddress|interface' <KEEPALIVED_CONF>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "VIP 已绑定规划接口 → OK；VIP 缺失或漂移 → CRIT"),
+    _middleware_metric("local.keepalived.vrrp.role", "Keepalived VRRP 角色", "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "主备角色和 priority 符合规划且无双 MASTER → OK；角色异常/双 MASTER → CRIT"),
+    _middleware_metric("local.keepalived.health_check.status", "Keepalived 健康检查", "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "健康检查脚本存在、可读可执行且无持续失败 → OK；脚本缺失/失败 → CRIT"),
+    _middleware_metric("local.keepalived.failover.config", "Keepalived 故障切换配置", "grep -E 'notify_master|notify_backup|notify_fault|virtual_ipaddress|track_script' <KEEPALIVED_CONF>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P1-TABLE6", "切换通知、VIP 和 track_script 配置完整 → OK；缺失或漂移 → WARN/CRIT"),
+    _middleware_metric("local.kafka.zookeeper.health", "ZooKeeper 节点健康", "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181; zkServer.sh status <zoo.cfg>", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "返回 imok；规划 3 节点为 1 leader + 2 follower；无响应、无 leader 或节点不足为 CRIT，leader 频繁切换为 WARN"),
+    _middleware_metric("local.kafka.broker.health", "Kafka Broker 服务健康", "pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "Kafka 进程存在且 9093 LISTEN → OK；任一缺失 → CRIT"),
+    _middleware_metric("local.kafka.controller.health", "Kafka Controller 健康", "zookeeper-shell.sh <ZK_CONNECT> get /controller", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "存在且仅有 1 个有效 Controller → OK；无 Controller → CRIT；频繁变化 → WARN"),
+    _middleware_metric("local.kafka.under_replicated_partitions", "Kafka 未充分复制分区", "kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "无输出 → OK；有未充分复制分区 → WARN，持续存在为 CRIT"),
+    _middleware_metric("local.kafka.under_min_isr", "Kafka ISR/不可用分区", "kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions; kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "Under-min-ISR 或不可用分区均为空 → OK；出现 → CRIT"),
+    _middleware_metric("local.kafka.zookeeper.latency", "ZooKeeper 延迟与积压请求", "echo mntr | nc -w 3 127.0.0.1 2181 | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections'", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P1-TABLE6", "延迟稳定且 outstanding_requests=0 → OK；持续积压或延迟升高 → 产品补充阈值 WARN/CRIT"),
+
+    _middleware_metric("local.mysql.service.health", "MySQL 服务健康", "pgrep -fa 'mysqld.*defaults-file=/opt/mysql/conf/my.cnf'; ss -tlnp | grep ':3306'", "Mysql运维巡检手册v1.0.docx", "P0-TABLE5", "mysqld 进程存在且 3306 LISTEN → OK；任一缺失 → CRIT"),
+    _middleware_metric("local.mysql.login.version", "MySQL 登录与版本", "mysql --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@version,@@hostname,@@port;\"", "Mysql运维巡检手册v1.0.docx", "P0-TABLE5", "可认证登录且版本、主机和端口符合部署基线 → OK；登录失败 → CRIT"),
+    _middleware_metric("local.mysql.role.gtid", "MySQL 角色与 GTID", "mysql -u<USER> -p -e \"SELECT @@server_id,@@gtid_mode,@@enforce_gtid_consistency,@@read_only,@@super_read_only;\"", "Mysql运维巡检手册v1.0.docx", "P0-TABLE5", "server_id 唯一、GTID/一致性 ON，主库可写、从库只读 → OK；角色或 GTID 不符合 → CRIT"),
+    _middleware_metric("local.mysql.replica.threads", "MySQL 复制线程", "mysql -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'", "Mysql运维巡检手册v1.0.docx", "P0-TABLE5", "IO/SQL 线程均 Yes 且错误码为 0 → OK；任一线程停止或有错误 → CRIT"),
+    _middleware_metric("local.mysql.replication.lag", "MySQL 复制延迟", "mysql -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Seconds_Behind_Source|Read_Source_Log_Pos|Exec_Source_Log_Pos'", "Mysql运维巡检手册v1.0.docx", "P0-TABLE5", "延迟为 0 或在业务可接受范围且位置推进 → OK；持续增长或 NULL → 产品补充阈值 WARN/CRIT"),
+    _middleware_metric("local.mysql.connection.pressure", "MySQL 连接压力", "mysql -u<USER> -p -e \"SHOW GLOBAL STATUS LIKE 'Threads_connected'; SHOW GLOBAL STATUS LIKE 'Max_used_connections'; SHOW VARIABLES LIKE 'max_connections';\"", "Mysql运维巡检手册v1.0.docx", "P0-TABLE5", "Max_used_connections < 80% max_connections → OK；接近上限 → WARN；Too many connections → CRIT"),
+
+    _middleware_metric("local.nacos.service.health", "Nacos 服务健康", "pgrep -fa 'com.alibaba.nacos|nacos.home|/opt/nacos'", "Nacos运维巡检手册v1.0.docx", "P0-TABLE5", "服务 active、进程存在且启动路径符合 /opt/nacos → OK；否则 → CRIT"),
+    _middleware_metric("local.nacos.core_ports.health", "Nacos 核心端口", "ss -tlnp | egrep ':8848|:9848|:9849|:7848'", "Nacos运维巡检手册v1.0.docx", "P0-TABLE5", "按部署模式规划端口均 LISTEN → OK；API/gRPC/JRaft 关键端口缺失 → CRIT"),
+    _middleware_metric("local.nacos.http.health", "Nacos HTTP 健康", "curl -sS --connect-timeout 3 http://127.0.0.1:8848/nacos/actuator/health", "Nacos运维巡检手册v1.0.docx", "P0-TABLE5", "返回 UP 或 HTTP 200 → OK；超时、拒绝连接、5xx 或非 UP → CRIT"),
+    _middleware_metric("local.nacos.cluster.nodes", "Nacos 集群节点", "curl -sS 'http://127.0.0.1:8848/nacos/v2/core/cluster/node/list?accessToken=<TOKEN>'", "Nacos运维巡检手册v1.0.docx", "P0-TABLE5", "规划节点全部在线且 alive=true → OK；节点缺失或可用节点少于 2 → CRIT"),
+    _middleware_metric("local.nacos.mysql.connectivity", "Nacos MySQL 连接", "grep -E '^(spring.sql.init.platform|db.num|db.url.0|db.user.0)' /opt/nacos/conf/application.properties; nc -vz <MYSQL_HOST> 3306", "Nacos运维巡检手册v1.0.docx", "P0-TABLE5", "MySQL 平台、库地址和 3306 可达且符合基线 → OK；否则 → CRIT"),
+    _middleware_metric("local.nacos.error_log", "Nacos 错误日志", "grep -R -iE 'ERROR|FATAL|OutOfMemory|No DataSource|SQLException|Connection refused|raft|failed' /opt/nacos/logs | tail -80", "Nacos运维巡检手册v1.0.docx", "P0-TABLE5", "无持续 OOM、数据库连接失败或 JRaft 失败 → OK；可解释短时异常 → WARN；持续关键错误 → CRIT"),
+
+    _middleware_metric("local.rabbitmq.service.health", "RabbitMQ 服务健康", "pgrep -fa 'beam.smp|rabbitmq-server'; systemctl is-active rabbitmq", "Rabbitmq运维巡检手册v1.0.docx", "P0-TABLE5", "systemd active 且 beam.smp/rabbitmq-server 存在 → OK；否则 → CRIT"),
+    _middleware_metric("local.rabbitmq.node.health", "RabbitMQ 节点健康", "rabbitmq-diagnostics ping; rabbitmq-diagnostics status", "Rabbitmq运维巡检手册v1.0.docx", "P0-TABLE5", "Ping succeeded 且可返回节点/版本/运行时信息 → OK；失败或超时 → CRIT"),
+    _middleware_metric("local.rabbitmq.cluster.nodes", "RabbitMQ 集群节点", "rabbitmqctl cluster_status", "Rabbitmq运维巡检手册v1.0.docx", "P0-TABLE5", "running_nodes 包含规划 3 节点 → OK；少于 3 → WARN；少于 2 → CRIT"),
+    _middleware_metric("local.rabbitmq.alarm.partition", "RabbitMQ 告警与分区", "rabbitmq-diagnostics check_local_alarms; rabbitmqctl cluster_status | egrep -i 'alarms|partitions|running_nodes'", "Rabbitmq运维巡检手册v1.0.docx", "P0-TABLE5", "无 memory/disk alarm 且 partitions 为空 → OK；出现告警或网络分区 → CRIT"),
+    _middleware_metric("local.rabbitmq.queue.backlog", "RabbitMQ 队列积压", "rabbitmqctl list_queues -p / name state messages messages_ready messages_unacknowledged consumers", "Rabbitmq运维巡检手册v1.0.docx", "P0-TABLE5", "队列 running 且消息量不持续增长 → OK；积压达到产品补充阈值 → WARN/CRIT"),
+    _middleware_metric("local.rabbitmq.connection.pressure", "RabbitMQ 连接与信道压力", "rabbitmqctl list_connections state channels send_pend; rabbitmqctl list_channels messages_unacknowledged", "Rabbitmq运维巡检手册v1.0.docx", "P1-TABLE6", "无 blocked/closing/flow 且 send_pend 不堆积 → OK；达到产品补充阈值 → WARN/CRIT"),
+
+    _middleware_metric("local.redis.service.health", "Redis 服务健康", "pgrep -fa 'redis-server.*(6379|16379|7000)'; systemctl is-active redis", "Redis运维巡检手册v1.0.docx", "P0-TABLE5", "systemd active 且 redis-server 使用规划配置 → OK；否则 → CRIT"),
+    _middleware_metric("local.redis.ping.version", "Redis PING 与版本", "redis-cli -h 127.0.0.1 -p <PORT> PING; redis-cli -h 127.0.0.1 -p <PORT> INFO server", "Redis运维巡检手册v1.0.docx", "P0-TABLE5", "返回 PONG 且版本/端口符合模式 → OK；认证失败、拒绝连接或超时 → CRIT"),
+    _middleware_metric("local.redis.replication.health", "Redis 复制健康", "redis-cli -p <PORT> INFO replication", "Redis运维巡检手册v1.0.docx", "P0-TABLE5", "角色、从库数和 master_link_status=up 符合规划 → OK；不符合 → CRIT"),
+    _middleware_metric("local.redis.sentinel.health", "Redis Sentinel 健康", "redis-cli -p 26379 INFO sentinel; redis-cli -p 26379 SENTINEL masters", "Redis运维巡检手册v1.0.docx", "P0-TABLE5", "1 master、2 slave、2 其他 Sentinel 且无 s_down/o_down/disconnected → OK；否则 → CRIT"),
+    _middleware_metric("local.redis.cluster.health", "Redis Cluster 健康", "redis-cli -p 7000 CLUSTER INFO; redis-cli -p 7000 CLUSTER NODES", "Redis运维巡检手册v1.0.docx", "P0-TABLE5", "cluster_state=ok、16384/16384 slots、3 master+3 slave 且无 fail/noaddr → OK；否则 → CRIT"),
+    _middleware_metric("local.redis.persistence.health", "Redis 持久化健康", "redis-cli -p <PORT> INFO persistence; redis-cli -p <PORT> CONFIG GET appendonly appendfsync dir", "Redis运维巡检手册v1.0.docx", "P0-TABLE5", "loading=0、RDB/AOF 状态正常且 appendfsync=everysec → OK；异常 → CRIT"),
+
+    _middleware_metric("local.rocketmq.namesrv.health", "RocketMQ NameServer 健康", "pgrep -fa 'NamesrvStartup|mqnamesrv'; tail -n 50 /opt/rocketmq/logs/rocketmqlogs/namesrv.log", "Rocketmq运维巡检手册v1.0.docx", "P0-TABLE5", "进程存在且日志显示启动成功 → OK；inactive/failed 或启动失败 → CRIT"),
+    _middleware_metric("local.rocketmq.broker.health", "RocketMQ Broker 健康", "pgrep -fa 'BrokerStartup|mqbroker'; tail -n 50 /opt/rocketmq/logs/rocketmqlogs/broker.log", "Rocketmq运维巡检手册v1.0.docx", "P0-TABLE5", "Broker 进程存在、配置正确且无持续 ERROR/FATAL → OK；否则 → CRIT"),
+    _middleware_metric("local.rocketmq.core_ports.health", "RocketMQ 核心端口", "ss -tlnp | egrep ':9876|:9877|:10911|:10912'", "Rocketmq运维巡检手册v1.0.docx", "P0-TABLE5", "按模式检查 9876/9877/10911/10912 均 LISTEN → OK；关键端口缺失 → CRIT"),
+    _middleware_metric("local.rocketmq.cluster.registration", "RocketMQ 集群注册", "mqadmin clusterList -n <NAMESRV_ADDR>", "Rocketmq运维巡检手册v1.0.docx", "P0-TABLE5", "返回预期集群、Broker、副本和 Master BrokerId=0 → OK；Broker 缺失或副本不足 → WARN/CRIT"),
+    _middleware_metric("local.rocketmq.controller.sync_set", "RocketMQ Controller 同步集合", "mqadmin getControllerMetaData -a <CONTROLLER_ADDR>; mqadmin getSyncStateSet -a <CONTROLLER_ADDR> -b <BROKER>", "Rocketmq运维巡检手册v1.0.docx", "P0-TABLE5", "有 leader、3 Controller 且 SyncStateSet 至少 2 副本 → OK；无 leader/少于多数派 → CRIT"),
+    _middleware_metric("local.rocketmq.consumer.lag", "RocketMQ 消费堆积", "mqadmin consumerProgress -n <NAMESRV_ADDR>; mqadmin statsAll -n <NAMESRV_ADDR>", "Rocketmq运维巡检手册v1.0.docx", "P0-TABLE5", "消费 diff/lag 为 0 或在业务可接受范围且不持续增长 → OK；快速增长 → WARN/CRIT"),
+
+    _middleware_metric("local.tomcat.service.health", "Tomcat 服务健康", "ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "Tomcat 进程存在且服务 active → OK；否则 → CRIT"),
+    _middleware_metric("local.tomcat.http.health", "Tomcat HTTP 健康", "ss -lntp | egrep '(:8080|:8443|:8005)\\b'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "HTTP 端口处于 LISTEN 且归属 Tomcat Java 进程 → OK；未监听或端口冲突 → CRIT"),
+    _middleware_metric("local.tomcat.access_log.errors", "Tomcat 访问与错误日志", "tail -200 /opt/tomcat/logs/catalina.out | egrep -i 'Server startup in|SEVERE|Exception|OutOfMemoryError|Address already in use'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "启动成功且无持续 SEVERE/OOM/端口占用等关键错误 → OK；关键错误 → CRIT"),
+    _middleware_metric("local.tomcat.jvm.memory", "Tomcat JVM 内存", "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); ps -o pid,rss,vsz,%mem,etime,cmd -p \"$PID\"; free -h", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "RSS/JVM 配置与业务负载匹配且 available 内存充足、swap 未持续使用 → OK；内存压力或 OOM 风险 → WARN/CRIT"),
+    _middleware_metric("local.tomcat.thread_pool.pressure", "Tomcat 文件句柄与线程压力", "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); echo fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); echo threads=$(ls /proc/$PID/task 2>/dev/null | wc -l); cat /proc/$PID/limits 2>/dev/null | egrep 'Max open files|Max processes'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "文件句柄/线程数接近限制但未耗尽，且无 too many open files 或线程堆积 → OK；接近/超过限制 → WARN/CRIT"),
+    _middleware_metric("local.tomcat.security.baseline", "Tomcat 安全配置基线", "egrep -n '(<Server port=|<Connector|autoDeploy=|deployOnStartup=|server=)' /opt/tomcat/conf/server.xml", "Tomcat运维巡检手册v1.0.docx", "Tomcat-P1", "Connector/Server 端口符合规划，autoDeploy/deployOnStartup 按基线关闭且 Server 响应头受控 → OK；偏离 → WARN/CRIT"),
+]
+
+METRICS.extend(_ADDITIONAL_MIDDLEWARE_METRICS)
+
 _METRICS_BY_ID = {m["metric_id"]: m for m in METRICS}
 
 # 注册表字段契约（tests/test_metrics.py 校验每个条目的键集）

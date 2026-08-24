@@ -532,6 +532,145 @@ for _es_metric_id in (
         "anchor": "安徽农金Elasticsearch运维巡检手册 P0/P1 指标动态采集",
     }
 
+# Additional middleware adapters use the exact, redacted manual command as a
+# static collector template.  Their module-specific defaults live in
+# inspect.conf for report provenance and future dynamic discovery; the first
+# implementation deliberately keeps collection independent of a guessed path.
+_ADDITIONAL_COMMANDS = {
+    "local.keepalived.vip.present": "ip -brief addr; grep -E 'virtual_ipaddress|interface' <KEEPALIVED_CONF>",
+    "local.keepalived.vrrp.role": "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>",
+    "local.keepalived.health_check.status": "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>",
+    "local.keepalived.failover.config": "grep -E 'notify_master|notify_backup|notify_fault|virtual_ipaddress|track_script' <KEEPALIVED_CONF>",
+    "local.kafka.zookeeper.health": "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181; zkServer.sh status <zoo.cfg>",
+    "local.kafka.broker.health": "pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'",
+    "local.kafka.controller.health": "zookeeper-shell.sh <ZK_CONNECT> get /controller",
+    "local.kafka.under_replicated_partitions": "kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions",
+    "local.kafka.under_min_isr": "kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions; kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions",
+    "local.kafka.zookeeper.latency": "echo mntr | nc -w 3 127.0.0.1 2181 | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections'",
+    "local.mysql.service.health": "pgrep -fa 'mysqld.*defaults-file=/opt/mysql/conf/my.cnf'; ss -tlnp | grep ':3306'",
+    "local.mysql.login.version": "mysql --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@version,@@hostname,@@port;\"",
+    "local.mysql.role.gtid": "mysql -u<USER> -p -e \"SELECT @@server_id,@@gtid_mode,@@enforce_gtid_consistency,@@read_only,@@super_read_only;\"",
+    "local.mysql.replica.threads": "mysql -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'",
+    "local.mysql.replication.lag": "mysql -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Seconds_Behind_Source|Read_Source_Log_Pos|Exec_Source_Log_Pos'",
+    "local.mysql.connection.pressure": "mysql -u<USER> -p -e \"SHOW GLOBAL STATUS LIKE 'Threads_connected'; SHOW GLOBAL STATUS LIKE 'Max_used_connections'; SHOW VARIABLES LIKE 'max_connections';\"",
+    "local.nacos.service.health": "pgrep -fa 'com.alibaba.nacos|nacos.home|/opt/nacos'",
+    "local.nacos.core_ports.health": "ss -tlnp | egrep ':8848|:9848|:9849|:7848'",
+    "local.nacos.http.health": "curl -sS --connect-timeout 3 http://127.0.0.1:8848/nacos/actuator/health",
+    "local.nacos.cluster.nodes": "curl -sS 'http://127.0.0.1:8848/nacos/v2/core/cluster/node/list?accessToken=<TOKEN>'",
+    "local.nacos.mysql.connectivity": "grep -E '^(spring.sql.init.platform|db.num|db.url.0|db.user.0)' /opt/nacos/conf/application.properties; nc -vz <MYSQL_HOST> 3306",
+    "local.nacos.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|No DataSource|SQLException|Connection refused|raft|failed' /opt/nacos/logs | tail -80",
+    "local.rabbitmq.service.health": "pgrep -fa 'beam.smp|rabbitmq-server'; systemctl is-active rabbitmq",
+    "local.rabbitmq.node.health": "rabbitmq-diagnostics ping; rabbitmq-diagnostics status",
+    "local.rabbitmq.cluster.nodes": "rabbitmqctl cluster_status",
+    "local.rabbitmq.alarm.partition": "rabbitmq-diagnostics check_local_alarms; rabbitmqctl cluster_status | egrep -i 'alarms|partitions|running_nodes'",
+    "local.rabbitmq.queue.backlog": "rabbitmqctl list_queues -p / name state messages messages_ready messages_unacknowledged consumers",
+    "local.rabbitmq.connection.pressure": "rabbitmqctl list_connections state channels send_pend; rabbitmqctl list_channels messages_unacknowledged",
+    "local.redis.service.health": "pgrep -fa 'redis-server.*(6379|16379|7000)'; systemctl is-active redis",
+    "local.redis.ping.version": "redis-cli -h 127.0.0.1 -p <PORT> PING; redis-cli -h 127.0.0.1 -p <PORT> INFO server",
+    "local.redis.replication.health": "redis-cli -p <PORT> INFO replication",
+    "local.redis.sentinel.health": "redis-cli -p 26379 INFO sentinel; redis-cli -p 26379 SENTINEL masters",
+    "local.redis.cluster.health": "redis-cli -p 7000 CLUSTER INFO; redis-cli -p 7000 CLUSTER NODES",
+    "local.redis.persistence.health": "redis-cli -p <PORT> INFO persistence; redis-cli -p <PORT> CONFIG GET appendonly appendfsync dir",
+    "local.rocketmq.namesrv.health": "pgrep -fa 'NamesrvStartup|mqnamesrv'; tail -n 50 /opt/rocketmq/logs/rocketmqlogs/namesrv.log",
+    "local.rocketmq.broker.health": "pgrep -fa 'BrokerStartup|mqbroker'; tail -n 50 /opt/rocketmq/logs/rocketmqlogs/broker.log",
+    "local.rocketmq.core_ports.health": "ss -tlnp | egrep ':9876|:9877|:10911|:10912'",
+    "local.rocketmq.cluster.registration": "mqadmin clusterList -n <NAMESRV_ADDR>",
+    "local.rocketmq.controller.sync_set": "mqadmin getControllerMetaData -a <CONTROLLER_ADDR>; mqadmin getSyncStateSet -a <CONTROLLER_ADDR> -b <BROKER>",
+    "local.rocketmq.consumer.lag": "mqadmin consumerProgress -n <NAMESRV_ADDR>; mqadmin statsAll -n <NAMESRV_ADDR>",
+    "local.tomcat.service.health": "ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'",
+    "local.tomcat.http.health": "ss -lntp | egrep '(:8080|:8443|:8005)\\b'",
+    "local.tomcat.access_log.errors": "tail -200 /opt/tomcat/logs/catalina.out | egrep -i 'Server startup in|SEVERE|Exception|OutOfMemoryError|Address already in use'",
+    "local.tomcat.jvm.memory": "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); ps -o pid,rss,vsz,%mem,etime,cmd -p \"$PID\"; free -h",
+    "local.tomcat.thread_pool.pressure": "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); echo fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); echo threads=$(ls /proc/$PID/task 2>/dev/null | wc -l); cat /proc/$PID/limits 2>/dev/null | egrep 'Max open files|Max processes'",
+    "local.tomcat.security.baseline": "egrep -n '(<Server port=|<Connector|autoDeploy=|deployOnStartup=|server=)' /opt/tomcat/conf/server.xml",
+}
+for _middleware_metric_id, _middleware_command in _ADDITIONAL_COMMANDS.items():
+    _COMMAND_TEMPLATES[_middleware_metric_id] = {
+        "command": _middleware_command,
+        "profile_keys": (),
+        "become": False,
+        "anchor": "DOCX:middleware-v1.0:P0/P1",
+    }
+
+_ADDITIONAL_PLACEHOLDER_KEYS = {
+    "local.keepalived.vip.present": {"<KEEPALIVED_CONF>": "keepalived_conf"},
+    "local.keepalived.vrrp.role": {"<KEEPALIVED_CONF>": "keepalived_conf"},
+    "local.keepalived.health_check.status": {
+        "<KEEPALIVED_CONF>": "keepalived_conf",
+        "<HEALTHCHECK_SCRIPT>": "keepalived_healthcheck_script",
+    },
+    "local.keepalived.failover.config": {"<KEEPALIVED_CONF>": "keepalived_conf"},
+    "local.kafka.zookeeper.health": {"<zoo.cfg>": "kafka_zookeeper_conf"},
+    "local.kafka.controller.health": {"<ZK_CONNECT>": "kafka_zookeeper_connect"},
+    "local.kafka.under_replicated_partitions": {
+        "<BOOTSTRAP>": "kafka_bootstrap", "<SSL_CONFIG>": "kafka_ssl_config",
+    },
+    "local.kafka.under_min_isr": {
+        "<BOOTSTRAP>": "kafka_bootstrap", "<SSL_CONFIG>": "kafka_ssl_config",
+    },
+    "local.mysql.login.version": {"<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user"},
+    "local.mysql.role.gtid": {"<USER>": "mysql_user"},
+    "local.mysql.replica.threads": {"<USER>": "mysql_user"},
+    "local.mysql.replication.lag": {"<USER>": "mysql_user"},
+    "local.mysql.connection.pressure": {"<USER>": "mysql_user"},
+    "local.nacos.cluster.nodes": {"<TOKEN>": "nacos_token"},
+    "local.nacos.mysql.connectivity": {"<MYSQL_HOST>": "mysql_host"},
+    "local.redis.ping.version": {"<PORT>": "redis_port"},
+    "local.redis.replication.health": {"<PORT>": "redis_port"},
+    "local.redis.persistence.health": {"<PORT>": "redis_port"},
+    "local.rocketmq.cluster.registration": {"<NAMESRV_ADDR>": "rocketmq_namesrv_addr"},
+    "local.rocketmq.controller.sync_set": {
+        "<CONTROLLER_ADDR>": "rocketmq_controller_addr", "<BROKER>": "rocketmq_broker",
+    },
+    "local.rocketmq.consumer.lag": {"<NAMESRV_ADDR>": "rocketmq_namesrv_addr"},
+}
+
+_ADDITIONAL_PLACEHOLDER_DEFAULTS = {
+    "keepalived_conf": "/etc/keepalived/keepalived.conf",
+    "keepalived_healthcheck_script": "/etc/keepalived/check.sh",
+    "kafka_zookeeper_conf": "/opt/zookeeper/conf/zoo.cfg",
+    "kafka_zookeeper_connect": "127.0.0.1:2181",
+    "kafka_bootstrap": "127.0.0.1:9093",
+    "kafka_ssl_config": "/opt/kafka/config/client.properties",
+    "mysql_socket": "/opt/mysql/data/mysql.sock",
+    "mysql_user": "root",
+    "mysql_host": "127.0.0.1",
+    "nacos_token": "CHANGE_ME",
+    "redis_port": "6379",
+    "rocketmq_namesrv_addr": "127.0.0.1:9876",
+    "rocketmq_controller_addr": "127.0.0.1:9877",
+    "rocketmq_broker": "broker-a",
+}
+_SAFE_ADDITIONAL_VALUE = re.compile(r"[A-Za-z0-9_./:@%+=,-]+")
+_ADDITIONAL_GENERATED_ALLOWED_BINARIES = (
+    "awk", "bash", "cat", "curl", "echo", "egrep", "free", "grep", "head",
+    "ip", "jcmd", "jstat", "kafka-topics.sh", "ls", "mqadmin", "mysql", "nc",
+    "pgrep", "ps", "rabbitmq-diagnostics", "rabbitmqctl", "redis-cli", "sed",
+    "ss", "systemctl", "tail", "test", "wc", "zookeeper-shell.sh", "zkServer.sh",
+)
+_ADDITIONAL_UNSAFE_GENERATED_TOKENS = re.compile(
+    r"\b(?:rm|rmdir|mkfs|dd|shutdown|reboot|poweroff|sudo|ssh|scp|wget|"
+    r"python|perl|ruby|php|eval|exec|source|chmod|chown|mount|umount)\b"
+)
+
+
+def _additional_profile_value(profile: Dict[str, Any], key: str) -> str:
+    raw = profile.get(key, _ADDITIONAL_PLACEHOLDER_DEFAULTS[key])
+    if isinstance(raw, list):
+        raw = raw[0] if raw else _ADDITIONAL_PLACEHOLDER_DEFAULTS[key]
+    value = str(raw)
+    if not value or not _SAFE_ADDITIONAL_VALUE.fullmatch(value):
+        raise CommandConfigError(f"additional middleware profile {key} 非法")
+    return value
+
+
+def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
+    command = _COMMAND_TEMPLATES[metric_id]["command"]
+    for placeholder, key in _ADDITIONAL_PLACEHOLDER_KEYS.get(metric_id, {}).items():
+        command = command.replace(placeholder, _additional_profile_value(profile, key))
+    return command
+
+
 # 日志类指标（超时 15s，AE §7 / TD §5.2 超时列）
 _LOG_METRIC_IDS = {
     "local.logs.key_evidence",
@@ -1326,6 +1465,21 @@ def build_metric_command_specs(
         required = probe_mod.metric_required_commands(metric_id)
         if not required:
             raise CommandConfigError(f"指标所需命令映射缺失: {metric_id}")
+        if metric_id in _ADDITIONAL_COMMANDS:
+            command = _build_additional_command(metric_id, profile)
+            specs.append(
+                CommandSpec(
+                    metric_id=metric_id,
+                    command=command,
+                    timeout_sec=effective_timeout_sec,
+                    become=bool(entry["become"]),
+                    required_commands=required,
+                    source_anchor=entry["anchor"],
+                    allowed_binaries=_ADDITIONAL_GENERATED_ALLOWED_BINARIES,
+                    trusted_generated_shell=True,
+                )
+            )
+            continue
         # Nginx is process-discovered.  Its command must still be emitted
         # when inspect.conf has no candidate values so that the target can
         # report UNKNOWN (rather than being mislabeled UNSUPPORTED_PROFILE).
@@ -1354,6 +1508,12 @@ def build_metric_command_specs(
         if (
             metric_id.startswith("local.keepalived.")
             and metric_id != KEEPALIVED_PROCESS_METRIC
+            and metric_id not in {
+                "local.keepalived.vip.present",
+                "local.keepalived.vrrp.role",
+                "local.keepalived.health_check.status",
+                "local.keepalived.failover.config",
+            }
             and _is_runtime_keepalived_profile(profile)
         ):
             command = _build_keepalived_metric_command(
@@ -1602,6 +1762,7 @@ def validate_command_specs(
                 spec.metric_id.startswith("local.nginx.")
                 or spec.metric_id.startswith("local.keepalived.")
                 or spec.metric_id.startswith("local.elasticsearch.")
+                or spec.metric_id in _ADDITIONAL_COMMANDS
             ):
                 raise CommandNotAllowedError(
                     f"allow-list 拒绝：只有已注册中间件动态命令可使用内部 shell 变量: {spec.metric_id}"
@@ -1610,8 +1771,10 @@ def validate_command_specs(
                 unsafe_tokens = _NGINX_UNSAFE_GENERATED_TOKENS
             elif spec.metric_id.startswith("local.keepalived."):
                 unsafe_tokens = _KEEPALIVED_UNSAFE_GENERATED_TOKENS
-            else:
+            elif spec.metric_id.startswith("local.elasticsearch."):
                 unsafe_tokens = _ELASTICSEARCH_UNSAFE_GENERATED_TOKENS
+            else:
+                unsafe_tokens = _ADDITIONAL_UNSAFE_GENERATED_TOKENS
             if "`" in spec.command or unsafe_tokens.search(spec.command):
                 raise CommandNotAllowedError(
                     f"allow-list 拒绝：中间件动态命令含危险执行词: {spec.metric_id}"

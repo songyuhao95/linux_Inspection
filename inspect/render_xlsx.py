@@ -37,7 +37,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
-from inspect.replay import replay_command_or_fallback
+from inspect.replay import manual_command_for_report
 from inspect.report_fields import format_threshold_rule
 
 # cli-contract §4：渲染失败（技术）按执行失败处理
@@ -63,8 +63,19 @@ SHEET_LOCAL = "Local"
 SHEET_NGINX = "nginx"
 SHEET_KEEPALIVED = "keepalived"
 SHEET_ELASTICSEARCH = "elasticsearch"
+SHEET_KAFKA = "kafka"
+SHEET_MYSQL = "mysql"
+SHEET_NACOS = "nacos"
+SHEET_RABBITMQ = "rabbitmq"
+SHEET_REDIS = "redis"
+SHEET_ROCKETMQ = "rocketmq"
+SHEET_TOMCAT = "tomcat"
 SHEET_ERRORS = "Errors-Evidence"
-SHEET_NAMES = (SHEET_OVERVIEW, SHEET_LOCAL, SHEET_NGINX, SHEET_KEEPALIVED, SHEET_ELASTICSEARCH, SHEET_ERRORS)
+SHEET_NAMES = (
+    SHEET_OVERVIEW, SHEET_LOCAL, SHEET_NGINX, SHEET_KEEPALIVED,
+    SHEET_ELASTICSEARCH, SHEET_KAFKA, SHEET_MYSQL, SHEET_NACOS,
+    SHEET_RABBITMQ, SHEET_REDIS, SHEET_ROCKETMQ, SHEET_TOMCAT, SHEET_ERRORS,
+)
 
 # Local 列：以主机/IP 开始；详情指标逐行展开；只保留可读阈值解释和
 # 事实源提供的复现命令，不把来源/证据摘要/provenance 冗余复制到报表。
@@ -316,7 +327,7 @@ def _local_row_values(
         "unit": metric.get("unit", ""),
         "status": status,
         "threshold_rule": _threshold_rule_text(metric, detail),
-        "command": replay_command_or_fallback(metric.get("evidence")),
+        "command": manual_command_for_report(metric),
     }
 
 
@@ -341,7 +352,11 @@ def _metric_prefix_filter(prefix: str):
     return _keep
 
 
-_MIDDLEWARE_METRIC_PREFIXES = ("local.nginx.", "local.keepalived.", "local.elasticsearch.")
+_MIDDLEWARE_METRIC_PREFIXES = (
+    "local.nginx.", "local.keepalived.", "local.elasticsearch.",
+    "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+    "local.redis.", "local.rocketmq.", "local.tomcat.",
+)
 
 
 def _local_metric_filter(metric: Mapping[str, Any]) -> bool:
@@ -531,6 +546,21 @@ def _write_workbook(
         metric_filter=_metric_prefix_filter("local.elasticsearch."),
     )
 
+    for sheet_name, prefix in (
+        (SHEET_KAFKA, "local.kafka."),
+        (SHEET_MYSQL, "local.mysql."),
+        (SHEET_NACOS, "local.nacos."),
+        (SHEET_RABBITMQ, "local.rabbitmq."),
+        (SHEET_REDIS, "local.redis."),
+        (SHEET_ROCKETMQ, "local.rocketmq."),
+        (SHEET_TOMCAT, "local.tomcat."),
+    ):
+        _write_detail_sheet(
+            workbook, sheet_name, LOCAL_HEADERS, local_widths,
+            docs, host_ips, header_fmt, cell_fmt, status_fmts, crit_value_fmt,
+            metric_filter=_metric_prefix_filter(prefix),
+        )
+
     # ============ Errors-Evidence（RR §3：error 非空指标与主机 +
     # 文档冲突/缺失 UNKNOWN 清单） ============
     ws = workbook.add_worksheet(SHEET_ERRORS)
@@ -576,7 +606,7 @@ def _write_workbook(
             ws.write(r, 3, status, status_fmt)
             ws.write(r, 4, err_code, cell_fmt)
             ws.write(r, 5, message, cell_fmt)
-            ws.write(r, 6, replay_command_or_fallback(evidence), cell_fmt)
+            ws.write(r, 6, manual_command_for_report(metric), cell_fmt)
             ws.write(r, 7, evidence.get("output_summary") or "—", cell_fmt)
             ws.write(r, 8, note, cell_fmt)
             r += 1

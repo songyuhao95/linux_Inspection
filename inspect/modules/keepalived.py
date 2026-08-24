@@ -17,6 +17,10 @@ KEEPALIVED_METRIC_IDS = (
     "local.keepalived.healthcheck.script",
     "local.keepalived.error_log.key_evidence",
     "local.keepalived.capability.stability",
+    "local.keepalived.vip.present",
+    "local.keepalived.vrrp.role",
+    "local.keepalived.health_check.status",
+    "local.keepalived.failover.config",
 )
 
 MODULE = MonitorModule(

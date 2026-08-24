@@ -1366,6 +1366,36 @@ def parse_elasticsearch_system_parameters(output: str) -> Dict[str, Any]:
     return {"max_map_count": max_map, "nofile": nofile, "nproc": nproc, "memlock": memlock.group(1), "swap_used": swap_used, "rows": [mask_output(x) for x in lines]}
 
 
+def parse_middleware_text(output: str) -> Dict[str, Any]:
+    """Parse a document command whose result is intentionally text-shaped.
+
+    Middleware commands differ widely (CLI tables, JSON, status lines and
+    logs).  The raw command output remains the fact; this parser only records
+    a bounded, masked sample and an observation count.  The judge below uses
+    explicit health/error words when the manual command emits them and never
+    treats missing output as healthy.
+    """
+    lines = _content_lines(output)
+    if not lines:
+        raise ParseError("中间件命令无输出")
+    text = "\n".join(lines[-80:])
+    lowered = text.lower()
+    return {
+        "text": mask_output(text),
+        "line_count": len(lines),
+        "has_critical_marker": bool(re.search(
+            r"(?:fatal|outofmemory|oom|connection refused|not\s+found|inactive|"
+            r"unavailable|unassigned|no leader|failed|failure|error|critical|\bdown\b)",
+            lowered,
+        )),
+        "has_warning_marker": bool(re.search(
+            r"(?:warn|warning|under[-_ ]replicated|under[-_ ]min|lag|yellow|"
+            r"pending|partition|timeout|degraded|\bslow\b)", lowered,
+        )),
+        "rows": [mask_output(line) for line in lines[-20:]],
+    }
+
+
 # --------------------------------------------------------------------------
 # 解析器注册表（metrics.py parser 字段名 ↔ 函数；TD §5.2 按名注册）
 # --------------------------------------------------------------------------
@@ -1424,6 +1454,10 @@ PARSERS: Dict[str, Any] = {
     "local.elasticsearch.snapshot.repository": parse_elasticsearch_snapshot,
     "local.elasticsearch.system.parameters": parse_elasticsearch_system_parameters,
 }
+
+for _metric in metrics_registry.METRICS:
+    if _metric.get("parser") == "parse_middleware_text":
+        PARSERS[_metric["metric_id"]] = parse_middleware_text
 
 # parser 字段名与注册表一一对应（tests 机械校验）
 PARSER_NAMES = {m["metric_id"]: m["parser"] for m in metrics_registry.METRICS}
@@ -2120,6 +2154,16 @@ def _judge_es_system_parameters(parsed, resolved, profile=None):
     return {"status": status, "rule": _baseline_rule(resolved, status)}
 
 
+def _judge_middleware_text(parsed, resolved, profile=None):
+    if parsed.get("has_critical_marker"):
+        status = STATUS_CRIT
+    elif parsed.get("has_warning_marker"):
+        status = STATUS_WARN
+    else:
+        status = STATUS_OK
+    return {"status": status, "rule": _baseline_rule(resolved, status)}
+
+
 # 指标 → 判定函数（数值边界全部来自 MR §5/§6 已批准基线）
 JUDGERS: Dict[str, Any] = {
     "local.process.present": _judge_process_present,
@@ -2175,6 +2219,10 @@ JUDGERS: Dict[str, Any] = {
     "local.elasticsearch.snapshot.repository": _judge_es_snapshot,
     "local.elasticsearch.system.parameters": _judge_es_system_parameters,
 }
+
+for _metric in metrics_registry.METRICS:
+    if _metric.get("parser") == "parse_middleware_text":
+        JUDGERS[_metric["metric_id"]] = _judge_middleware_text
 
 # 数值化指标（normalized_value 非 null，可参与外部配置数值规则；MR §5）
 NUMERIC_METRIC_IDS = frozenset(
@@ -2259,6 +2307,11 @@ def _normalized_value(metric_id: str, parsed: Dict[str, Any]) -> Optional[float]
         return float(parsed["days_remaining"])
     if metric_id == "local.elasticsearch.system.parameters":
         return float(parsed["max_map_count"])
+    if metric_id in PARSERS and metric_id.startswith((
+        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.",
+    )):
+        return float(parsed.get("line_count", 0))
     return None
 
 
@@ -2342,6 +2395,11 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
         return f"net_admin={parsed['has_net_admin']};net_raw={parsed['has_net_raw']}"
     if metric_id == "local.elasticsearch.process.present":
         return "present" if parsed["present"] else "absent"
+    if metric_id.startswith((
+        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.",
+    )):
+        return parsed.get("text", "")
     if metric_id == "local.elasticsearch.version":
         return parsed["version"]
     if metric_id == "local.elasticsearch.cluster.health":
@@ -2637,6 +2695,11 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
             return f"仓库数量={parsed['repository_count']}；verify={parsed['verify_ok']}"
         if metric_id == "local.elasticsearch.system.parameters":
             return f"max_map_count={parsed['max_map_count']}；swap_used={parsed['swap_used']}；nofile={parsed['nofile']}；nproc={parsed['nproc']}；memlock={parsed['memlock']}"
+    if metric_id.startswith((
+        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.",
+    )):
+        return parsed.get("text", "")
     return ""
 
 
@@ -2656,6 +2719,12 @@ def _scope_for(metric_id: str) -> str:
         return "keepalived-p0-v1"
     if metric_id.startswith("local.elasticsearch."):
         return "elasticsearch-p0-p1-v1"
+    for _prefix in (
+        "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.",
+    ):
+        if metric_id.startswith(_prefix):
+            return _prefix[6:-1] + "-p0-p1-v1"
     return SCOPE
 
 
