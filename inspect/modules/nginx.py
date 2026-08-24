@@ -17,15 +17,11 @@ NGINX_METRIC_IDS = (
     "local.nginx.config.valid",
     "local.nginx.port.listening",
     "local.nginx.error_log.key_evidence",
-    "local.nginx.connections.status",
     "local.nginx.access_log.status_codes",
     "local.nginx.config.baseline",
     "local.nginx.security.baseline",
     "local.nginx.http.reachability",
-    "local.nginx.stub_status.connections",
-    "local.nginx.proxy.upstream.config",
     "local.nginx.fd.process.limits",
-    "local.nginx.https.certificate",
 )
 
 MODULE = MonitorModule(

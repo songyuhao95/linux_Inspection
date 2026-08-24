@@ -647,26 +647,6 @@ def parse_nginx_error_log(output: str) -> Dict[str, Any]:
     return parse_logs_key_evidence(_strip_ls_marker(output))
 
 
-def parse_nginx_connections_status(output: str) -> Dict[str, Any]:
-    """curl /nginx_status → stub_status 连接数（未开启 → configured=False）。"""
-    active = re.search(r"Active connections:\s*(\d+)", output)
-    if not output.strip() or active is None:
-        return {
-            "configured": False, "active": 0,
-            "reading": 0, "writing": 0, "waiting": 0,
-        }
-    def _num(pat: str) -> int:
-        m = re.search(pat, output)
-        return int(m.group(1)) if m else 0
-    return {
-        "configured": True,
-        "active": int(active.group(1)),
-        "reading": _num(r"Reading:\s*(\d+)"),
-        "writing": _num(r"Writing:\s*(\d+)"),
-        "waiting": _num(r"Waiting:\s*(\d+)"),
-    }
-
-
 _NGINX_STATUS_CODE_RE = re.compile(r"(?<![0-9])(?P<code>[1-5][0-9]{2})(?![0-9])")
 
 
@@ -729,17 +709,6 @@ def parse_nginx_security_baseline(output: str) -> Dict[str, Any]:
     }
 
 
-_NGINX_PROXY_UPSTREAM_RE = re.compile(
-    r"\bupstream\s+([A-Za-z0-9_.:-]+)\s*\{", re.IGNORECASE
-)
-_NGINX_PROXY_PASS_RE = re.compile(
-    r"\bproxy_pass\s+([^;\s]+)\s*;", re.IGNORECASE
-)
-_NGINX_PROXY_HEADER_RE = re.compile(
-    r"\bproxy_set_header\s+([^;]+?)\s*;", re.IGNORECASE
-)
-
-
 def parse_nginx_http_reachability(output: str) -> Dict[str, Any]:
     """Parse the first HTTP response status emitted by a local Nginx probe."""
     match = _NGINX_HTTP_STATUS_RE.search(output or "")
@@ -750,29 +719,6 @@ def parse_nginx_http_reachability(output: str) -> Dict[str, Any]:
         "reachable": True,
         "http_status": status,
         "summary": [mask_output(ln) for ln in _content_lines(output)[:3]],
-    }
-
-
-def parse_nginx_stub_status_connections(output: str) -> Dict[str, Any]:
-    """Parse the Nginx v2 stub_status fact using the existing parser contract."""
-    return parse_nginx_connections_status(output)
-
-
-def parse_nginx_proxy_upstream_config(output: str) -> Dict[str, Any]:
-    """Extract upstream/proxy directives from an ``nginx -T`` evidence stream."""
-    text = output or ""
-    upstreams = list(dict.fromkeys(_NGINX_PROXY_UPSTREAM_RE.findall(text)))
-    proxy_passes = list(dict.fromkeys(_NGINX_PROXY_PASS_RE.findall(text)))
-    proxy_set_headers = [
-        item.strip() for item in _NGINX_PROXY_HEADER_RE.findall(text) if item.strip()
-    ]
-    if not upstreams and not proxy_passes and not proxy_set_headers:
-        raise ParseError("Nginx upstream/proxy 配置缺少可解析证据")
-    return {
-        "upstreams": upstreams,
-        "proxy_passes": proxy_passes,
-        "proxy_set_headers": list(dict.fromkeys(proxy_set_headers)),
-        "rows": [mask_output(ln) for ln in _content_lines(text)[:20]],
     }
 
 
@@ -788,33 +734,6 @@ def parse_nginx_fd_process_limits(output: str) -> Dict[str, Any]:
     return {
         "nofile": int(nofile_match.group(1)),
         "max_processes": int(process_match.group(1)),
-        "rows": [mask_output(ln) for ln in _content_lines(text)[:10]],
-    }
-
-
-def parse_nginx_https_certificate(output: str) -> Dict[str, Any]:
-    """Extract certificate paths and OpenSSL ``notAfter`` evidence."""
-    text = output or ""
-    certificates = list(
-        dict.fromkeys(
-            re.findall(r"\bssl_certificate\s+([^;\s]+)\s*;", text, re.IGNORECASE)
-        )
-    )
-    not_after = list(
-        dict.fromkeys(
-            m.group(1).strip()
-            for m in re.finditer(
-                r"\bnotAfter\s*=\s*(.+?)\s*$",
-                text,
-                re.IGNORECASE | re.MULTILINE,
-            )
-        )
-    )
-    if not certificates and not not_after:
-        raise ParseError("Nginx HTTPS 证书缺少证书路径或 notAfter 证据")
-    return {
-        "certificates": certificates,
-        "not_after": not_after,
         "rows": [mask_output(ln) for ln in _content_lines(text)[:10]],
     }
 
@@ -1408,7 +1327,6 @@ _TYPED_KEEPALIVED_METRIC_IDS = frozenset(
         "local.keepalived.vip.present",
         "local.keepalived.vrrp.role",
         "local.keepalived.health_check.status",
-        "local.keepalived.failover.config",
     }
 )
 
@@ -1726,15 +1644,11 @@ PARSERS: Dict[str, Any] = {
     "local.nginx.config.valid": parse_nginx_config_valid,
     "local.nginx.port.listening": parse_nginx_port_listening,
     "local.nginx.error_log.key_evidence": parse_nginx_error_log,
-    "local.nginx.connections.status": parse_nginx_connections_status,
     "local.nginx.access_log.status_codes": parse_nginx_access_log_status_codes,
     "local.nginx.config.baseline": parse_nginx_config_baseline,
     "local.nginx.security.baseline": parse_nginx_security_baseline,
     "local.nginx.http.reachability": parse_nginx_http_reachability,
-    "local.nginx.stub_status.connections": parse_nginx_stub_status_connections,
-    "local.nginx.proxy.upstream.config": parse_nginx_proxy_upstream_config,
     "local.nginx.fd.process.limits": parse_nginx_fd_process_limits,
-    "local.nginx.https.certificate": parse_nginx_https_certificate,
     "local.keepalived.process.present": parse_process_present,
     "local.keepalived.version": parse_keepalived_version,
     "local.keepalived.vip.bound": parse_keepalived_vip_bound,
@@ -2066,17 +1980,6 @@ def _judge_nginx_error_log(
     return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN)}
 
 
-def _judge_nginx_connections_status(
-    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """stub_status 开启且返回连接数 → OK；未开启 → UNKNOWN（记录为未配置）。"""
-    if not parsed["configured"]:
-        return _unknown_decision(
-            resolved, extra_note="stub_status 未开启或 URL 不可访问（记录为未配置）"
-        )
-    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
-
-
 def _judge_nginx_access_log_status_codes(
     parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -2142,22 +2045,6 @@ def _judge_nginx_http_reachability(
     return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
 
 
-def _judge_nginx_stub_status_connections(
-    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """stub_status availability is factual; no capacity threshold is invented."""
-    if not parsed.get("configured"):
-        return _unknown_decision(resolved, extra_note="stub_status 未配置或不可访问")
-    return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
-
-
-def _judge_nginx_proxy_upstream_config(
-    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Keep upstream/proxy evidence without inventing health thresholds."""
-    return _unknown_decision(resolved, extra_note="upstream/proxy 配置边界未定义")
-
-
 _NGINX_FD_NOFILE_OK = 65535
 _NGINX_FD_NOFILE_WARN = 32768
 _NGINX_MAX_PROCESSES_OK = 4096
@@ -2210,13 +2097,6 @@ def _judge_nginx_fd_process_limits(
             f"当前 nofile={nofile}、max_processes={max_processes}。"
         ),
     }
-
-
-def _judge_nginx_https_certificate(
-    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """Keep certificate evidence without inventing validity-age thresholds."""
-    return _unknown_decision(resolved, extra_note="HTTPS 证书有效期边界未定义")
 
 
 # -- local.keepalived.* 判定（keepalived-p0-v1） -----------------------------
@@ -2540,15 +2420,11 @@ JUDGERS: Dict[str, Any] = {
     "local.nginx.config.valid": _judge_nginx_config_valid,
     "local.nginx.port.listening": _judge_nginx_port_listening,
     "local.nginx.error_log.key_evidence": _judge_nginx_error_log,
-    "local.nginx.connections.status": _judge_nginx_connections_status,
     "local.nginx.access_log.status_codes": _judge_nginx_access_log_status_codes,
     "local.nginx.config.baseline": _judge_nginx_config_baseline,
     "local.nginx.security.baseline": _judge_nginx_security_baseline,
     "local.nginx.http.reachability": _judge_nginx_http_reachability,
-    "local.nginx.stub_status.connections": _judge_nginx_stub_status_connections,
-    "local.nginx.proxy.upstream.config": _judge_nginx_proxy_upstream_config,
     "local.nginx.fd.process.limits": _judge_nginx_fd_process_limits,
-    "local.nginx.https.certificate": _judge_nginx_https_certificate,
     "local.keepalived.process.present": _judge_process_present,
     "local.keepalived.version": _judge_keepalived_version,
     "local.keepalived.vip.bound": _judge_keepalived_vip_bound,
@@ -2610,7 +2486,6 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.filesystem.inode_used_percent",
         "local.logs.key_evidence",
         "local.nginx.error_log.key_evidence",
-        "local.nginx.connections.status",
         "local.nginx.access_log.status_codes",
         "local.keepalived.error_log.key_evidence",
         "local.elasticsearch.nodes.online",
@@ -2664,8 +2539,6 @@ def _normalized_value(metric_id: str, parsed: Dict[str, Any]) -> Optional[float]
         return float(parsed["hit_count"])
     if metric_id == "local.nginx.error_log.key_evidence":
         return float(parsed["hit_count"])
-    if metric_id == "local.nginx.connections.status":
-        return float(parsed["active"]) if parsed["configured"] else None
     if metric_id == "local.nginx.access_log.status_codes":
         return float(parsed["five_xx"])
     if metric_id == "local.keepalived.error_log.key_evidence":
@@ -2733,11 +2606,6 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
         return f"listening={parsed['listening']};http_status={status}"
     if metric_id == "local.nginx.error_log.key_evidence":
         return str(parsed["hit_count"])
-    if metric_id == "local.nginx.connections.status":
-        if not parsed["configured"]:
-            return "not_configured"
-        return (f"active={parsed['active']};reading={parsed['reading']};"
-                f"writing={parsed['writing']};waiting={parsed['waiting']}")
     if metric_id == "local.nginx.access_log.status_codes":
         return str(parsed["five_xx"])
     if metric_id == "local.nginx.config.baseline":
@@ -2747,20 +2615,8 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
                 f"autoindex_off={parsed['autoindex_off']}")
     if metric_id == "local.nginx.http.reachability":
         return f"reachable={parsed['reachable']};http_status={parsed['http_status']}"
-    if metric_id == "local.nginx.stub_status.connections":
-        if not parsed["configured"]:
-            return "not_configured"
-        return (f"active={parsed['active']};reading={parsed['reading']};"
-                f"writing={parsed['writing']};waiting={parsed['waiting']}")
-    if metric_id == "local.nginx.proxy.upstream.config":
-        return (f"upstreams={','.join(parsed['upstreams'])};"
-                f"proxy_passes={','.join(parsed['proxy_passes'])};"
-                f"proxy_set_headers={','.join(parsed['proxy_set_headers'])}")
     if metric_id == "local.nginx.fd.process.limits":
         return f"nofile={parsed['nofile']};max_processes={parsed['max_processes']}"
-    if metric_id == "local.nginx.https.certificate":
-        return (f"certificates={','.join(parsed['certificates'])};"
-                f"not_after={','.join(parsed['not_after'])}")
     if metric_id == "local.keepalived.process.present":
         return "present" if parsed["present"] else "absent"
     if metric_id == "local.keepalived.version":
@@ -2975,11 +2831,6 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
         dist = " ".join(f"{k}={v}" for k, v in sorted(parsed["keyword_counts"].items()))
         last = " / ".join(parsed["last_hits"]) if parsed["last_hits"] else "无命中"
         return f"hits={parsed['hit_count']}；{dist}；最近命中: {last}"
-    if metric_id == "local.nginx.connections.status":
-        if not parsed["configured"]:
-            return "stub_status 未开启或 URL 不可访问（记录为未配置）"
-        return (f"active={parsed['active']} reading={parsed['reading']} "
-                f"writing={parsed['writing']} waiting={parsed['waiting']}")
     if metric_id == "local.nginx.access_log.status_codes":
         dist = " ".join(f"{k}={v}" for k, v in sorted(parsed["counts"].items()))
         last = " / ".join(parsed["last_hits"]) if parsed["last_hits"] else "无 5xx"
@@ -2991,20 +2842,8 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
                 f"autoindex off={parsed['autoindex_off']}")
     if metric_id == "local.nginx.http.reachability":
         return f"reachable={parsed['reachable']}；http_status={parsed['http_status']}"
-    if metric_id == "local.nginx.stub_status.connections":
-        if not parsed["configured"]:
-            return "stub_status 未配置或 URL 不可访问；记录为未配置"
-        return (f"active={parsed['active']} reading={parsed['reading']} "
-                f"writing={parsed['writing']} waiting={parsed['waiting']}")
-    if metric_id == "local.nginx.proxy.upstream.config":
-        return (f"upstreams={','.join(parsed['upstreams'])}；"
-                f"proxy_pass={','.join(parsed['proxy_passes'])}；"
-                f"proxy_set_header={','.join(parsed['proxy_set_headers'])}")
     if metric_id == "local.nginx.fd.process.limits":
         return f"nofile={parsed['nofile']}；max_processes={parsed['max_processes']}"
-    if metric_id == "local.nginx.https.certificate":
-        return (f"certificates={','.join(parsed['certificates'])}；"
-                f"notAfter={','.join(parsed['not_after'])}")
     if metric_id == "local.keepalived.process.present":
         if not parsed["present"]:
             return "未匹配到 Keepalived 进程（absent）"
@@ -4035,14 +3874,10 @@ __all__ = [
     "parse_nginx_access_log_status_codes",
     "parse_nginx_config_baseline",
     "parse_nginx_config_valid",
-    "parse_nginx_connections_status",
     "parse_nginx_error_log",
     "parse_nginx_port_listening",
     "parse_nginx_http_reachability",
-    "parse_nginx_stub_status_connections",
-    "parse_nginx_proxy_upstream_config",
     "parse_nginx_fd_process_limits",
-    "parse_nginx_https_certificate",
     "parse_nginx_security_baseline",
     "parse_nginx_version",
     "parse_keepalived_capability_stability",

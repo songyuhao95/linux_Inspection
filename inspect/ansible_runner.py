@@ -387,12 +387,6 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "become": False,
         "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P0「关键日志」行",
     },
-    "local.nginx.connections.status": {
-        "command": "curl -sS --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/nginx_status",
-        "profile_keys": ("nginx_port",),
-        "become": False,
-        "anchor": "安徽农金Nginx、Keepalived运维巡检手册 P1「Nginx连接状态」行",
-    },
     "local.nginx.access_log.status_codes": {
         "command": (
             "ls -1 {nginx_access_log} 2>/dev/null; "
@@ -429,29 +423,11 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "become": False,
         "anchor": "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE6-R4",
     },
-    "local.nginx.stub_status.connections": {
-        "command": "curl -sS --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/nginx_status",
-        "profile_keys": ("nginx_port",),
-        "become": False,
-        "anchor": "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R2",
-    },
-    "local.nginx.proxy.upstream.config": {
-        "command": "{nginx_bin} -T -c {nginx_conf} 2>&1 | grep -E '(^|[[:space:]])upstream[[:space:]]|proxy_pass|proxy_set_header'",
-        "profile_keys": ("nginx_bin", "nginx_conf"),
-        "become": False,
-        "anchor": "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R4",
-    },
     "local.nginx.fd.process.limits": {
         "command": "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+nginx[[:space:]]+nginx: master process'",
         "profile_keys": (),
         "become": False,
         "anchor": "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R7",
-    },
-    "local.nginx.https.certificate": {
-        "command": "{nginx_bin} -T -c {nginx_conf} 2>&1 | grep -E 'ssl_certificate|notAfter'",
-        "profile_keys": ("nginx_bin", "nginx_conf"),
-        "become": False,
-        "anchor": "DOCX:安徽农金Nginx、Keepalived运维巡检手册v1.0.docx:TABLE7-R9",
     },
     # ---- Keepalived 中间件（keepalived-p0-v1） ----
     "local.keepalived.process.present": {
@@ -540,7 +516,6 @@ _ADDITIONAL_COMMANDS = {
     "local.keepalived.vip.present": "ip -brief addr; grep -E 'virtual_ipaddress|interface' <KEEPALIVED_CONF>",
     "local.keepalived.vrrp.role": "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>",
     "local.keepalived.health_check.status": "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>",
-    "local.keepalived.failover.config": "grep -E 'notify_master|notify_backup|notify_fault|virtual_ipaddress|track_script' <KEEPALIVED_CONF>",
     "local.kafka.zookeeper.health": "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181; <ZOOKEEPER_TOOL> status <ZOOKEEPER_CONF>",
     "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'; tail -n 50 <KAFKA_LOG>/server.log",
     "local.kafka.controller.health": "<ZOOKEEPER_SHELL> <ZK_CONNECT> get /controller",
@@ -599,7 +574,6 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
         "<KEEPALIVED_CONF>": ("keepalived_conf", "keepalived.conf"),
         "<HEALTHCHECK_SCRIPT>": "keepalived_healthcheck_script",
     },
-    "local.keepalived.failover.config": {"<KEEPALIVED_CONF>": ("keepalived_conf", "keepalived.conf")},
     "local.kafka.zookeeper.health": {
         "<ZOOKEEPER_TOOL>": ("zookeeper_bin", "zkServer.sh"),
         "<ZOOKEEPER_CONF>": "zookeeper_conf",
@@ -772,7 +746,6 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         "local.keepalived.vip.present",
         "local.keepalived.vrrp.role",
         "local.keepalived.health_check.status",
-        "local.keepalived.failover.config",
     }
     if metric_id.startswith(typed_prefixes) or metric_id in typed_keepalived:
         module_id = metric_id.split(".", 2)[1]
@@ -1403,12 +1376,6 @@ def _build_nginx_metric_command(
             _nginx_discovery_prefix(profile, include_dump=True)
             + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_listener_host\"; then nginx_listener_host=127.0.0.1; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_HTTP_NOT_FOUND; else for port in $nginx_ports; do curl -sS -I --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://$nginx_listener_host:$port/\" | head -n 1; done; fi"
         )
-    if metric_id == "local.nginx.stub_status.connections":
-        ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))
-        return (
-            _nginx_discovery_prefix(profile, include_dump=True)
-            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\"; then nginx_ports='{ports}'; fi; if test -z \"$nginx_listener_host\"; then nginx_listener_host=127.0.0.1; fi; if test -z \"$nginx_ports\"; then printf '%s\\n' INSPECT_NGINX_STUB_STATUS_NOT_FOUND; else for port in $nginx_ports; do curl -sS --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://$nginx_listener_host:$port/nginx_status\"; done; fi"
-        )
     if metric_id == "local.nginx.port.listening":
         ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))
         return (
@@ -1420,31 +1387,15 @@ def _build_nginx_metric_command(
             _nginx_discovery_prefix(profile, include_dump=False)
             + "; if test -z \"$nginx_error_log\"; then printf '%s\\n' INSPECT_NGINX_ERROR_LOG_NOT_FOUND; else printf '%s\\n' \"$nginx_error_log\"; tail -n 1000 \"$nginx_error_log\" | egrep -i 'emerg|alert|crit|error|permission denied|bind\\(|connect\\(\\) failed|upstream timed out' | tail -n 20; fi"
         )
-    if metric_id == "local.nginx.connections.status":
-        ports = _nginx_shell_words(_nginx_candidates(profile, "nginx_port"))
-        return (
-            _nginx_discovery_prefix(profile, include_dump=True)
-            + f"; nginx_ports=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*listen[[:space:]]+[^;]*:([0-9]+)[^;]*;/\\1/p; s/^[[:space:]]*listen[[:space:]]+([0-9]+)[^;]*;/\\1/p'); if test -z \"$nginx_ports\" || test -z \"$nginx_listener_host\"; then printf '%s\\n' INSPECT_NGINX_PORT_NOT_FOUND; else for port in $nginx_ports; do curl -sS --connect-timeout {timeout_sec} --max-time {timeout_sec} \"http://$nginx_listener_host:$port/nginx_status\"; done; fi"
-        )
     if metric_id == "local.nginx.access_log.status_codes":
         return (
             _nginx_discovery_prefix(profile, include_dump=True)
             + "; if test -z \"$nginx_access_log\"; then printf '%s\\n' INSPECT_NGINX_ACCESS_LOG_NOT_FOUND; else printf '%s\\n' \"$nginx_access_log\"; tail -n 1000 \"$nginx_access_log\" | grep -E ' [1-5][0-9][0-9] '; fi"
         )
-    if metric_id == "local.nginx.proxy.upstream.config":
-        return (
-            _nginx_discovery_prefix(profile, include_dump=True)
-            + "; if test -z \"$nginx_dump\"; then printf '%s\\n' INSPECT_NGINX_PROXY_CONFIG_NOT_FOUND; else printf '%s\\n' \"$nginx_dump\" | grep -E '(^|[[:space:]])upstream[[:space:]]|proxy_pass|proxy_set_header'; fi"
-        )
     if metric_id == "local.nginx.fd.process.limits":
         return (
             _nginx_discovery_prefix(profile, include_dump=False)
             + "; nginx_pid=$(printf '%s\\n' \"$master_line\" | sed -nE 's/^[[:space:]]*([0-9]+).*/\\1/p'); if test -z \"$nginx_pid\" || ! test -r \"/proc/$nginx_pid/limits\"; then printf '%s\\n' INSPECT_NGINX_LIMITS_NOT_FOUND; else sed -nE '/^Max open files[[:space:]]|^Max processes[[:space:]]/p' \"/proc/$nginx_pid/limits\"; fi"
-        )
-    if metric_id == "local.nginx.https.certificate":
-        return (
-            _nginx_discovery_prefix(profile, include_dump=True)
-            + "; if test -z \"$nginx_dump\"; then printf '%s\\n' INSPECT_NGINX_CERTIFICATE_NOT_FOUND; else cert_paths=$(printf '%s\\n' \"$nginx_dump\" | sed -nE 's/^[[:space:]]*ssl_certificate[[:space:]]+([^[:space:];]+).*/\\1/p'); if test -z \"$cert_paths\"; then printf '%s\\n' INSPECT_NGINX_CERTIFICATE_NOT_FOUND; else for cert_path in $cert_paths; do printf 'ssl_certificate %s;\\n' \"$cert_path\"; if test -r \"$cert_path\"; then openssl x509 -in \"$cert_path\" -noout -enddate; else printf 'INSPECT_NGINX_CERTIFICATE_UNREADABLE=%s\\n' \"$cert_path\"; fi; done; fi; fi"
         )
     if metric_id in {"local.nginx.config.baseline", "local.nginx.security.baseline"}:
         patterns = (
@@ -1471,17 +1422,6 @@ def _nginx_replay_command(metric_id: str, profile: Dict[str, Any]) -> Optional[s
         ports = _nginx_candidates(profile, "nginx_port")
         if ports:
             return f"curl -sS --connect-timeout 3 -I http://localhost:{ports[0]}/"
-        return None
-    if metric_id == "local.nginx.stub_status.connections":
-        ports = _nginx_candidates(profile, "nginx_port")
-        if ports:
-            return f"curl -sS --connect-timeout 3 http://localhost:{ports[0]}/nginx_status"
-        return None
-    if metric_id == "local.nginx.proxy.upstream.config":
-        bins = _nginx_candidates(profile, "nginx_bin")
-        confs = _nginx_path_candidates(profile, "nginx_conf", "nginx.conf")
-        if bins and confs:
-            return f"{bins[0]} -T -c {confs[0]}"
         return None
     # No safe static command can bind a discovered master PID for /proc limits,
     # or discover an HTTPS certificate path and then run openssl without shell
@@ -1685,7 +1625,6 @@ def build_metric_command_specs(
                 "local.keepalived.vip.present",
                 "local.keepalived.vrrp.role",
                 "local.keepalived.health_check.status",
-                "local.keepalived.failover.config",
             }
             and _is_runtime_keepalived_profile(profile)
         ):

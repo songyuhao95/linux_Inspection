@@ -162,15 +162,11 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     "local.nginx.config.valid": ("bash", "ps", "grep", "head"),
     "local.nginx.port.listening": ("bash", "ps", "grep", "netstat", "curl", "head"),
     "local.nginx.error_log.key_evidence": ("bash", "ps", "grep", "tail", "head"),
-    "local.nginx.connections.status": ("bash", "ps", "grep", "curl", "head"),
     "local.nginx.access_log.status_codes": ("bash", "ps", "grep", "tail", "head"),
     "local.nginx.config.baseline": ("bash", "ps", "grep", "head"),
     "local.nginx.security.baseline": ("bash", "ps", "grep", "head"),
     "local.nginx.http.reachability": ("bash", "ps", "grep", "sed", "head", "curl"),
-    "local.nginx.stub_status.connections": ("bash", "ps", "grep", "sed", "head", "curl"),
-    "local.nginx.proxy.upstream.config": ("bash", "ps", "grep", "sed", "head"),
     "local.nginx.fd.process.limits": ("bash", "ps", "grep", "sed", "head"),
-    "local.nginx.https.certificate": ("bash", "ps", "grep", "sed", "head", "openssl"),
     "local.keepalived.process.present": ("bash", "ps", "grep"),
     "local.keepalived.version": ("bash", "ps", "grep", "head", "sed"),
     "local.keepalived.vip.bound": ("bash", "ps", "grep", "head", "sed", "ip", "awk"),
@@ -212,7 +208,7 @@ def metric_required_commands(metric_id: str) -> Tuple[str, ...]:
         return required
     if metric_id.startswith((
         "local.keepalived.vip.", "local.keepalived.vrrp.",
-        "local.keepalived.health_check.", "local.keepalived.failover.",
+        "local.keepalived.health_check.",
         "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
         "local.redis.", "local.rocketmq.", "local.tomcat.",
     )):

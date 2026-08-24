@@ -847,7 +847,6 @@ def build_resolved_thresholds(
                         "local.keepalived.vip.present",
                         "local.keepalived.vrrp.role",
                         "local.keepalived.health_check.status",
-                        "local.keepalived.failover.config",
                     ))
                 ):
                     continue

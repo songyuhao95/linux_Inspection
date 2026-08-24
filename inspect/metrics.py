@@ -341,23 +341,6 @@ NGINX_METRICS = [
         "unknown_conditions": "日志不可读（不作为 OK）→ UNKNOWN",
     },
     {
-        "metric_id": "local.nginx.connections.status",
-        "name": "Nginx 连接状态（stub_status）",
-        "command": "curl -sS --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/nginx_status",
-        "timeout_sec": 10,
-        "parser": "parse_nginx_connections_status",
-        "unit": "连接数（active/reading/writing/waiting）",
-        "source_anchor": (
-            "P1 指标表「Nginx连接状态」行（curl -sS --connect-timeout 3 "
-            "http://{nginx_listener_host}:8010/nginx_status）；" + _NGINX_ANCHOR
-        ),
-        "threshold_layer": "文档基线（返回 Active connections 等=正常；未开启 stub_status=未配置）",
-        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.connections.status"],
-        "conflicts": [],
-        "doc_baseline": "已开启 stub_status 且返回连接数 → OK；未开启 → UNKNOWN（记录为未配置）",
-        "unknown_conditions": "stub_status 未开启/URL 不可访问、curl 不可用 → UNKNOWN",
-    },
-    {
         "metric_id": "local.nginx.access_log.status_codes",
         "name": "访问日志状态码",
         "command": (
@@ -438,34 +421,6 @@ NGINX_METRICS = [
         "unknown_conditions": "无法取得 HTTP 响应、连接失败或 curl 不可用 → UNKNOWN",
     },
     {
-        "metric_id": "local.nginx.stub_status.connections",
-        "name": "Nginx stub_status 连接状态",
-        "command": "curl -sS --connect-timeout 3 http://{nginx_listener_host}:{nginx_port}/nginx_status",
-        "timeout_sec": 10,
-        "parser": "parse_nginx_stub_status_connections",
-        "unit": "连接数（active/reading/writing/waiting）",
-        "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE7-R2",
-        "threshold_layer": "文档基线（stub_status 配置与事实采集）",
-        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.stub_status.connections"],
-        "conflicts": [],
-        "doc_baseline": "返回 Active connections、Reading、Writing、Waiting 字段 → OK",
-        "unknown_conditions": "未开启 stub_status、状态 URL 不可访问或 curl 不可用 → UNKNOWN",
-    },
-    {
-        "metric_id": "local.nginx.proxy.upstream.config",
-        "name": "Nginx upstream/proxy 配置证据",
-        "command": "{nginx_bin} -T -c {nginx_conf} 2>&1 | grep -E '(^|[[:space:]])upstream[[:space:]]|proxy_pass|proxy_set_header'",
-        "timeout_sec": 10,
-        "parser": "parse_nginx_proxy_upstream_config",
-        "unit": "upstream、proxy_pass、proxy_set_header 指令集合",
-        "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE7-R4",
-        "threshold_layer": "文档基线（配置证据采集；容量边界未定义）",
-        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.proxy.upstream.config"],
-        "conflicts": [],
-        "doc_baseline": "保留 upstream、proxy_pass、proxy_set_header 配置事实；WARN/CRIT 边界未定义",
-        "unknown_conditions": "配置文件不可读或 nginx -T 无输出 → UNKNOWN",
-    },
-    {
         "metric_id": "local.nginx.fd.process.limits",
         "name": "Nginx 文件描述符与进程限制",
         "command": "ps -eo pid=,comm=,args= | grep -E '^[[:space:]]*[0-9]+[[:space:]]+nginx[[:space:]]+nginx: master process'",
@@ -479,26 +434,13 @@ NGINX_METRICS = [
         "doc_baseline": "用户授权的产品补充阈值（非 DOCX-derived）：nofile >=65535 OK、32768..65534 WARN、<32768 CRIT；max_processes >=4096 OK、2048..4095 WARN、<2048 CRIT；两维按最高严重度聚合",
         "unknown_conditions": "Nginx master 或 /proc 限制输出不可读，或 nofile/max_processes 缺失/无效 → UNKNOWN",
     },
-    {
-        "metric_id": "local.nginx.https.certificate",
-        "name": "Nginx HTTPS 证书",
-        "command": "{nginx_bin} -T -c {nginx_conf} 2>&1 | grep -E 'ssl_certificate|notAfter'",
-        "timeout_sec": 10,
-        "parser": "parse_nginx_https_certificate",
-        "unit": "证书路径 + notAfter 到期证据",
-        "source_anchor": f"DOCX:{_NGINX_DOCX}:TABLE7-R9",
-        "threshold_layer": "文档基线（证书事实采集；有效期边界未定义）",
-        "threshold_rule_ids": [f"{_NGINX_RULE_PREFIX}:local.nginx.https.certificate"],
-        "conflicts": [],
-        "doc_baseline": "保留 HTTPS 证书路径与 notAfter 事实；WARN/CRIT 有效期边界未定义",
-        "unknown_conditions": "证书路径不可发现、openssl 不可用或 notAfter 缺失 → UNKNOWN",
-    },
 ]
 
 # 阈值规则 ID 前缀（nginx-p0-v1）
 NGINX_RULE_PREFIX = _NGINX_RULE_PREFIX
 
 METRICS.extend(NGINX_METRICS)
+NGINX_METRIC_IDS = tuple(metric["metric_id"] for metric in NGINX_METRICS)
 
 
 # --------------------------------------------------------------------------
@@ -629,6 +571,7 @@ KEEPALIVED_METRICS = [
 
 KEEPALIVED_RULE_PREFIX = _KEEPALIVED_RULE_PREFIX
 METRICS.extend(KEEPALIVED_METRICS)
+KEEPALIVED_METRIC_IDS = tuple(metric["metric_id"] for metric in KEEPALIVED_METRICS)
 
 # --------------------------------------------------------------------------
 # Elasticsearch 中间件指标（elasticsearch-p0-p1-v1）
@@ -794,7 +737,6 @@ def _middleware_metric(
         "local.keepalived.vip.present",
         "local.keepalived.vrrp.role",
         "local.keepalived.health_check.status",
-        "local.keepalived.failover.config",
     }
     numeric_units = {
         "local.kafka.under_replicated_partitions": "分区数",
@@ -841,7 +783,6 @@ _ADDITIONAL_MIDDLEWARE_METRICS = [
     _middleware_metric("local.keepalived.vip.present", "Keepalived VIP 存在性", "ip -brief addr; grep -E 'virtual_ipaddress|interface' <KEEPALIVED_CONF>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "VIP 已绑定规划接口 → OK；VIP 缺失或漂移 → CRIT"),
     _middleware_metric("local.keepalived.vrrp.role", "Keepalived VRRP 角色", "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "主备角色和 priority 符合规划且无双 MASTER → OK；角色异常/双 MASTER → CRIT"),
     _middleware_metric("local.keepalived.health_check.status", "Keepalived 健康检查", "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "健康检查脚本存在、可读可执行且无持续失败 → OK；脚本缺失/失败 → CRIT"),
-    _middleware_metric("local.keepalived.failover.config", "Keepalived 故障切换配置", "grep -E 'notify_master|notify_backup|notify_fault|virtual_ipaddress|track_script' <KEEPALIVED_CONF>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P1-TABLE6", "切换通知、VIP 和 track_script 配置完整 → OK；缺失或漂移 → WARN/CRIT"),
     _middleware_metric("local.kafka.zookeeper.health", "ZooKeeper 节点健康", "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181; zkServer.sh status <zoo.cfg>", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "返回 imok；规划 3 节点为 1 leader + 2 follower；无响应、无 leader 或节点不足为 CRIT，leader 频繁切换为 WARN"),
     _middleware_metric("local.kafka.broker.health", "Kafka Broker 服务健康", "pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "Kafka 进程存在且 9093 LISTEN → OK；任一缺失 → CRIT"),
     _middleware_metric("local.kafka.controller.health", "Kafka Controller 健康", "zookeeper-shell.sh <ZK_CONNECT> get /controller", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "存在且仅有 1 个有效 Controller → OK；无 Controller → CRIT；频繁变化 → WARN"),
