@@ -721,7 +721,7 @@ _ADDITIONAL_GENERATED_ALLOWED_BINARIES = (
     "ip", "jcmd", "jstat", "kafka-consumer-groups.sh", "kafka-topics.sh", "ls", "mqadmin", "mysql", "nc",
     "openssl",
     "pgrep", "ps", "rabbitmq-diagnostics", "rabbitmqctl", "redis-cli", "sed",
-    "ss", "su", "systemctl", "tail", "test", "wc", "zookeeper-shell.sh", "zkServer.sh",
+    "ss", "su", "systemctl", "tail", "test", "unlink", "wc", "zookeeper-shell.sh", "zkServer.sh",
 )
 _ADDITIONAL_UNSAFE_GENERATED_TOKENS = re.compile(
     r"\b(?:rm|rmdir|mkfs|dd|shutdown|reboot|poweroff|sudo|ssh|scp|wget|"
@@ -802,10 +802,10 @@ def _kafka_runtime_prefix(profile: Dict[str, Any]) -> str:
         "if [ -n \"$kafka_ssl_config_temp\" ]; then "
         "{ printf '%s\\n' 'security.protocol=SSL' 'ssl.endpoint.identification.algorithm='; "
         "awk -F= '/^(ssl\\.(keystore|truststore)\\.(type|location|password)|ssl\\.key\\.password|ssl\\.(protocol|enabled\\.protocols))=/ {print}' \"$kafka_conf\"; "
-        "} > \"$kafka_ssl_config_temp\" || { rm -f -- \"$kafka_ssl_config_temp\"; kafka_ssl_config_temp=; }; "
+        "} > \"$kafka_ssl_config_temp\" || { unlink \"$kafka_ssl_config_temp\"; kafka_ssl_config_temp=; }; "
         "kafka_ssl_config=\"$kafka_ssl_config_temp\"; fi; fi; "
         f"if [ -z \"$kafka_ssl_config\" ]; then kafka_ssl_config={fallback_ssl_config}; fi; "
-        "trap 'if [ -n \"$kafka_ssl_config_temp\" ]; then rm -f -- \"$kafka_ssl_config_temp\"; fi' EXIT HUP INT TERM; "
+        "trap 'if [ -n \"$kafka_ssl_config_temp\" ]; then unlink \"$kafka_ssl_config_temp\"; fi' EXIT HUP INT TERM; "
         "kafka_topics=\"$kafka_bin_dir/kafka-topics.sh\"; "
         "kafka_consumer_groups=\"$kafka_bin_dir/kafka-consumer-groups.sh\""
     )
