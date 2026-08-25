@@ -116,6 +116,7 @@ def _build_default_registry() -> ModuleRegistry:
     from .nginx import MODULE as NGINX_MODULE
     from .elasticsearch import MODULE as ELASTICSEARCH_MODULE
     from .kafka import MODULE as KAFKA_MODULE
+    from .zookeeper import MODULE as ZOOKEEPER_MODULE
     from .mysql import MODULE as MYSQL_MODULE
     from .nacos import MODULE as NACOS_MODULE
     from .rabbitmq import MODULE as RABBITMQ_MODULE
@@ -130,6 +131,7 @@ def _build_default_registry() -> ModuleRegistry:
     registry.register(KEEPALIVED_MODULE)
     registry.register(ELASTICSEARCH_MODULE)
     registry.register(KAFKA_MODULE)
+    registry.register(ZOOKEEPER_MODULE)
     registry.register(MYSQL_MODULE)
     registry.register(NACOS_MODULE)
     registry.register(RABBITMQ_MODULE)

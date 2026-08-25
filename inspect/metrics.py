@@ -731,7 +731,7 @@ def _middleware_metric(
     """
     typed_prefixes = (
         "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
-        "local.redis.", "local.rocketmq.", "local.tomcat.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.", "local.zookeeper.",
     )
     typed_keepalived = {
         "local.keepalived.vip.present",
@@ -741,7 +741,8 @@ def _middleware_metric(
     numeric_units = {
         "local.kafka.under_replicated_partitions": "分区数",
         "local.kafka.under_min_isr": "分区数",
-        "local.kafka.zookeeper.latency": "毫秒",
+        "local.zookeeper.ports.health": "端口数",
+        "local.zookeeper.mntr.health": "毫秒",
         "local.mysql.replication.lag": "秒",
         "local.mysql.connection.pressure": "百分比",
         "local.nacos.core_ports.health": "端口数",
@@ -783,12 +784,16 @@ _ADDITIONAL_MIDDLEWARE_METRICS = [
     _middleware_metric("local.keepalived.vip.present", "Keepalived VIP 存在性", "ip -brief addr; grep -E 'virtual_ipaddress|interface' <KEEPALIVED_CONF>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "VIP 已绑定规划接口 → OK；VIP 缺失或漂移 → CRIT"),
     _middleware_metric("local.keepalived.vrrp.role", "Keepalived VRRP 角色", "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "主备角色和 priority 符合规划且无双 MASTER → OK；角色异常/双 MASTER → CRIT"),
     _middleware_metric("local.keepalived.health_check.status", "Keepalived 健康检查", "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>", "Nginx、Keepalived运维巡检手册v1.0.docx", "P0-TABLE5", "健康检查脚本存在、可读可执行且无持续失败 → OK；脚本缺失/失败 → CRIT"),
-    _middleware_metric("local.kafka.zookeeper.health", "ZooKeeper 节点健康", "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181; zkServer.sh status <zoo.cfg>", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "返回 imok；规划 3 节点为 1 leader + 2 follower；无响应、无 leader 或节点不足为 CRIT，leader 频繁切换为 WARN"),
     _middleware_metric("local.kafka.broker.health", "Kafka Broker 服务健康", "pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "Kafka 进程存在且 9093 LISTEN → OK；任一缺失 → CRIT"),
     _middleware_metric("local.kafka.controller.health", "Kafka Controller 健康", "zookeeper-shell.sh <ZK_CONNECT> get /controller", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "存在且仅有 1 个有效 Controller → OK；无 Controller → CRIT；频繁变化 → WARN"),
     _middleware_metric("local.kafka.under_replicated_partitions", "Kafka 未充分复制分区", "kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "无输出 → OK；有未充分复制分区 → WARN，持续存在为 CRIT"),
     _middleware_metric("local.kafka.under_min_isr", "Kafka ISR/不可用分区", "kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions; kafka-topics.sh --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "Under-min-ISR 或不可用分区均为空 → OK；出现 → CRIT"),
-    _middleware_metric("local.kafka.zookeeper.latency", "ZooKeeper 延迟与积压请求", "echo mntr | nc -w 3 127.0.0.1 2181 | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections'", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P1-TABLE6", "延迟稳定且 outstanding_requests=0 → OK；持续积压或延迟升高 → 产品补充阈值 WARN/CRIT"),
+    _middleware_metric("local.zookeeper.node.health", "ZooKeeper 节点健康", "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181 | egrep 'Mode|Node count|Connections'; /opt/zookeeper/bin/zkServer.sh status /opt/zookeeper/conf/zoo.cfg", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "返回 imok 且 Mode 为 leader/follower；规划 3 节点为 1 leader + 2 follower；无响应、无 leader 或节点不足为 CRIT，leader 频繁切换为 WARN", unit="布尔"),
+    _middleware_metric("local.zookeeper.ports.health", "ZooKeeper 核心端口", "ss -tlnp | grep -E ':2181|:2888|:3888'", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "clientPort、peerPort、electionPort 均 LISTEN → OK；缺少 1 个 → WARN；缺少 2 个及以上 → CRIT", unit="端口数"),
+    _middleware_metric("local.zookeeper.error_log", "ZooKeeper 关键错误日志", "grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|IOException|Session expired' <ZOOKEEPER_LOG> 2>/dev/null | tail -30", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P0-TABLE5", "无持续 ERROR/FATAL/OOM/NotLeader/Session expired → OK；命中关键错误 → CRIT", unit="布尔"),
+    _middleware_metric("local.zookeeper.mntr.health", "ZooKeeper 延迟与积压请求", "echo mntr | nc -w 3 127.0.0.1 2181 | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections|zk_znode_count|zk_watch_count'", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P1-TABLE6", "zk_max_latency ≤ 50ms 且 outstanding_requests=0 → OK；max latency 51–200ms 或存在积压 → WARN；>200ms → CRIT", unit="毫秒"),
+    _middleware_metric("local.zookeeper.data.retention", "ZooKeeper 数据与日志留存", "du -sh <ZOOKEEPER_DATA> <ZOOKEEPER_DATALOG> 2>/dev/null; ls -lt <ZOOKEEPER_DATA>/version-2 2>/dev/null | head -10; ls -lt <ZOOKEEPER_DATALOG>/version-2 2>/dev/null | head -10", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P1-TABLE6", "dataDir/dataLogDir 可读且 version-2 目录存在、增长受控 → OK；目录缺失或无法读取 → CRIT", unit="布尔"),
+    _middleware_metric("local.zookeeper.config.baseline", "ZooKeeper 配置基线", "grep -E '^(dataDir|dataLogDir|clientPort|server\\.|autopurge|4lw.commands.whitelist|admin.enableServer|standaloneEnabled|reconfigEnabled)' <ZOOKEEPER_CONF>; cat <ZOOKEEPER_DATA>/myid", "Kafka+Zookeeper运维巡检手册v1.0.docx", "P1-TABLE6", "dataDir/dataLogDir/clientPort/server.*、autopurge 与 myid 可读取且符合集群规划 → OK；关键项缺失或 myid 不可读 → CRIT", unit="布尔"),
 
     _middleware_metric("local.mysql.service.health", "MySQL 服务健康", "pgrep -fa 'mysqld.*defaults-file=/opt/mysql/conf/my.cnf'; ss -tlnp | grep ':3306'", "Mysql运维巡检手册v1.0.docx", "P0-TABLE5", "mysqld 进程存在且 3306 LISTEN → OK；任一缺失 → CRIT"),
     _middleware_metric("local.mysql.login.version", "MySQL 登录与版本", "mysql --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@version,@@hostname,@@port;\"", "Mysql运维巡检手册v1.0.docx", "P0-TABLE5", "可认证登录且版本、主机和端口符合部署基线 → OK；登录失败 → CRIT"),

@@ -1320,7 +1320,7 @@ def parse_middleware_text(output: str) -> Dict[str, Any]:
 # output is never retained as raw_value/normalized_value.
 _TYPED_MIDDLEWARE_PREFIXES = (
     "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
-    "local.redis.", "local.rocketmq.", "local.tomcat.",
+    "local.redis.", "local.rocketmq.", "local.tomcat.", "local.zookeeper.",
 )
 _TYPED_KEEPALIVED_METRIC_IDS = frozenset(
     {
@@ -1412,6 +1412,80 @@ def parse_kafka_under_min_isr(output):
 
 def parse_kafka_zookeeper_latency(output):
     return _typed_number(output, r"zk_max_latency\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)", cast=float, summary="zk_max_latency={value}ms")
+
+
+def parse_zookeeper_node_health(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if re.search(r"connection refused|no leader|failed|error", text, re.IGNORECASE):
+        return {"value": False, "summary": "imok=false;mode=invalid"}
+    healthy = bool(
+        re.search(r"\bimok\b", text, re.IGNORECASE)
+        and re.search(r"\bMode\s*[:=]\s*(?:leader|follower)\b", text, re.IGNORECASE)
+    )
+    if not healthy:
+        raise ParseError("ZooKeeper 节点状态缺少 imok 或 leader/follower")
+    mode = re.search(r"\bMode\s*[:=]\s*(leader|follower)\b", text, re.IGNORECASE)
+    return {"value": True, "summary": f"imok=true;mode={mode.group(1).lower()}"}
+
+
+def parse_zookeeper_ports_health(output):
+    lines = _typed_middleware_lines(output)
+    ports = set()
+    for line in lines:
+        ports.update(re.findall(r":(2181|2888|3888)\b", line))
+    if not ports:
+        raise ParseError("ZooKeeper 核心端口输出缺失")
+    value = len(ports)
+    return {"value": value, "summary": f"zookeeper_listening_ports={value}"}
+
+
+def parse_zookeeper_error_log(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if re.search(r"ZK_LOG_OK\s*=\s*true", text, re.IGNORECASE):
+        return {"value": True, "summary": "critical_log_evidence=false"}
+    if re.search(r"ERROR|FATAL|OutOfMemory|NotLeader|IOException|Session expired", text, re.IGNORECASE):
+        return {"value": False, "summary": "critical_log_evidence=true"}
+    raise ParseError("ZooKeeper 关键日志输出缺少可判定标记")
+
+
+def parse_zookeeper_mntr_health(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    max_latency = re.search(r"\bzk_max_latency\s*[=: ]\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+    outstanding = re.search(r"\bzk_outstanding_requests\s*[=: ]\s*([0-9]+)", text, re.IGNORECASE)
+    if not max_latency or not outstanding:
+        raise ParseError("ZooKeeper mntr 缺少 max latency 或 outstanding requests")
+    value = float(max_latency.group(1))
+    outstanding_value = int(outstanding.group(1))
+    return {
+        "value": value,
+        "outstanding_requests": outstanding_value,
+        "summary": f"zk_max_latency={value}ms;outstanding_requests={outstanding_value}",
+    }
+
+
+def parse_zookeeper_data_retention(output):
+    return _typed_bool(
+        output,
+        r"dataDir\s*=|version-2|/zookeeper/(?:data|datalog)",
+        negative=r"No such file|Permission denied|not found|error|failed",
+    )
+
+
+def parse_zookeeper_config_baseline(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    required = (
+        re.search(r"\bdataDir\s*=", text, re.IGNORECASE),
+        re.search(r"\bclientPort\s*=", text, re.IGNORECASE),
+        re.search(r"\bserver\.\d+\s*=", text, re.IGNORECASE),
+        re.search(r"\bmyid\s*=|^\s*\d+\s*$", text, re.IGNORECASE | re.MULTILINE),
+    )
+    if not all(required):
+        raise ParseError("ZooKeeper 配置基线缺少 dataDir/clientPort/server 或 myid")
+    return {"value": True, "summary": "zookeeper_config_baseline=true"}
 
 
 def parse_mysql_service_health(output):
@@ -2360,7 +2434,8 @@ def _judge_middleware_text(parsed, resolved, profile=None):
 _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.kafka.under_replicated_partitions": (0, 2),
     "local.kafka.under_min_isr": (0, 0),
-    "local.kafka.zookeeper.latency": (50, 200),
+    "local.zookeeper.ports.health": (3, 2),
+    "local.zookeeper.mntr.health": (50, 200),
     "local.mysql.replication.lag": (0, 30),
     "local.mysql.connection.pressure": (80, 95),
     "local.nacos.cluster.nodes": (2, 1),
@@ -2387,6 +2462,14 @@ def _judge_typed_middleware(parsed, resolved, profile=None):
         thresholds = _MIDDLEWARE_NUMERIC_THRESHOLDS.get(metric_id)
         if thresholds is None:
             status = STATUS_UNKNOWN
+        elif metric_id == "local.zookeeper.mntr.health":
+            outstanding = int(parsed.get("outstanding_requests", 0))
+            ok_limit, warn_limit = thresholds
+            status = (
+                STATUS_CRIT if value > warn_limit
+                else STATUS_WARN if value > ok_limit or outstanding > 0
+                else STATUS_OK
+            )
         else:
             ok_limit, warn_limit = thresholds
             if metric_id in {
@@ -2394,6 +2477,7 @@ def _judge_typed_middleware(parsed, resolved, profile=None):
                 "local.nacos.core_ports.health",
                 "local.rocketmq.core_ports.health",
                 "local.tomcat.http.health",
+                "local.zookeeper.ports.health",
             }:
                 status = STATUS_OK if value >= ok_limit else STATUS_WARN if value >= warn_limit else STATUS_CRIT
             elif metric_id == "local.rabbitmq.cluster.nodes":
@@ -2502,7 +2586,8 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.elasticsearch.system.parameters",
         "local.kafka.under_replicated_partitions",
         "local.kafka.under_min_isr",
-        "local.kafka.zookeeper.latency",
+        "local.zookeeper.ports.health",
+        "local.zookeeper.mntr.health",
         "local.mysql.replication.lag",
         "local.mysql.connection.pressure",
         "local.nacos.cluster.nodes",

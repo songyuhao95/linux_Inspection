@@ -516,12 +516,16 @@ _ADDITIONAL_COMMANDS = {
     "local.keepalived.vip.present": "ip -brief addr; grep -E 'virtual_ipaddress|interface' <KEEPALIVED_CONF>",
     "local.keepalived.vrrp.role": "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>",
     "local.keepalived.health_check.status": "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>",
-    "local.kafka.zookeeper.health": "echo ruok | nc -w 3 127.0.0.1 2181; echo stat | nc -w 3 127.0.0.1 2181; <ZOOKEEPER_TOOL> status <ZOOKEEPER_CONF>",
     "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'; tail -n 50 <KAFKA_LOG>/server.log",
     "local.kafka.controller.health": "<ZOOKEEPER_SHELL> <ZK_CONNECT> get /controller",
     "local.kafka.under_replicated_partitions": "<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions",
     "local.kafka.under_min_isr": "<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions; <KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions",
-    "local.kafka.zookeeper.latency": "echo mntr | nc -w 3 127.0.0.1 2181 | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections'; tail -n 50 <ZOOKEEPER_LOG>/zookeeper.log",
+    "local.zookeeper.node.health": "echo ruok | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT>; echo stat | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT> | egrep 'Mode|Node count|Connections'",
+    "local.zookeeper.ports.health": "ss -tlnp | grep -E ':<ZOOKEEPER_CLIENT_PORT>|:<ZOOKEEPER_PEER_PORT>|:<ZOOKEEPER_ELECTION_PORT>'",
+    "local.zookeeper.error_log": "if grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|IOException|Session expired' <ZOOKEEPER_LOG> 2>/dev/null | tail -30; then :; else printf 'ZK_LOG_OK=true\\n'; fi",
+    "local.zookeeper.mntr.health": "echo mntr | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT> | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections|zk_znode_count|zk_watch_count'",
+    "local.zookeeper.data.retention": "du -sh <ZOOKEEPER_DATA> <ZOOKEEPER_DATALOG> 2>/dev/null; ls -lt <ZOOKEEPER_DATA>/version-2 2>/dev/null | head -10; ls -lt <ZOOKEEPER_DATALOG>/version-2 2>/dev/null | head -10",
+    "local.zookeeper.config.baseline": "grep -E '^(dataDir|dataLogDir|clientPort|server\\.|autopurge|4lw.commands.whitelist|admin.enableServer|standaloneEnabled|reconfigEnabled)' <ZOOKEEPER_CONF>; cat <ZOOKEEPER_DATA>/myid",
     "local.mysql.service.health": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -e \"SELECT 1;\"; test -r <MYSQL_CONF>; ls -ld <MYSQL_LOG>",
     "local.mysql.login.version": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@version,@@hostname,@@port;\"",
     "local.mysql.role.gtid": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@server_id,@@gtid_mode,@@enforce_gtid_consistency,@@read_only,@@super_read_only;\"",
@@ -574,10 +578,6 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
         "<KEEPALIVED_CONF>": ("keepalived_conf", "keepalived.conf"),
         "<HEALTHCHECK_SCRIPT>": "keepalived_healthcheck_script",
     },
-    "local.kafka.zookeeper.health": {
-        "<ZOOKEEPER_TOOL>": ("zookeeper_bin", "zkServer.sh"),
-        "<ZOOKEEPER_CONF>": "zookeeper_conf",
-    },
     "local.kafka.broker.health": {"<KAFKA_LOG>": "kafka_log", "<KAFKA_CONF>": "kafka_conf"},
     "local.kafka.controller.health": {
         "<ZOOKEEPER_SHELL>": ("zookeeper_bin", "zookeeper-shell.sh"),
@@ -591,8 +591,21 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
         "<KAFKA_TOPICS>": ("kafka_bin", "kafka-topics.sh"),
         "<BOOTSTRAP>": "kafka_bootstrap", "<SSL_CONFIG>": "kafka_ssl_config",
     },
-    "local.kafka.zookeeper.latency": {
-        "<ZOOKEEPER_LOG>": "zookeeper_log",
+    "local.zookeeper.node.health": {"<ZOOKEEPER_CLIENT_PORT>": "zookeeper_client_port"},
+    "local.zookeeper.ports.health": {
+        "<ZOOKEEPER_CLIENT_PORT>": "zookeeper_client_port",
+        "<ZOOKEEPER_PEER_PORT>": "zookeeper_peer_port",
+        "<ZOOKEEPER_ELECTION_PORT>": "zookeeper_election_port",
+    },
+    "local.zookeeper.error_log": {"<ZOOKEEPER_LOG>": "zookeeper_log"},
+    "local.zookeeper.mntr.health": {"<ZOOKEEPER_CLIENT_PORT>": "zookeeper_client_port"},
+    "local.zookeeper.data.retention": {
+        "<ZOOKEEPER_DATA>": "zookeeper_data",
+        "<ZOOKEEPER_DATALOG>": "zookeeper_datalog",
+    },
+    "local.zookeeper.config.baseline": {
+        "<ZOOKEEPER_CONF>": "zookeeper_conf",
+        "<ZOOKEEPER_DATA>": "zookeeper_data",
     },
     "local.mysql.service.health": {
         "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket",
@@ -656,7 +669,13 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "keepalived_healthcheck_script": "/etc/keepalived/check.sh",
     "kafka_zookeeper_conf": "/opt/zookeeper/conf/zoo.cfg",
     "zookeeper_bin": "/opt/redis/bin/redis-server",
+    "zookeeper_conf": "/opt/zookeeper/conf/zoo.cfg",
     "zookeeper_log": "/opt/zookeeper/logs",
+    "zookeeper_data": "/opt/zookeeper/data",
+    "zookeeper_datalog": "/opt/zookeeper/datalog",
+    "zookeeper_client_port": "2181",
+    "zookeeper_peer_port": "2888",
+    "zookeeper_election_port": "3888",
     "kafka_log": "/opt/kafka/logs/",
     "kafka_zookeeper_connect": "127.0.0.1:2181",
     "kafka_bootstrap": "127.0.0.1:9093",
@@ -740,7 +759,7 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         command = command.replace(placeholder, _derive_additional_path(value, suffix))
     typed_prefixes = (
         "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
-        "local.redis.", "local.rocketmq.", "local.tomcat.",
+        "local.redis.", "local.rocketmq.", "local.tomcat.", "local.zookeeper.",
     )
     typed_keepalived = {
         "local.keepalived.vip.present",
@@ -758,6 +777,7 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             "redis": (r"redis-server", "redis_conf"),
             "rocketmq": (r"NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker", "rocketmq_conf"),
             "tomcat": (r"org\.apache\.catalina\.startup\.Bootstrap", "tomcat_conf"),
+            "zookeeper": (r"QuorumPeerMain|org\.apache\.zookeeper\.server\.quorum\.QuorumPeerMain", "zookeeper_conf"),
         }
         pattern, config_key = gate_specs[module_id]
         # Resolve the module's configured path to select/validate the gate,
@@ -1578,6 +1598,11 @@ def build_metric_command_specs(
             timeout_sec if timeout_sec is not None else metric_timeout_sec
         )
         required = probe_mod.metric_required_commands(metric_id)
+        if not required and metric_id.startswith("local.zookeeper."):
+            # probe.py is a frozen shared contract; ZooKeeper's read-only
+            # command family uses the same minimal shell gate as the other
+            # additional middleware adapters.
+            required = ("bash",)
         if not required:
             raise CommandConfigError(f"指标所需命令映射缺失: {metric_id}")
         if metric_id in _ADDITIONAL_COMMANDS:
@@ -2466,7 +2491,7 @@ ELASTICSEARCH_METRIC_PREFIX = "local.elasticsearch."
 ELASTICSEARCH_PROCESS_METRIC = "local.elasticsearch.process.present"
 MIDDLEWARE_METRIC_PREFIXES = (
     "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
-    "local.redis.", "local.rocketmq.", "local.tomcat.",
+    "local.redis.", "local.rocketmq.", "local.tomcat.", "local.zookeeper.",
     "local.keepalived.",
 )
 

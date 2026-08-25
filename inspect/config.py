@@ -843,7 +843,7 @@ def build_resolved_thresholds(
                     and not metric.get("metric_id", "").startswith((
                         "local.kafka.", "local.mysql.", "local.nacos.",
                         "local.rabbitmq.", "local.redis.", "local.rocketmq.",
-                        "local.tomcat.",
+                        "local.tomcat.", "local.zookeeper.",
                         "local.keepalived.vip.present",
                         "local.keepalived.vrrp.role",
                         "local.keepalived.health_check.status",
@@ -1005,6 +1005,9 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "kafka_ssl_config": ["/opt/kafka/config/client.properties"],
     "kafka_port": ["9093"],
     "kafka_zookeeper_port": ["2181"],
+    "zookeeper_client_port": ["2181"],
+    "zookeeper_peer_port": ["2888"],
+    "zookeeper_election_port": ["3888"],
     # MySQL
     "mysql_bin": ["/opt/mysql/bin/mysql"],
     "mysql_conf": ["/opt/mysql/conf/my.cnf"],
