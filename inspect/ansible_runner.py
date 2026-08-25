@@ -1143,6 +1143,7 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         _elasticsearch_candidates(profile, "elasticsearch_cacert")
     ) or certs or ":"
     auths = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_auth_file")) or ":"
+    endpoints = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_endpoint")) or ":"
     http_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_http_port")) or "9200"
     transport_ports = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_transport_port")) or "9300"
     system_users = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_system_user")) or "es"
@@ -1196,6 +1197,7 @@ def _elasticsearch_discovery_prefix(profile: Dict[str, Any]) -> str:
         # 127.0.0.1 or an inventory address.
         "if test -z \"$es_listen_host\" && command -v ss >/dev/null 2>&1; then es_listen_host=$(ss -H -ltn \"sport = :$es_http_port\" 2>/dev/null | sed -nE 's/^[[:space:]]*[A-Z]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+([^[:space:]]+):[0-9]+.*/\\1/p' | sed -E 's/^\\[::ffff:(.*)\\]$/\\1/; s/^\\[(.*)\\]$/\\1/' | grep -Ev '^(0\\.0\\.0\\.0|\\*|::)$' | head -n 1); fi",
         "es_endpoint=\"\"; if test -n \"$es_listen_host\"; then case \"$es_listen_host\" in *:*) es_endpoint=\"https://[$es_listen_host]:$es_http_port\";; *) es_endpoint=\"https://$es_listen_host:$es_http_port\";; esac; fi",
+        "if test -z \"$es_endpoint\"; then for p in " + endpoints + "; do if test -n \"$p\"; then es_endpoint=\"$p\"; break; fi; done; fi",
         "es_auth_file=\"\"; for p in " + auths + "; do if test -f \"$p\"; then es_auth_file=\"$p\"; break; fi; done",
         "es_cert=\"\"; if test -n \"$es_conf\"; then es_cert=$(grep -Eo '/[^[:space:]]+\\.(crt|pem)' \"$es_conf\" | head -n 1); fi",
         f"if test -z \"$es_cert\"; then for p in {certs}; do if test -f \"$p\"; then es_cert=\"$p\"; break; fi; done; fi",

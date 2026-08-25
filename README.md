@@ -529,7 +529,7 @@ Keepalived 进程白名单，判断规则与 `nginx_whitelist` 相同：白名�
 
 ```text
 elasticsearch_bin = /opt/elasticsearch/bin/elasticsearch|/usr/local/elasticsearch/bin/elasticsearch|/usr/share/elasticsearch/bin/elasticsearch
-elasticsearch_conf = /opt/elasticsearch/config/elasticsearch.yml|/etc/elasticsearch/elasticsearch.yml|/usr/local/etc/elasticsearch/elasticsearch.yml
+elasticsearch_conf = /opt/elasticsearch/conf/elasticsearch.yml|/opt/elasticsearch/config/elasticsearch.yml|/etc/elasticsearch/elasticsearch.yml|/usr/local/etc/elasticsearch/elasticsearch.yml
 elasticsearch_log = /opt/elasticsearch/logs/es-prod-cluster.log|/opt/elasticsearch/logs/elasticsearch.log|/var/log/elasticsearch/elasticsearch.log
 elasticsearch_gc_log = /opt/elasticsearch/logs/gc.log|/opt/elasticsearch/logs/gc.log.*|/var/log/elasticsearch/gc.log
 elasticsearch_data = /opt/elasticsearch/data|/var/lib/elasticsearch
@@ -545,7 +545,8 @@ elasticsearch_backup = /opt/elasticsearch/backup|/var/backups/elasticsearch
 - `elasticsearch_data`：数据目录候选路径，用于磁盘和数据目录说明；
 - `elasticsearch_backup`：备份目录候选路径，用于备份目录检查和说明。
 
-实际运行参数和 `elasticsearch.yml` 中已经声明的路径优先于这些兜底候选值。
+实际运行参数和 `elasticsearch.yml` 中已经声明的路径优先于这些兜底候选值；其中
+`/opt/elasticsearch/conf/elasticsearch.yml` 覆盖常见 tar 包部署的实际配置目录。
 
 #### `elasticsearch_endpoint`
 
@@ -553,7 +554,7 @@ elasticsearch_backup = /opt/elasticsearch/backup|/var/backups/elasticsearch
 elasticsearch_endpoint = https://127.0.0.1:9200
 ```
 
-Elasticsearch HTTP API 的兼容地址。程序优先从运行中的 `elasticsearch.yml` 解析 `http.host`、`http.bind_host`、`network.bind_host` 或 `network.host`；只有无法解析具体监听地址时才参考此值。
+Elasticsearch HTTP API 的兼容地址。程序优先从运行中的 `elasticsearch.yml` 和本机监听 socket 解析可连接地址；只有无法发现具体监听地址时才按候选顺序使用此值。每个候选值必须包含自己的协议和端口，使用时保持原值，不会再拼接默认地址或端口。
 
 #### `elasticsearch_http_port`
 
