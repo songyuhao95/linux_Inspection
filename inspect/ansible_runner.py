@@ -516,7 +516,7 @@ _ADDITIONAL_COMMANDS = {
     "local.keepalived.vip.present": "ip -brief addr; grep -E 'virtual_ipaddress|interface' <KEEPALIVED_CONF>",
     "local.keepalived.vrrp.role": "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>",
     "local.keepalived.health_check.status": "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>",
-    "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'; tail -n 50 <KAFKA_LOG>/server.log",
+    "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa '[k]afka.Kafka' | grep -v 'INSPECT_MIDDLEWARE_NOT_RUNNING='; ss -tlnp | grep ':9093'; tail -n 50 <KAFKA_LOG>/server.log",
     "local.kafka.controller.health": "<ZOOKEEPER_SHELL> <ZK_CONNECT> get /controller",
     "local.kafka.broker.registration": "BROKER_ID=$(grep '^broker.id=' <KAFKA_CONF> | cut -d= -f2-); <ZOOKEEPER_SHELL> <ZK_CONNECT> get /brokers/ids/${BROKER_ID}",
     "local.kafka.under_replicated_partitions": "out=$(<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_UNDER_REPLICATED=true\\n'; fi",
@@ -794,7 +794,7 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         module_id = metric_id.split(".", 2)[1]
         gate_specs = {
             "keepalived": (r"keepalived", "keepalived_conf"),
-            "kafka": (r"kafka\.Kafka", "kafka_conf"),
+            "kafka": (r"[k]afka\.Kafka", "kafka_conf"),
             "mysql": (r"mysqld", "mysql_conf"),
             "nacos": (r"com\.alibaba\.nacos|nacos", "nacos_home"),
             "rabbitmq": (r"beam\.smp|rabbitmq-server", "rabbitmq_conf"),
