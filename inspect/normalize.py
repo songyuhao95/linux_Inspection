@@ -1419,8 +1419,11 @@ def parse_zookeeper_node_health(output):
     text = "\n".join(lines)
     if re.search(r"connection refused|no leader|failed|error", text, re.IGNORECASE):
         return {"value": False, "summary": "imok=false;mode=invalid"}
+    # ``ruok`` may return ``imok`` without a trailing newline.  The next
+    # ``stat`` command can therefore start immediately after it
+    # (``imokConnections: 1``), which is valid ZooKeeper 4LW output.
     healthy = bool(
-        re.search(r"\bimok\b", text, re.IGNORECASE)
+        re.search(r"imok", text, re.IGNORECASE)
         and re.search(r"\bMode\s*[:=]\s*(?:leader|follower)\b", text, re.IGNORECASE)
     )
     if not healthy:
@@ -1453,8 +1456,12 @@ def parse_zookeeper_error_log(output):
 def parse_zookeeper_mntr_health(output):
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
-    max_latency = re.search(r"\bzk_max_latency\s*[=: ]\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
-    outstanding = re.search(r"\bzk_outstanding_requests\s*[=: ]\s*([0-9]+)", text, re.IGNORECASE)
+    # ``mntr`` is tab-delimited on the target host, while some versions emit
+    # spaces or ``key=value``.  Accept all documented separators without
+    # requiring an extra separator after ``\s*`` has already consumed a tab.
+    separator = r"(?:\s+|\s*[=:]\s*)"
+    max_latency = re.search(r"\bzk_max_latency" + separator + r"([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+    outstanding = re.search(r"\bzk_outstanding_requests" + separator + r"([0-9]+)", text, re.IGNORECASE)
     if not max_latency or not outstanding:
         raise ParseError("ZooKeeper mntr 缺少 max latency 或 outstanding requests")
     value = float(max_latency.group(1))
