@@ -999,6 +999,8 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "zookeeper_bin": ["/opt/redis/bin/redis-server"],
     "zookeeper_conf": ["/opt/zookeeper/conf/zoo.cfg"],
     "zookeeper_log": ["/opt/zookeeper/logs"],
+    "zookeeper_data": ["/opt/zookeeper/data"],
+    "zookeeper_datalog": ["/opt/zookeeper/datalog"],
     "kafka_log": ["/opt/kafka/logs/"],
     "kafka_zookeeper_connect": ["127.0.0.1:2181"],
     "kafka_bootstrap": ["127.0.0.1:9093"],
