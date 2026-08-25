@@ -522,7 +522,7 @@ _ADDITIONAL_COMMANDS = {
     "local.kafka.under_min_isr": "<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions; <KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions",
     "local.zookeeper.node.health": "echo ruok | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT>; echo stat | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT> | egrep 'Mode|Node count|Connections'",
     "local.zookeeper.ports.health": "ss -tlnp | grep -E ':<ZOOKEEPER_CLIENT_PORT>|:<ZOOKEEPER_PEER_PORT>|:<ZOOKEEPER_ELECTION_PORT>'",
-    "local.zookeeper.error_log": "if grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|IOException|Session expired' <ZOOKEEPER_LOG> 2>/dev/null | tail -30; then :; else printf 'ZK_LOG_OK=true\\n'; fi",
+    "local.zookeeper.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|IOException|Session expired' <ZOOKEEPER_LOG> 2>/dev/null | tail -30; grep_rc=${PIPESTATUS[0]}; if [ \"$grep_rc\" -eq 1 ]; then printf 'ZK_LOG_OK=true\\n'; elif [ \"$grep_rc\" -gt 1 ]; then printf 'ZK_LOG_PARSE_FAILED=true\\n'; fi",
     "local.zookeeper.mntr.health": "echo mntr | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT> | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections|zk_znode_count|zk_watch_count'",
     "local.zookeeper.data.retention": "du -sh <ZOOKEEPER_DATA> <ZOOKEEPER_DATALOG> 2>/dev/null; ls -lt <ZOOKEEPER_DATA>/version-2 2>/dev/null | head -10; ls -lt <ZOOKEEPER_DATALOG>/version-2 2>/dev/null | head -10",
     "local.zookeeper.config.baseline": "grep -E '^(dataDir|dataLogDir|clientPort|server\\.|autopurge|4lw.commands.whitelist|admin.enableServer|standaloneEnabled|reconfigEnabled)' <ZOOKEEPER_CONF>; cat <ZOOKEEPER_DATA>/myid",
