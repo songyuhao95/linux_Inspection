@@ -1386,7 +1386,16 @@ def parse_kafka_broker_health(output):
 
 
 def parse_kafka_controller_health(output):
-    return _typed_bool(output, r"controller|brokerid|controllerid", negative=r"no controller|null|failed|error")
+    lines = _typed_middleware_lines(output)
+    meaningful = "\n".join(
+        line for line in lines
+        if not re.search(r"^(?:Connecting to|WATCHER::|WatchedEvent\b)", line, re.IGNORECASE)
+    )
+    if re.search(r"no controller|node does not exist|failed|error", meaningful, re.IGNORECASE):
+        return {"value": False, "summary": "controller=false"}
+    if re.search(r"controller|brokerid|controllerid", meaningful, re.IGNORECASE):
+        return {"value": True, "summary": "controller=true"}
+    raise ParseError("Kafka Controller 输出缺少可判定标记")
 
 
 def parse_kafka_broker_registration(output):
@@ -1402,6 +1411,26 @@ def parse_kafka_under_replicated_partitions(output):
         return {"value": 0, "summary": "under_replicated_partitions=0"}
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
+    if re.search(r"KAFKA_FULL_TOPIC_DESCRIBE\s*=\s*true", text, re.IGNORECASE):
+        rows = [
+            line for line in lines
+            if re.search(r"\bTopic:\s*\S+", line, re.IGNORECASE)
+            and re.search(r"\bPartition:\s*\S+", line, re.IGNORECASE)
+        ]
+        if not rows:
+            raise ParseError("Kafka 未充分复制分区输出格式非法")
+        value = 0
+        for line in rows:
+            replicas = re.search(r"\bReplicas:\s*([^\s]+)", line, re.IGNORECASE)
+            isr = re.search(r"\bISR:\s*([^\s]+)", line, re.IGNORECASE)
+            leader = re.search(r"\bLeader:\s*([^\s]+)", line, re.IGNORECASE)
+            if not replicas or not isr or not leader:
+                raise ParseError("Kafka 未充分复制分区输出格式非法")
+            replica_count = len([item for item in replicas.group(1).split(",") if item])
+            isr_count = len([item for item in isr.group(1).split(",") if item])
+            if leader.group(1) == "-1" or isr_count < replica_count:
+                value += 1
+        return {"value": value, "summary": f"under_replicated_partitions={value}"}
     if not re.search(r"\bTopic\b.*\bPartition\b|^\s*Topic:", text, re.IGNORECASE | re.MULTILINE):
         raise ParseError("Kafka 未充分复制分区输出格式非法")
     value = sum(1 for line in lines if re.search(r"^\s*Topic:", line, re.IGNORECASE))
