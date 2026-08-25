@@ -534,12 +534,21 @@ _ADDITIONAL_COMMANDS = {
     "local.zookeeper.mntr.health": "echo mntr | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT> | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections|zk_znode_count|zk_watch_count'",
     "local.zookeeper.data.retention": "du -sh <ZOOKEEPER_DATA> <ZOOKEEPER_DATALOG> 2>/dev/null; ls -lt <ZOOKEEPER_DATA>/version-2 2>/dev/null | head -10; ls -lt <ZOOKEEPER_DATALOG>/version-2 2>/dev/null | head -10",
     "local.zookeeper.config.baseline": "grep -E '^(dataDir|dataLogDir|clientPort|server\\.|autopurge|4lw.commands.whitelist|admin.enableServer|standaloneEnabled|reconfigEnabled)' <ZOOKEEPER_CONF>; cat <ZOOKEEPER_DATA>/myid",
-    "local.mysql.service.health": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -e \"SELECT 1;\"; test -r <MYSQL_CONF>; ls -ld <MYSQL_LOG>",
-    "local.mysql.login.version": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@version,@@hostname,@@port;\"",
-    "local.mysql.role.gtid": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SELECT @@server_id,@@gtid_mode,@@enforce_gtid_consistency,@@read_only,@@super_read_only;\"",
-    "local.mysql.replica.threads": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'",
-    "local.mysql.replication.lag": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SHOW REPLICA STATUS\\G\" | egrep 'Seconds_Behind_Source|Read_Source_Log_Pos|Exec_Source_Log_Pos'",
-    "local.mysql.connection.pressure": "<MYSQL_BIN> --socket=<MYSQL_SOCKET> -u<USER> -p -e \"SHOW GLOBAL STATUS LIKE 'Threads_connected'; SHOW GLOBAL STATUS LIKE 'Max_used_connections'; SHOW VARIABLES LIKE 'max_connections';\"",
+    "local.mysql.service.health": "pgrep -fa '[m]ysqld'; ss -tlnp | grep ':3306'",
+    "local.mysql.login.version": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT @@version,@@hostname,@@port;\"",
+    "local.mysql.role.gtid": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('server_id=',@@server_id),CONCAT('gtid_mode=',@@gtid_mode),CONCAT('enforce_gtid_consistency=',@@enforce_gtid_consistency),CONCAT('read_only=',@@read_only),CONCAT('super_read_only=',@@super_read_only);\"",
+    "local.mysql.replica.threads": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SHOW REPLICA STATUS\\G\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'",
+    "local.mysql.replication.lag": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SHOW REPLICA STATUS\\G\" | egrep 'Seconds_Behind_Source|Read_Source_Log_Pos|Exec_Source_Log_Pos|Retrieved_Gtid_Set|Executed_Gtid_Set'",
+    "local.mysql.connection.pressure": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('Threads_connected=',@@GLOBAL.threads_connected),CONCAT('Max_used_connections=',@@GLOBAL.max_used_connections),CONCAT('max_connections=',@@max_connections);\"",
+    "local.mysql.binlog.relaylog": "if [ -r <MYSQL_BINLOG> ] && [ -r <MYSQL_RELAYLOG> ]; then printf 'MYSQL_BINLOG_RELAY_OK=true\\n'; else printf 'MYSQL_BINLOG_RELAY_OK=false\\n'; fi; ls -lh <MYSQL_BINLOG> <MYSQL_RELAYLOG> 2>/dev/null | tail -10",
+    "local.mysql.error_log.key_evidence": "if [ -r <MYSQL_ERROR_LOG> ]; then printf 'MYSQL_ERROR_COUNT=%s\\n' \"$(grep -iE 'ERROR|FATAL|crash|corrupt|Out of memory|Disk is full|Too many connections|Access denied|Aborted connection' <MYSQL_ERROR_LOG> 2>/dev/null | tail -50 | wc -l)\"; else printf 'MYSQL_ERROR_LOG_UNAVAILABLE=true\\n'; fi",
+    "local.mysql.slow_query.key_evidence": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('MYSQL_SLOW_QUERY_COUNT=',@@GLOBAL.Slow_queries);\"; test -r <MYSQL_SLOW_LOG> && tail -100 <MYSQL_SLOW_LOG> 2>/dev/null",
+    "local.mysql.innodb.waits": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('long_trx=',COUNT(*)) FROM information_schema.innodb_trx WHERE TIME_TO_SEC(TIMEDIFF(NOW(),trx_started))>300; SELECT CONCAT('row_lock_waits=',@@GLOBAL.Innodb_row_lock_current_waits);\"",
+    "local.mysql.buffer_pool.hit_ratio": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('read_requests=',@@GLOBAL.Innodb_buffer_pool_read_requests),CONCAT('reads=',@@GLOBAL.Innodb_buffer_pool_reads),CONCAT('buffer_pool_size=',@@innodb_buffer_pool_size);\"",
+    "local.mysql.sql.digest": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('Threads_running=',@@GLOBAL.Threads_running),CONCAT('Questions=',@@GLOBAL.Questions),CONCAT('Created_tmp_disk_tables=',@@GLOBAL.Created_tmp_disk_tables),CONCAT('Handler_read_rnd_next=',@@GLOBAL.Handler_read_rnd_next),CONCAT('Select_full_join=',@@GLOBAL.Select_full_join);\"",
+    "local.mysql.config.baseline": "grep -E '^(bind-address|server_id|report_host|port|datadir|socket|log_error|slow_query_log|long_query_time|log_bin|gtid_mode|enforce_gtid_consistency|binlog_format|sync_binlog|relay_log|relay_log_recovery|read_only|super_read_only|innodb_buffer_pool_size|innodb_flush_log_at_trx_commit|max_connections)' <MYSQL_CONF>",
+    "local.mysql.security.accounts": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('locked_accounts=',COUNT(*)),CONCAT('local_infile=',@@local_infile),CONCAT('skip_name_resolve=',@@skip_name_resolve),CONCAT('secure_file_priv=',@@secure_file_priv),CONCAT('mysqlx=',@@mysqlx) FROM mysql.user LIMIT 1;\"",
+    "local.mysql.backup.status": "if [ -d <MYSQL_BACKUP> ]; then printf 'BACKUP_FILES=%s\\n' \"$(find <MYSQL_BACKUP> -type f -mtime -2 -print 2>/dev/null | wc -l)\"; else printf 'MYSQL_BACKUP_UNAVAILABLE=true\\n'; fi",
     "local.nacos.service.health": "test -x <NACOS_BIN>; pgrep -fa 'com.alibaba.nacos|nacos.home|<NACOS_HOME>'; tail -n 50 <NACOS_LOG>/start.out",
     "local.nacos.core_ports.health": "ss -tlnp | egrep ':8848|:9848|:9849|:7848'",
     "local.nacos.http.health": "curl -sS --connect-timeout 3 http://127.0.0.1:8848/nacos/actuator/health",
@@ -623,20 +632,41 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
         "<USER>": "mysql_user",
     },
     "local.mysql.login.version": {
-        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
     },
     "local.mysql.role.gtid": {
-        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
     },
     "local.mysql.replica.threads": {
-        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
     },
     "local.mysql.replication.lag": {
-        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
     },
     "local.mysql.connection.pressure": {
-        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
     },
+    "local.mysql.binlog.relaylog": {
+        "<MYSQL_BINLOG>": "mysql_binlog", "<MYSQL_RELAYLOG>": "mysql_relaylog",
+    },
+    "local.mysql.error_log.key_evidence": {"<MYSQL_ERROR_LOG>": "mysql_error_log"},
+    "local.mysql.slow_query.key_evidence": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<MYSQL_SLOW_LOG>": "mysql_slow_log", "<USER>": "mysql_user",
+    },
+    "local.mysql.innodb.waits": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.mysql.buffer_pool.hit_ratio": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.mysql.sql.digest": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.mysql.config.baseline": {"<MYSQL_CONF>": "mysql_conf"},
+    "local.mysql.security.accounts": {
+        "<MYSQL_BIN>": "mysql_bin", "<MYSQL_CONF>": "mysql_conf", "<MYSQL_SOCKET>": "mysql_socket", "<USER>": "mysql_user",
+    },
+    "local.mysql.backup.status": {"<MYSQL_BACKUP>": "mysql_backup"},
     "local.nacos.service.health": {
         "<NACOS_BIN>": "nacos_bin", "<NACOS_HOME>": "nacos_home", "<NACOS_LOG>": "nacos_log",
     },
@@ -694,7 +724,13 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "mysql_bin": "/opt/mysql/bin/mysql",
     "mysql_conf": "/opt/mysql/conf/my.cnf",
     "mysql_log": "/opt/mysql/logs",
-    "mysql_user": "root",
+    "mysql_error_log": "/opt/mysql/logs/error.log",
+    "mysql_slow_log": "/opt/mysql/logs/slow.log",
+    "mysql_data": "/opt/mysql/data",
+    "mysql_binlog": "/opt/mysql/binlog",
+    "mysql_relaylog": "/opt/mysql/relaylog",
+    "mysql_backup": "/opt/mysql/backuptest",
+    "mysql_user": "Mysql_inspect",
     "mysql_host": "127.0.0.1",
     "nacos_token": "CHANGE_ME",
     "nacos_home": "/opt/nacos",
@@ -831,6 +867,8 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         command = command.replace(placeholder, _derive_additional_path(value, suffix))
     if metric_id.startswith("local.kafka."):
         command = f"{_kafka_runtime_prefix(profile)}; {command}"
+    if metric_id.startswith("local.mysql."):
+        command = 'export MYSQL_PWD="${INSPECT_MYSQL_PASSWORD:-}"; ' + command
     typed_prefixes = (
         "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
         "local.redis.", "local.rocketmq.", "local.tomcat.", "local.zookeeper.",
@@ -845,7 +883,7 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         gate_specs = {
             "keepalived": (r"keepalived", "keepalived_conf"),
             "kafka": (r"[k]afka\.Kafka", "kafka_conf"),
-            "mysql": (r"mysqld", "mysql_conf"),
+            "mysql": (r"[m]ysqld", "mysql_conf"),
             "nacos": (r"com\.alibaba\.nacos|nacos", "nacos_home"),
             "rabbitmq": (r"beam\.smp|rabbitmq-server", "rabbitmq_conf"),
             "redis": (r"redis-server", "redis_conf"),
@@ -1321,6 +1359,25 @@ def _elasticsearch_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def _mysql_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
+    """Return the MySQL password through Ansible's private task environment.
+
+    The password is never interpolated into the command, playbook, callback,
+    or fact source. ``MYSQL_PWD`` is read by the mysql client in the generated
+    target-side shell command. Placeholder/empty values fail closed to
+    passwordless execution, which becomes UNKNOWN on authentication failure.
+    """
+    values = profile.get("mysql_passwd") or []
+    if isinstance(values, str):
+        values = [values]
+    if not values:
+        return {}
+    password = str(values[0])
+    if not password.strip() or password.strip().upper() in {"CHANGE_ME", "REPLACE_ME", "请填写"}:
+        return {}
+    return {"INSPECT_MYSQL_PASSWORD": password}
+
+
 def _es_curl(path: str, options: str = "", *, timeout_sec: int = METRIC_TIMEOUT_SEC) -> str:
     """Build a curl call using task-local auth/TLS arrays, never literals."""
     extra = f" {options}" if options else ""
@@ -1681,6 +1738,11 @@ def build_metric_command_specs(
             raise CommandConfigError(f"指标所需命令映射缺失: {metric_id}")
         if metric_id in _ADDITIONAL_COMMANDS:
             command = _build_additional_command(metric_id, profile)
+            task_environment = (
+                _mysql_task_environment(profile)
+                if metric_id.startswith("local.mysql.")
+                else {}
+            )
             specs.append(
                 CommandSpec(
                     metric_id=metric_id,
@@ -1691,6 +1753,7 @@ def build_metric_command_specs(
                     source_anchor=entry["anchor"],
                     allowed_binaries=_ADDITIONAL_GENERATED_ALLOWED_BINARIES,
                     trusted_generated_shell=True,
+                    task_environment=task_environment,
                 )
             )
             continue
@@ -1959,6 +2022,7 @@ def validate_command_specs(
         allowed_environment = {
             "INSPECT_ES_API_USER",
             "INSPECT_ES_API_PASSWORD",
+            "INSPECT_MYSQL_PASSWORD",
         }
         if any(key not in allowed_environment for key in spec.task_environment):
             raise CommandNotAllowedError(
@@ -3078,7 +3142,11 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
         # allowing raw-compatible execution on target hosts with Python 3.7.
         for spec in plan.metric_specs:
             for key, value in getattr(spec, "task_environment", {}).items():
-                if key in {"INSPECT_ES_API_USER", "INSPECT_ES_API_PASSWORD"}:
+                if key in {
+                    "INSPECT_ES_API_USER",
+                    "INSPECT_ES_API_PASSWORD",
+                    "INSPECT_MYSQL_PASSWORD",
+                }:
                     env[key] = value
         for secret_name in ("ANSIBLE_PASSWORD", "ANSIBLE_NET_PASSWORD", "SSHPASS"):
             env.pop(secret_name, None)

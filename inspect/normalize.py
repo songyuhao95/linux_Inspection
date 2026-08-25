@@ -1658,34 +1658,177 @@ def parse_zookeeper_config_baseline(output):
 
 
 def parse_mysql_service_health(output):
-    return _typed_bool(output, r"mysqld|\bLISTEN\b|active", negative=r"connection refused|inactive|not found|failed|error")
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if re.search(r"connection refused|inactive|not found|failed|error", text, re.IGNORECASE):
+        return {"value": False, "summary": "mysql_service=false"}
+    if not re.search(r"mysqld", text, re.IGNORECASE) or not re.search(r"\bLISTEN\b.*(?:\b|:)3306\b|(?:\b|:)3306\b.*\bLISTEN\b", text, re.IGNORECASE):
+        raise ParseError("MySQL 服务健康事实缺少 mysqld 或 3306 LISTEN")
+    return {"value": True, "summary": "mysql_service=true"}
 
 
 def parse_mysql_login_version(output):
-    return _typed_bool(output, r"\b\d+\.\d+(?:\.\d+)?\b.*\b(?:3306|localhost|127\.0\.0\.1)\b|@@version", negative=r"access denied|error|failed")
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if re.search(r"access denied|error|failed|can't connect", text, re.IGNORECASE):
+        return {"value": False, "summary": "mysql_login=false"}
+    if not re.search(r"\b8\.0\.44\b", text) or not re.search(r"\b3306\b", text):
+        return {"value": False, "summary": "mysql_login=false"}
+    return {"value": True, "summary": "mysql_login=true"}
 
 
 def parse_mysql_role_gtid(output):
-    return _typed_bool(output, r"server_id.*(?:ON|1)|gtid_mode.*ON.*enforce_gtid_consistency.*ON", negative=r"OFF|error|failed")
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    fields = {
+        name: re.search(pattern, text, re.IGNORECASE)
+        for name, pattern in {
+            "server_id": r"server_id\s*[=:]\s*(\d+)",
+            "gtid": r"gtid_mode\s*[=:]\s*ON",
+            "consistency": r"enforce_gtid_consistency\s*[=:]\s*ON",
+            "read_only": r"read_only\s*[=:]\s*(ON|OFF|1|0)",
+            "super_read_only": r"super_read_only\s*[=:]\s*(ON|OFF|1|0)",
+        }.items()
+    }
+    if not all(fields.values()):
+        raise ParseError("MySQL 角色与 GTID 输出格式非法")
+    read_only = fields["read_only"].group(1).lower() in {"on", "1"}
+    super_read_only = fields["super_read_only"].group(1).lower() in {"on", "1"}
+    value = bool(fields["server_id"].group(1)) and read_only == super_read_only
+    return {"value": value, "summary": f"mysql_role_gtid={str(value).lower()}"}
 
 
 def parse_mysql_replica_threads(output):
-    return _typed_bool(output, r"Replica_IO_Running\s*:\s*Yes.*Replica_SQL_Running\s*:\s*Yes|Replica_SQL_Running\s*:\s*Yes.*Replica_IO_Running\s*:\s*Yes", negative=r"Replica_(?:IO|SQL)_Running\s*:\s*No|Last_(?:IO|SQL)_Errno\s*:\s*[1-9]")
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    required = (
+        re.search(r"Replica_IO_Running\s*:\s*(Yes|No)", text, re.IGNORECASE),
+        re.search(r"Replica_SQL_Running\s*:\s*(Yes|No)", text, re.IGNORECASE),
+        re.search(r"Last_IO_Errno\s*:\s*(\d+)", text, re.IGNORECASE),
+        re.search(r"Last_SQL_Errno\s*:\s*(\d+)", text, re.IGNORECASE),
+    )
+    if not all(required):
+        raise ParseError("MySQL 复制线程输出格式非法")
+    value = (
+        required[0].group(1).lower() == "yes"
+        and required[1].group(1).lower() == "yes"
+        and int(required[2].group(1)) == 0
+        and int(required[3].group(1)) == 0
+    )
+    return {"value": value, "summary": f"mysql_replica_threads={str(value).lower()}"}
 
 
 def parse_mysql_replication_lag(output):
-    return _typed_number(output, r"Seconds_Behind_Source\s*:\s*(\d+)", cast=int, summary="replication_lag={value}s")
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    lag = re.search(r"Seconds_Behind_Source\s*:\s*(\d+)", text, re.IGNORECASE)
+    read_pos = re.search(r"Read_Source_Log_Pos\s*:\s*(\d+)", text, re.IGNORECASE)
+    exec_pos = re.search(r"Exec_Source_Log_Pos\s*:\s*(\d+)", text, re.IGNORECASE)
+    if not lag or not read_pos or not exec_pos:
+        raise ParseError("MySQL 复制延迟输出格式非法或为 NULL")
+    value = int(lag.group(1))
+    return {"value": value, "read_pos": int(read_pos.group(1)), "exec_pos": int(exec_pos.group(1)), "summary": f"replication_lag={value}s"}
 
 
 def parse_mysql_connection_pressure(output):
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
-    used = re.search(r"Max_used_connections\s+([0-9]+)", text, re.IGNORECASE)
-    limit = re.search(r"max_connections\s+([0-9]+)", text, re.IGNORECASE)
+    used = re.search(r"Max_used_connections\s*[=:]?\s*([0-9]+)", text, re.IGNORECASE)
+    limit = re.search(r"max_connections\s*[=:]?\s*([0-9]+)", text, re.IGNORECASE)
     if not used or not limit or int(limit.group(1)) <= 0:
         raise ParseError("MySQL 连接压力数值缺失")
     value = round(int(used.group(1)) * 100.0 / int(limit.group(1)), 2)
     return {"value": value, "summary": f"connection_pressure={value}%"}
+
+
+def parse_mysql_binlog_relaylog(output):
+    return _typed_bool(output, r"MYSQL_BINLOG_RELAY_OK\s*=\s*true", negative=r"MYSQL_BINLOG_RELAY_OK\s*=\s*false|not found|permission denied|error|failed")
+
+
+def _parse_mysql_count_marker(output: str, marker: str, summary: str) -> Dict[str, Any]:
+    return _typed_number(output, rf"{re.escape(marker)}\s*=\s*(\d+)", cast=int, summary=summary)
+
+
+def parse_mysql_error_log_key_evidence(output):
+    return _parse_mysql_count_marker(output, "MYSQL_ERROR_COUNT", "mysql_error_count={value}")
+
+
+def parse_mysql_slow_query_key_evidence(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    match = re.search(r"MYSQL_SLOW_QUERY_COUNT\s*=\s*(\d+)|Slow_queries\s+(\d+)", text, re.IGNORECASE)
+    if not match:
+        raise ParseError("MySQL 慢查询输出格式非法")
+    value = int(next(group for group in match.groups() if group is not None))
+    return {"value": value, "summary": f"mysql_slow_query_count={value}"}
+
+
+def parse_mysql_innodb_waits(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    long_trx = re.search(r"long_trx\s*=\s*(\d+)", text, re.IGNORECASE)
+    row_waits = re.search(r"(?:row_lock_waits|Innodb_row_lock_current_waits)\s*[=:]?\s*(\d+)", text, re.IGNORECASE)
+    if not long_trx or not row_waits:
+        raise ParseError("MySQL InnoDB 等待输出格式非法")
+    value = max(int(long_trx.group(1)), int(row_waits.group(1)))
+    return {"value": value, "long_trx": int(long_trx.group(1)), "row_lock_waits": int(row_waits.group(1)), "summary": f"mysql_innodb_waits={value}"}
+
+
+def parse_mysql_buffer_pool_hit_ratio(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    requests = re.search(r"(?:read_requests|Innodb_buffer_pool_read_requests)\s*[=:]?\s*(\d+)", text, re.IGNORECASE)
+    reads = re.search(r"(?:reads|Innodb_buffer_pool_reads)\s*[=:]?\s*(\d+)", text, re.IGNORECASE)
+    if not requests or not reads or int(requests.group(1)) <= 0:
+        raise ParseError("MySQL Buffer Pool 计数输出格式非法")
+    value = round(max(0.0, 100.0 * (1.0 - int(reads.group(1)) / int(requests.group(1)))), 2)
+    return {"value": value, "read_requests": int(requests.group(1)), "reads": int(reads.group(1)), "summary": f"mysql_buffer_pool_hit_ratio={value}%"}
+
+
+def parse_mysql_sql_digest(output):
+    return _typed_number(output, r"(?:^|\s)Threads_running\s*[=:]?\s*(\d+)", cast=int, summary="mysql_threads_running={value}")
+
+
+def parse_mysql_config_baseline(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    required = (
+        re.search(r"server_id\s*=", text, re.IGNORECASE),
+        re.search(r"gtid_mode\s*=\s*ON", text, re.IGNORECASE),
+        re.search(r"enforce_gtid_consistency\s*=\s*ON", text, re.IGNORECASE),
+        re.search(r"log_bin\s*=|log_bin(?:\s|$)", text, re.IGNORECASE),
+        re.search(r"max_connections\s*=\s*\d+", text, re.IGNORECASE),
+    )
+    if not all(required):
+        raise ParseError("MySQL 配置基线缺少关键项")
+    return {"value": True, "summary": "mysql_config_baseline=true"}
+
+
+def parse_mysql_security_accounts(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    required = (
+        re.search(r"local_infile\s*[=:]?\s*OFF", text, re.IGNORECASE),
+        re.search(r"skip_name_resolve\s*[=:]?\s*ON", text, re.IGNORECASE),
+        re.search(r"secure_file_priv\s*[=:]?\s*\S+", text, re.IGNORECASE),
+        re.search(r"mysqlx\s*[=:]?\s*OFF", text, re.IGNORECASE),
+        re.search(r"locked_accounts\s*[=:]?\s*0", text, re.IGNORECASE),
+    )
+    if not all(required):
+        raise ParseError("MySQL 用户与安全配置输出格式非法")
+    return {"value": True, "summary": "mysql_security_accounts=true"}
+
+
+def parse_mysql_backup_status(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    files = re.search(r"BACKUP_FILES\s*=\s*(\d+)", text, re.IGNORECASE)
+    age = re.search(r"LATEST_BACKUP_AGE_DAYS\s*=\s*(\d+)", text, re.IGNORECASE)
+    if not files:
+        raise ParseError("MySQL 备份状态输出格式非法")
+    age_days = int(age.group(1)) if age else 0
+    value = int(files.group(1)) > 0 and age_days <= 2
+    return {"value": value, "backup_files": int(files.group(1)), "age_days": age_days, "summary": f"mysql_backup_status={str(value).lower()}"}
 
 
 def parse_nacos_service_health(output):
@@ -2609,6 +2752,11 @@ _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.zookeeper.mntr.health": (50, 200),
     "local.mysql.replication.lag": (0, 30),
     "local.mysql.connection.pressure": (80, 95),
+    "local.mysql.error_log.key_evidence": (0, 10),
+    "local.mysql.slow_query.key_evidence": (10, 100),
+    "local.mysql.innodb.waits": (0, 5),
+    "local.mysql.buffer_pool.hit_ratio": (99, 95),
+    "local.mysql.sql.digest": (10, 50),
     "local.nacos.cluster.nodes": (2, 1),
     "local.nacos.core_ports.health": (4, 2),
     "local.rocketmq.core_ports.health": (4, 2),
@@ -2640,6 +2788,13 @@ def _judge_typed_middleware(parsed, resolved, profile=None):
                 STATUS_CRIT if value > warn_limit
                 else STATUS_WARN if value > ok_limit or outstanding > 0
                 else STATUS_OK
+            )
+        elif metric_id == "local.mysql.buffer_pool.hit_ratio":
+            ok_limit, warn_limit = thresholds
+            status = (
+                STATUS_OK if value >= ok_limit
+                else STATUS_WARN if value >= warn_limit
+                else STATUS_CRIT
             )
         else:
             ok_limit, warn_limit = thresholds
@@ -2761,6 +2916,11 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.zookeeper.mntr.health",
         "local.mysql.replication.lag",
         "local.mysql.connection.pressure",
+        "local.mysql.error_log.key_evidence",
+        "local.mysql.slow_query.key_evidence",
+        "local.mysql.innodb.waits",
+        "local.mysql.buffer_pool.hit_ratio",
+        "local.mysql.sql.digest",
         "local.nacos.cluster.nodes",
         "local.rabbitmq.cluster.nodes",
         "local.rabbitmq.queue.backlog",
