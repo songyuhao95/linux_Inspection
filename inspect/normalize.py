@@ -1413,6 +1413,35 @@ def parse_kafka_under_min_isr(output):
         return {"value": 0, "summary": "under_min_isr=0"}
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
+    if re.search(r"KAFKA_FULL_TOPIC_DESCRIBE\s*=\s*true", text, re.IGNORECASE):
+        min_isr_by_topic = {}
+        for line in lines:
+            summary = re.search(
+                r"\bTopic:\s*(\S+).*?Configs:.*?\bmin\.insync\.replicas\s*=\s*(\d+)",
+                line,
+                re.IGNORECASE,
+            )
+            if summary:
+                min_isr_by_topic[summary.group(1)] = int(summary.group(2))
+        rows = [
+            line for line in lines
+            if re.search(r"\bTopic:\s*\S+", line, re.IGNORECASE)
+            and re.search(r"\bPartition:\s*\S+", line, re.IGNORECASE)
+        ]
+        if not rows:
+            raise ParseError("Kafka ISR 输出格式非法")
+        value = 0
+        for line in rows:
+            topic = re.search(r"\bTopic:\s*(\S+)", line, re.IGNORECASE)
+            isr = re.search(r"\bISR:\s*([^\s]+)", line, re.IGNORECASE)
+            leader = re.search(r"\bLeader:\s*([^\s]+)", line, re.IGNORECASE)
+            if not topic or not isr or not leader:
+                raise ParseError("Kafka ISR 输出格式非法")
+            isr_count = len([item for item in isr.group(1).split(",") if item])
+            required = min_isr_by_topic.get(topic.group(1), 1)
+            if leader.group(1) == "-1" or isr_count < required:
+                value += 1
+        return {"value": value, "summary": f"under_min_isr={value}"}
     if re.search(r"no (?:under[-_ ]min|unavailable)|none|empty", text, re.IGNORECASE):
         value = 0
     elif not re.search(r"\bunder[-_ ]min\b|\bunavailable\b|\bTopic\b.*\bPartition\b|^\s*Topic:", text, re.IGNORECASE | re.MULTILINE):

@@ -518,10 +518,10 @@ _ADDITIONAL_COMMANDS = {
     "local.keepalived.vrrp.role": "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>",
     "local.keepalived.health_check.status": "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>",
     "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa '[k]afka.Kafka' | grep -v 'INSPECT_MIDDLEWARE_NOT_RUNNING='; ss -tlnp | grep ':9093'",
-    "local.kafka.controller.health": "$kafka_bin_dir/zookeeper-shell.sh \"$kafka_zookeeper_connect\" get /controller",
-    "local.kafka.broker.registration": "BROKER_ID=$(awk -F= '$1 ~ /^[[:space:]]*broker[.]id[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2; exit}' \"$kafka_conf\"); \"$kafka_bin_dir/zookeeper-shell.sh\" \"$kafka_zookeeper_connect\" get /brokers/ids/${BROKER_ID}",
+    "local.kafka.controller.health": "$kafka_bin_dir/zookeeper-shell.sh \"$kafka_zookeeper_root\" get \"$kafka_zookeeper_path/controller\"",
+    "local.kafka.broker.registration": "BROKER_ID=$(awk -F= '$1 ~ /^[[:space:]]*broker[.]id[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2; exit}' \"$kafka_conf\"); \"$kafka_bin_dir/zookeeper-shell.sh\" \"$kafka_zookeeper_root\" get \"$kafka_zookeeper_path/brokers/ids/${BROKER_ID}\"",
     "local.kafka.under_replicated_partitions": "out=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --under-replicated-partitions); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_UNDER_REPLICATED=true\\n'; fi",
-    "local.kafka.under_min_isr": "out1=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --under-min-isr-partitions); rc1=$?; out2=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --unavailable-partitions); rc2=$?; if [ \"$rc1\" -ne 0 ] || [ \"$rc2\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out1$out2\" ]; then printf '%s\\n%s\\n' \"$out1\" \"$out2\"; else printf 'KAFKA_NO_UNDER_MIN_ISR=true\\n'; fi",
+    "local.kafka.under_min_isr": "out=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf 'KAFKA_FULL_TOPIC_DESCRIBE=true\\n%s\\n' \"$out\"; else printf 'KAFKA_NO_UNDER_MIN_ISR=true\\n'; fi",
     "local.kafka.topic.replica_distribution": "out=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_TOPICS=true\\n'; fi",
     "local.kafka.consumer.lag": "out=$(\"$kafka_consumer_groups\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --all-groups); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_CONSUMER_GROUPS=true\\n'; fi",
     "local.kafka.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|UnderReplicated|IOException|Session expired' <KAFKA_LOG> 2>/dev/null | tail -30; grep_rc=${PIPESTATUS[0]}; if [ \"$grep_rc\" -eq 1 ]; then printf 'KAFKA_LOG_OK=true\\n'; elif [ \"$grep_rc\" -gt 1 ]; then printf 'KAFKA_LOG_PARSE_FAILED=true\\n'; fi",
@@ -778,6 +778,10 @@ def _kafka_runtime_prefix(profile: Dict[str, Any]) -> str:
         "kafka_zookeeper_connect=$(awk -F= '$1 ~ /^[[:space:]]*zookeeper[.]connect[[:space:]]*$/ "
         "{gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2; exit}' \"$kafka_conf\"); "
         f"if [ -z \"$kafka_zookeeper_connect\" ]; then kafka_zookeeper_connect={zk_fallback_q}; fi; "
+        "kafka_zookeeper_root=\"${kafka_zookeeper_connect%%/*}\"; "
+        "kafka_zookeeper_chroot=; kafka_zookeeper_path=; "
+        "case \"$kafka_zookeeper_connect\" in */*) kafka_zookeeper_chroot=\"${kafka_zookeeper_connect#*/}\"; "
+        "kafka_zookeeper_path=\"/${kafka_zookeeper_chroot#/}\";; esac; "
         "kafka_bootstrap=$(awk -F= '$1 ~ /^[[:space:]]*advertised[.]listeners[[:space:]]*$/ "
         "{gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); split($2, a, \",\"); "
         "sub(/^[^:]+:\\/\\//, \"\", a[1]); print a[1]; exit}' \"$kafka_conf\"); "
@@ -789,7 +793,10 @@ def _kafka_runtime_prefix(profile: Dict[str, Any]) -> str:
         "kafka_ssl_config=; kafka_ssl_config_temp=; "
         f"for kafka_ssl_candidate in {ssl_config_args}; do "
         "if [ -r \"$kafka_ssl_candidate\" ]; then "
-        "kafka_ssl_config=\"$kafka_ssl_candidate\"; break; fi; done; "
+        "kafka_ssl_missing=0; for kafka_ssl_path in $(awk -F= '/^[[:space:]]*ssl\\.(keystore|truststore)\\.location[[:space:]]*=/ "
+        "{gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2}' \"$kafka_ssl_candidate\"); do "
+        "if [ ! -r \"$kafka_ssl_path\" ]; then kafka_ssl_missing=1; fi; done; "
+        "if [ \"$kafka_ssl_missing\" -eq 0 ]; then kafka_ssl_config=\"$kafka_ssl_candidate\"; break; fi; fi; done; "
         "if [ -z \"$kafka_ssl_config\" ] && [ -r \"$kafka_conf\" ]; then "
         "kafka_ssl_config_temp=$(mktemp \"${TMPDIR:-/tmp}/inspect-kafka-client.XXXXXX\") || kafka_ssl_config_temp=; "
         "if [ -n \"$kafka_ssl_config_temp\" ]; then "
