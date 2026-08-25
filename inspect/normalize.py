@@ -1382,7 +1382,7 @@ def parse_kafka_zookeeper_health(output):
 
 
 def parse_kafka_broker_health(output):
-    return _typed_bool(output, r"kafka\.Kafka|\bLISTEN\b|started", negative=r"connection refused|not found|failed|error")
+    return _typed_bool(output, r"kafka\.Kafka|\bLISTEN\b|started", negative=r"connection refused|not found|failed")
 
 
 def parse_kafka_controller_health(output):
