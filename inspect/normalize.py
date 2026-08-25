@@ -1701,6 +1701,8 @@ def parse_mysql_role_gtid(output):
 def parse_mysql_replica_threads(output):
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
+    if re.search(r"MYSQL_REPLICA_NOT_CONFIGURED\s*=\s*true", text, re.IGNORECASE):
+        return {"value": True, "summary": "mysql_replica_threads=true;replication=not_configured"}
     required = (
         re.search(r"Replica_IO_Running\s*:\s*(Yes|No)", text, re.IGNORECASE),
         re.search(r"Replica_SQL_Running\s*:\s*(Yes|No)", text, re.IGNORECASE),
@@ -1721,6 +1723,8 @@ def parse_mysql_replica_threads(output):
 def parse_mysql_replication_lag(output):
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
+    if re.search(r"MYSQL_REPLICA_NOT_CONFIGURED\s*=\s*true", text, re.IGNORECASE):
+        return {"value": 0, "read_pos": 0, "exec_pos": 0, "summary": "replication_lag=0s;replication=not_configured"}
     lag = re.search(r"Seconds_Behind_Source\s*:\s*(\d+)", text, re.IGNORECASE)
     read_pos = re.search(r"Read_Source_Log_Pos\s*:\s*(\d+)", text, re.IGNORECASE)
     exec_pos = re.search(r"Exec_Source_Log_Pos\s*:\s*(\d+)", text, re.IGNORECASE)

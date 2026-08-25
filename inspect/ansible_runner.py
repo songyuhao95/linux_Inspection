@@ -537,17 +537,17 @@ _ADDITIONAL_COMMANDS = {
     "local.mysql.service.health": "pgrep -fa '[m]ysqld'; ss -tlnp | grep ':3306'",
     "local.mysql.login.version": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT @@version,@@hostname,@@port;\"",
     "local.mysql.role.gtid": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('server_id=',@@server_id),CONCAT('gtid_mode=',@@gtid_mode),CONCAT('enforce_gtid_consistency=',@@enforce_gtid_consistency),CONCAT('read_only=',@@read_only),CONCAT('super_read_only=',@@super_read_only);\"",
-    "local.mysql.replica.threads": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SHOW REPLICA STATUS\\G\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'",
-    "local.mysql.replication.lag": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SHOW REPLICA STATUS\\G\" | egrep 'Seconds_Behind_Source|Read_Source_Log_Pos|Exec_Source_Log_Pos|Retrieved_Gtid_Set|Executed_Gtid_Set'",
-    "local.mysql.connection.pressure": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('Threads_connected=',@@GLOBAL.threads_connected),CONCAT('Max_used_connections=',@@GLOBAL.max_used_connections),CONCAT('max_connections=',@@max_connections);\"",
+    "local.mysql.replica.threads": "replica_status=$(\"$mysql_bin\" --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SHOW REPLICA STATUS\\G\" 2>&1); replica_rc=$?; if [ \"$replica_rc\" -ne 0 ]; then printf '%s\\n' \"$replica_status\"; exit \"$replica_rc\"; elif [ -z \"$replica_status\" ]; then printf '%s\\n' MYSQL_REPLICA_NOT_CONFIGURED=true; else printf '%s\\n' \"$replica_status\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'; fi",
+    "local.mysql.replication.lag": "replica_status=$(\"$mysql_bin\" --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SHOW REPLICA STATUS\\G\" 2>&1); replica_rc=$?; if [ \"$replica_rc\" -ne 0 ]; then printf '%s\\n' \"$replica_status\"; exit \"$replica_rc\"; elif [ -z \"$replica_status\" ]; then printf '%s\\n' MYSQL_REPLICA_NOT_CONFIGURED=true; else printf '%s\\n' \"$replica_status\" | egrep 'Seconds_Behind_Source|Read_Source_Log_Pos|Exec_Source_Log_Pos|Retrieved_Gtid_Set|Executed_Gtid_Set'; fi",
+    "local.mysql.connection.pressure": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('Threads_connected=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Threads_connected'; SELECT CONCAT('Max_used_connections=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Max_used_connections'; SELECT CONCAT('max_connections=', VARIABLE_VALUE) FROM performance_schema.global_variables WHERE VARIABLE_NAME='max_connections';\"",
     "local.mysql.binlog.relaylog": "if [ -r <MYSQL_BINLOG> ] && [ -r <MYSQL_RELAYLOG> ]; then printf 'MYSQL_BINLOG_RELAY_OK=true\\n'; else printf 'MYSQL_BINLOG_RELAY_OK=false\\n'; fi; ls -lh <MYSQL_BINLOG> <MYSQL_RELAYLOG> 2>/dev/null | tail -10",
     "local.mysql.error_log.key_evidence": "if [ -r <MYSQL_ERROR_LOG> ]; then printf 'MYSQL_ERROR_COUNT=%s\\n' \"$(grep -iE 'ERROR|FATAL|crash|corrupt|Out of memory|Disk is full|Too many connections|Access denied|Aborted connection' <MYSQL_ERROR_LOG> 2>/dev/null | tail -50 | wc -l)\"; else printf 'MYSQL_ERROR_LOG_UNAVAILABLE=true\\n'; fi",
-    "local.mysql.slow_query.key_evidence": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('MYSQL_SLOW_QUERY_COUNT=',@@GLOBAL.Slow_queries);\"; test -r <MYSQL_SLOW_LOG> && tail -100 <MYSQL_SLOW_LOG> 2>/dev/null",
-    "local.mysql.innodb.waits": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('long_trx=',COUNT(*)) FROM information_schema.innodb_trx WHERE TIME_TO_SEC(TIMEDIFF(NOW(),trx_started))>300; SELECT CONCAT('row_lock_waits=',@@GLOBAL.Innodb_row_lock_current_waits);\"",
-    "local.mysql.buffer_pool.hit_ratio": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('read_requests=',@@GLOBAL.Innodb_buffer_pool_read_requests),CONCAT('reads=',@@GLOBAL.Innodb_buffer_pool_reads),CONCAT('buffer_pool_size=',@@innodb_buffer_pool_size);\"",
-    "local.mysql.sql.digest": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('Threads_running=',@@GLOBAL.Threads_running),CONCAT('Questions=',@@GLOBAL.Questions),CONCAT('Created_tmp_disk_tables=',@@GLOBAL.Created_tmp_disk_tables),CONCAT('Handler_read_rnd_next=',@@GLOBAL.Handler_read_rnd_next),CONCAT('Select_full_join=',@@GLOBAL.Select_full_join);\"",
+     "local.mysql.slow_query.key_evidence": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('MYSQL_SLOW_QUERY_COUNT=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Slow_queries';\"; test -r <MYSQL_SLOW_LOG> && tail -100 <MYSQL_SLOW_LOG> 2>/dev/null",
+     "local.mysql.innodb.waits": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('long_trx=',COUNT(*)) FROM information_schema.innodb_trx WHERE TIME_TO_SEC(TIMEDIFF(NOW(),trx_started))>300; SELECT CONCAT('row_lock_waits=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_row_lock_current_waits';\"",
+     "local.mysql.buffer_pool.hit_ratio": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('read_requests=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_buffer_pool_read_requests'; SELECT CONCAT('reads=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Innodb_buffer_pool_reads'; SELECT CONCAT('buffer_pool_size=', VARIABLE_VALUE) FROM performance_schema.global_variables WHERE VARIABLE_NAME='innodb_buffer_pool_size';\"",
+     "local.mysql.sql.digest": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('Threads_running=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Threads_running'; SELECT CONCAT('Questions=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Questions'; SELECT CONCAT('Created_tmp_disk_tables=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Created_tmp_disk_tables'; SELECT CONCAT('Handler_read_rnd_next=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Handler_read_rnd_next'; SELECT CONCAT('Select_full_join=', VARIABLE_VALUE) FROM performance_schema.global_status WHERE VARIABLE_NAME='Select_full_join';\"",
     "local.mysql.config.baseline": "grep -E '^(bind-address|server_id|report_host|port|datadir|socket|log_error|slow_query_log|long_query_time|log_bin|gtid_mode|enforce_gtid_consistency|binlog_format|sync_binlog|relay_log|relay_log_recovery|read_only|super_read_only|innodb_buffer_pool_size|innodb_flush_log_at_trx_commit|max_connections)' <MYSQL_CONF>",
-    "local.mysql.security.accounts": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('locked_accounts=',COUNT(*)),CONCAT('local_infile=',@@local_infile),CONCAT('skip_name_resolve=',@@skip_name_resolve),CONCAT('secure_file_priv=',@@secure_file_priv),CONCAT('mysqlx=',@@mysqlx) FROM mysql.user LIMIT 1;\"",
+     "local.mysql.security.accounts": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('locked_accounts=',COUNT(*)) FROM mysql.user; SELECT CONCAT('local_infile=', VARIABLE_VALUE) FROM performance_schema.global_variables WHERE VARIABLE_NAME='local_infile'; SELECT CONCAT('skip_name_resolve=', VARIABLE_VALUE) FROM performance_schema.global_variables WHERE VARIABLE_NAME='skip_name_resolve'; SELECT CONCAT('secure_file_priv=', VARIABLE_VALUE) FROM performance_schema.global_variables WHERE VARIABLE_NAME='secure_file_priv'; SELECT CONCAT('mysqlx=', IF(COUNT(*)=0,'OFF',IF(MAX(VARIABLE_VALUE <> '0'),'ON','OFF'))) FROM performance_schema.global_variables WHERE VARIABLE_NAME IN ('mysqlx','mysqlx_port');\"",
     "local.mysql.backup.status": "if [ -d <MYSQL_BACKUP> ]; then printf 'BACKUP_FILES=%s\\n' \"$(find <MYSQL_BACKUP> -type f -mtime -2 -print 2>/dev/null | wc -l)\"; else printf 'MYSQL_BACKUP_UNAVAILABLE=true\\n'; fi",
     "local.nacos.service.health": "test -x <NACOS_BIN>; pgrep -fa 'com.alibaba.nacos|nacos.home|<NACOS_HOME>'; tail -n 50 <NACOS_LOG>/start.out",
     "local.nacos.core_ports.health": "ss -tlnp | egrep ':8848|:9848|:9849|:7848'",
@@ -783,6 +783,22 @@ def _additional_profile_value(profile: Dict[str, Any], key: str) -> str:
     return _additional_profile_values(profile, key)[0]
 
 
+def _mysql_runtime_prefix(profile: Dict[str, Any]) -> str:
+    """Resolve the configured MySQL client candidates on the target host."""
+    candidates = _additional_profile_values(profile, "mysql_bin")
+    words = " ".join(shlex.quote(value) for value in candidates)
+    fallback = shlex.quote(candidates[0])
+    return (
+        f"mysql_bin={fallback}; "
+        f"for mysql_candidate in {words}; do "
+        "if [ -x \"$mysql_candidate\" ]; then "
+        "mysql_bin=\"$mysql_candidate\"; break; fi; "
+        "done; "
+        "if [ ! -x \"$mysql_bin\" ]; then "
+        "printf '%s\\n' INSPECT_MYSQL_CLIENT_NOT_FOUND=true; exit 0; fi"
+    )
+
+
 def _kafka_runtime_prefix(profile: Dict[str, Any]) -> str:
     """Resolve Kafka tools and endpoints on the target, with conf fallbacks."""
     kafka_conf = _additional_profile_values(profile, "kafka_conf")
@@ -858,13 +874,28 @@ def _derive_additional_path(value: str, suffix: Optional[str]) -> str:
 
 def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
     command = _COMMAND_TEMPLATES[metric_id]["command"]
-    for placeholder, spec in _ADDITIONAL_PLACEHOLDER_KEYS.get(metric_id, {}).items():
-        if isinstance(spec, tuple):
-            key, suffix = spec
-        else:
-            key, suffix = spec, None
-        value = _additional_profile_value(profile, key)
-        command = command.replace(placeholder, _derive_additional_path(value, suffix))
+    if metric_id.startswith("local.mysql."):
+        # mysql_bin is a candidate list. Keep selection on the target host so
+        # a missing first path cannot turn every SQL fact into empty output.
+        command = command.replace("<MYSQL_BIN>", '\"$mysql_bin\"')
+        for placeholder, spec in _ADDITIONAL_PLACEHOLDER_KEYS.get(metric_id, {}).items():
+            if placeholder == "<MYSQL_BIN>":
+                continue
+            if isinstance(spec, tuple):
+                key, suffix = spec
+            else:
+                key, suffix = spec, None
+            value = _additional_profile_value(profile, key)
+            command = command.replace(placeholder, _derive_additional_path(value, suffix))
+        command = _mysql_runtime_prefix(profile) + "; " + command
+    else:
+        for placeholder, spec in _ADDITIONAL_PLACEHOLDER_KEYS.get(metric_id, {}).items():
+            if isinstance(spec, tuple):
+                key, suffix = spec
+            else:
+                key, suffix = spec, None
+            value = _additional_profile_value(profile, key)
+            command = command.replace(placeholder, _derive_additional_path(value, suffix))
     if metric_id.startswith("local.kafka."):
         command = f"{_kafka_runtime_prefix(profile)}; {command}"
     if metric_id.startswith("local.mysql."):
