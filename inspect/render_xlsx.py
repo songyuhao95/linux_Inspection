@@ -64,6 +64,7 @@ SHEET_NGINX = "nginx"
 SHEET_KEEPALIVED = "keepalived"
 SHEET_ELASTICSEARCH = "elasticsearch"
 SHEET_KAFKA = "kafka"
+SHEET_ZOOKEEPER = "zookeeper"
 SHEET_MYSQL = "mysql"
 SHEET_NACOS = "nacos"
 SHEET_RABBITMQ = "rabbitmq"
@@ -73,7 +74,7 @@ SHEET_TOMCAT = "tomcat"
 SHEET_ERRORS = "Errors-Evidence"
 SHEET_NAMES = (
     SHEET_OVERVIEW, SHEET_LOCAL, SHEET_NGINX, SHEET_KEEPALIVED,
-    SHEET_ELASTICSEARCH, SHEET_KAFKA, SHEET_MYSQL, SHEET_NACOS,
+    SHEET_ELASTICSEARCH, SHEET_KAFKA, SHEET_ZOOKEEPER, SHEET_MYSQL, SHEET_NACOS,
     SHEET_RABBITMQ, SHEET_REDIS, SHEET_ROCKETMQ, SHEET_TOMCAT, SHEET_ERRORS,
 )
 
@@ -88,6 +89,7 @@ LOCAL_HEADERS = (
 NGINX_HEADERS = LOCAL_HEADERS
 KEEPALIVED_HEADERS = LOCAL_HEADERS
 ELASTICSEARCH_HEADERS = LOCAL_HEADERS
+ZOOKEEPER_HEADERS = LOCAL_HEADERS
 
 # RR §3 Errors-Evidence 列：error.code/message/command/output_summary；
 # UNKNOWN（文档冲突/缺失）清单行 error_code 为空，note 注明原因
@@ -354,7 +356,7 @@ def _metric_prefix_filter(prefix: str):
 
 _MIDDLEWARE_METRIC_PREFIXES = (
     "local.nginx.", "local.keepalived.", "local.elasticsearch.",
-    "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
+    "local.kafka.", "local.zookeeper.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
     "local.redis.", "local.rocketmq.", "local.tomcat.",
 )
 
@@ -546,6 +548,13 @@ def _write_workbook(
         metric_filter=_metric_prefix_filter("local.elasticsearch."),
     )
 
+    # ============ zookeeper（ZooKeeper 中间件明细） ============
+    _write_detail_sheet(
+        workbook, SHEET_ZOOKEEPER, ZOOKEEPER_HEADERS, local_widths,
+        docs, host_ips, header_fmt, cell_fmt, status_fmts, crit_value_fmt,
+        metric_filter=_metric_prefix_filter("local.zookeeper."),
+    )
+
     for sheet_name, prefix in (
         (SHEET_KAFKA, "local.kafka."),
         (SHEET_MYSQL, "local.mysql."),
@@ -709,6 +718,7 @@ __all__ = [
     "SHEET_NAMES",
     "SHEET_NGINX",
     "SHEET_KEEPALIVED",
+    "SHEET_ZOOKEEPER",
     "SHEET_OVERVIEW",
     "STATUS_COLORS",
     "VALID_STATUSES",

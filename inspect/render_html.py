@@ -234,6 +234,7 @@ _MIDDLEWARE_PREFIXES: tuple = (
     ("local.keepalived.", "keepalived"),
     ("local.elasticsearch.", "elasticsearch"),
     ("local.kafka.", "kafka"),
+    ("local.zookeeper.", "zookeeper"),
     ("local.mysql.", "mysql"),
     ("local.nacos.", "nacos"),
     ("local.rabbitmq.", "rabbitmq"),

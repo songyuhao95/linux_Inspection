@@ -86,12 +86,12 @@ _HELP_EPILOG = """主机选择示例:
   INSPECT_FIXTURE_DIR 为两种模式共用的零连接调试路径。
 
 中间件选择:
-  默认巡检全部已注册中间件（Nginx、Keepalived、Elasticsearch、Kafka/Zookeeper、MySQL、
+  默认巡检全部已注册中间件（Nginx、Keepalived、Elasticsearch、Kafka、ZooKeeper、MySQL、
   Nacos、RabbitMQ、Redis、RocketMQ、Tomcat）+ Linux 主机基础指标；
   --nginx 只巡检 Nginx 中间件 + Linux 主机基础指标；
   --keepalived 只巡检 Keepalived 中间件 + Linux 主机基础指标；
   --elasticsearch 只巡检 Elasticsearch 中间件 + Linux 主机基础指标；
-  --kafka/--mysql/--nacos/--rabbitmq/--redis/--rocketmq/--tomcat 分别只巡检对应中间件
+  --kafka/--zookeeper/--mysql/--nacos/--rabbitmq/--redis/--rocketmq/--tomcat 分别只巡检对应中间件
   + Linux 主机基础指标；
   Nginx 进程发现：未运行且不在 inspect.conf 白名单 → 跳过该主机 Nginx 指标；
   白名单内未运行 → CRIT「未运行」。
@@ -141,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="只巡检 Elasticsearch 中间件（默认巡检全部已注册中间件）",
     )
     for _module_id, _label in (
-        ("kafka", "Kafka/Zookeeper"), ("mysql", "MySQL"),
+        ("kafka", "Kafka"), ("zookeeper", "ZooKeeper"), ("mysql", "MySQL"),
         ("nacos", "Nacos"), ("rabbitmq", "RabbitMQ"),
         ("redis", "Redis"), ("rocketmq", "RocketMQ"), ("tomcat", "Tomcat"),
     ):
@@ -190,7 +190,7 @@ def validate_args(ns: argparse.Namespace) -> List[str]:
         errors.append("--parallel 仅用于远程巡检，不能与 --local 搭配")
     middleware_flags = [
         name for name in (
-            "nginx", "keepalived", "elasticsearch", "kafka", "mysql", "nacos",
+            "nginx", "keepalived", "elasticsearch", "kafka", "zookeeper", "mysql", "nacos",
             "rabbitmq", "redis", "rocketmq", "tomcat",
         ) if getattr(ns, name, False)
     ]
@@ -332,11 +332,11 @@ def run_inspection(ns: argparse.Namespace, selection: Dict[str, object]) -> int:
     elif getattr(ns, "elasticsearch", False):
         selected_modules = ("linux_basic", "elasticsearch")
     elif any(getattr(ns, _name, False) for _name in (
-        "kafka", "mysql", "nacos", "rabbitmq", "redis", "rocketmq", "tomcat",
+        "kafka", "zookeeper", "mysql", "nacos", "rabbitmq", "redis", "rocketmq", "tomcat",
     )):
         _selected = next(
             _name for _name in (
-                "kafka", "mysql", "nacos", "rabbitmq", "redis", "rocketmq", "tomcat",
+                "kafka", "zookeeper", "mysql", "nacos", "rabbitmq", "redis", "rocketmq", "tomcat",
             ) if getattr(ns, _name, False)
         )
         selected_modules = ("linux_basic", _selected)
