@@ -518,8 +518,15 @@ _ADDITIONAL_COMMANDS = {
     "local.keepalived.health_check.status": "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>",
     "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa 'kafka.Kafka'; ss -tlnp | grep ':9093'; tail -n 50 <KAFKA_LOG>/server.log",
     "local.kafka.controller.health": "<ZOOKEEPER_SHELL> <ZK_CONNECT> get /controller",
-    "local.kafka.under_replicated_partitions": "<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions",
-    "local.kafka.under_min_isr": "<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions; <KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions",
+    "local.kafka.broker.registration": "BROKER_ID=$(grep '^broker.id=' <KAFKA_CONF> | cut -d= -f2-); <ZOOKEEPER_SHELL> <ZK_CONNECT> get /brokers/ids/${BROKER_ID}",
+    "local.kafka.under_replicated_partitions": "out=$(<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-replicated-partitions); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_UNDER_REPLICATED=true\\n'; fi",
+    "local.kafka.under_min_isr": "out1=$(<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --under-min-isr-partitions); rc1=$?; out2=$(<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --unavailable-partitions); rc2=$?; if [ \"$rc1\" -ne 0 ] || [ \"$rc2\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out1$out2\" ]; then printf '%s\\n%s\\n' \"$out1\" \"$out2\"; else printf 'KAFKA_NO_UNDER_MIN_ISR=true\\n'; fi",
+    "local.kafka.topic.replica_distribution": "out=$(<KAFKA_TOPICS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_TOPICS=true\\n'; fi",
+    "local.kafka.consumer.lag": "out=$(<KAFKA_CONSUMER_GROUPS> --bootstrap-server <BOOTSTRAP> --command-config <SSL_CONFIG> --describe --all-groups); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_CONSUMER_GROUPS=true\\n'; fi",
+    "local.kafka.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|UnderReplicated|IOException|Session expired' <KAFKA_LOG> 2>/dev/null | tail -30; grep_rc=${PIPESTATUS[0]}; if [ \"$grep_rc\" -eq 1 ]; then printf 'KAFKA_LOG_OK=true\\n'; elif [ \"$grep_rc\" -gt 1 ]; then printf 'KAFKA_LOG_PARSE_FAILED=true\\n'; fi",
+    "local.kafka.config.baseline": "grep -E '^(listeners|advertised.listeners|inter.broker.listener.name|log.dirs|zookeeper.connect|default.replication.factor|min.insync.replicas|unclean.leader.election.enable|auto.create.topics.enable)' <KAFKA_CONF>",
+    "local.kafka.ssl.certificate": "cert=$(find <KAFKA_CERTS> -type f \\( -name '*.crt' -o -name '*.pem' \\) -print 2>/dev/null | head -1); if [ -z \"$cert\" ]; then printf 'KAFKA_SSL_CERT_NOT_FOUND=true\\n'; elif openssl x509 -in \"$cert\" -noout -dates -checkend 2592000 >/dev/null 2>&1; then printf 'KAFKA_SSL_CERT_OK=true\\n'; else printf 'KAFKA_SSL_CERT_FAILED=true\\n'; fi; ls -l <KAFKA_CERTS>/*.p12 2>/dev/null",
+    "local.kafka.system.parameters": "nofile=$(su - kafka -c 'ulimit -n'); nproc=$(su - kafka -c 'ulimit -u'); swap_used=$(free -b | awk '/^Swap:/ {print $3}'); swappiness=$(cat /proc/sys/vm/swappiness); printf 'nofile=%s\\nnproc=%s\\nswap_used=%s\\nswappiness=%s\\n' \"$nofile\" \"$nproc\" \"$swap_used\" \"$swappiness\"",
     "local.zookeeper.node.health": "echo ruok | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT>; echo stat | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT> | egrep 'Mode|Node count|Connections'",
     "local.zookeeper.ports.health": "ss -tlnp | grep -E ':<ZOOKEEPER_CLIENT_PORT>|:<ZOOKEEPER_PEER_PORT>|:<ZOOKEEPER_ELECTION_PORT>'",
     "local.zookeeper.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|IOException|Session expired' <ZOOKEEPER_LOG> 2>/dev/null | tail -30; grep_rc=${PIPESTATUS[0]}; if [ \"$grep_rc\" -eq 1 ]; then printf 'ZK_LOG_OK=true\\n'; elif [ \"$grep_rc\" -gt 1 ]; then printf 'ZK_LOG_PARSE_FAILED=true\\n'; fi",
@@ -580,7 +587,11 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
     },
     "local.kafka.broker.health": {"<KAFKA_LOG>": "kafka_log", "<KAFKA_CONF>": "kafka_conf"},
     "local.kafka.controller.health": {
-        "<ZOOKEEPER_SHELL>": ("zookeeper_bin", "zookeeper-shell.sh"),
+        "<ZOOKEEPER_SHELL>": ("kafka_bin", "zookeeper-shell.sh"),
+        "<ZK_CONNECT>": "kafka_zookeeper_connect",
+    },
+    "local.kafka.broker.registration": {
+        "<KAFKA_CONF>": "kafka_conf", "<ZOOKEEPER_SHELL>": ("kafka_bin", "zookeeper-shell.sh"),
         "<ZK_CONNECT>": "kafka_zookeeper_connect",
     },
     "local.kafka.under_replicated_partitions": {
@@ -591,6 +602,18 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
         "<KAFKA_TOPICS>": ("kafka_bin", "kafka-topics.sh"),
         "<BOOTSTRAP>": "kafka_bootstrap", "<SSL_CONFIG>": "kafka_ssl_config",
     },
+    "local.kafka.topic.replica_distribution": {
+        "<KAFKA_TOPICS>": ("kafka_bin", "kafka-topics.sh"),
+        "<BOOTSTRAP>": "kafka_bootstrap", "<SSL_CONFIG>": "kafka_ssl_config",
+    },
+    "local.kafka.consumer.lag": {
+        "<KAFKA_CONSUMER_GROUPS>": ("kafka_bin", "kafka-consumer-groups.sh"),
+        "<BOOTSTRAP>": "kafka_bootstrap", "<SSL_CONFIG>": "kafka_ssl_config",
+    },
+    "local.kafka.error_log": {"<KAFKA_LOG>": "kafka_log"},
+    "local.kafka.config.baseline": {"<KAFKA_CONF>": "kafka_conf"},
+    "local.kafka.ssl.certificate": {"<KAFKA_CERTS>": ("kafka_conf", "certs")},
+    "local.kafka.system.parameters": {},
     "local.zookeeper.node.health": {"<ZOOKEEPER_CLIENT_PORT>": "zookeeper_client_port"},
     "local.zookeeper.ports.health": {
         "<ZOOKEEPER_CLIENT_PORT>": "zookeeper_client_port",
@@ -679,7 +702,7 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "kafka_log": "/opt/kafka/logs/",
     "kafka_zookeeper_connect": "127.0.0.1:2181",
     "kafka_bootstrap": "127.0.0.1:9093",
-    "kafka_ssl_config": "/opt/kafka/config/client.properties",
+    "kafka_ssl_config": "/opt/kafka/conf/client-ssl.properties",
     "mysql_socket": "/opt/mysql/tmp/mysql.sock",
     "mysql_bin": "/opt/mysql/bin/mysql",
     "mysql_conf": "/opt/mysql/conf/my.cnf",
@@ -707,10 +730,11 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
 }
 _SAFE_ADDITIONAL_VALUE = re.compile(r"[A-Za-z0-9_./:@%+=,-]+")
 _ADDITIONAL_GENERATED_ALLOWED_BINARIES = (
-    "awk", "bash", "cat", "curl", "echo", "egrep", "free", "grep", "head",
-    "ip", "jcmd", "jstat", "kafka-topics.sh", "ls", "mqadmin", "mysql", "nc",
+    "awk", "bash", "cat", "cut", "curl", "echo", "egrep", "find", "free", "grep", "head",
+    "ip", "jcmd", "jstat", "kafka-consumer-groups.sh", "kafka-topics.sh", "ls", "mqadmin", "mysql", "nc",
+    "openssl",
     "pgrep", "ps", "rabbitmq-diagnostics", "rabbitmqctl", "redis-cli", "sed",
-    "ss", "systemctl", "tail", "test", "wc", "zookeeper-shell.sh", "zkServer.sh",
+    "ss", "su", "systemctl", "tail", "test", "wc", "zookeeper-shell.sh", "zkServer.sh",
 )
 _ADDITIONAL_UNSAFE_GENERATED_TOKENS = re.compile(
     r"\b(?:rm|rmdir|mkfs|dd|shutdown|reboot|poweroff|sudo|ssh|scp|wget|"
@@ -770,7 +794,7 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         module_id = metric_id.split(".", 2)[1]
         gate_specs = {
             "keepalived": (r"keepalived", "keepalived_conf"),
-            "kafka": (r"kafka\.Kafka|QuorumPeerMain|zookeeper", "kafka_conf"),
+            "kafka": (r"kafka\.Kafka", "kafka_conf"),
             "mysql": (r"mysqld", "mysql_conf"),
             "nacos": (r"com\.alibaba\.nacos|nacos", "nacos_home"),
             "rabbitmq": (r"beam\.smp|rabbitmq-server", "rabbitmq_conf"),

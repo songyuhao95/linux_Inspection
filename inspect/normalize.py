@@ -1389,7 +1389,17 @@ def parse_kafka_controller_health(output):
     return _typed_bool(output, r"controller|brokerid|controllerid", negative=r"no controller|null|failed|error")
 
 
+def parse_kafka_broker_registration(output):
+    return _typed_bool(
+        output,
+        r"advertised\.listeners\s*[=:].*SSL://|SSL://.*:9093|brokerid|broker\.id",
+        negative=r"NoNode|not found|PLAINTEXT://|:9092|failed|error",
+    )
+
+
 def parse_kafka_under_replicated_partitions(output):
+    if re.search(r"KAFKA_NO_UNDER_REPLICATED\s*=\s*true", output or "", re.IGNORECASE):
+        return {"value": 0, "summary": "under_replicated_partitions=0"}
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
     if not re.search(r"\bTopic\b.*\bPartition\b|^\s*Topic:", text, re.IGNORECASE | re.MULTILINE):
@@ -1399,6 +1409,8 @@ def parse_kafka_under_replicated_partitions(output):
 
 
 def parse_kafka_under_min_isr(output):
+    if re.search(r"KAFKA_NO_UNDER_MIN_ISR\s*=\s*true", output or "", re.IGNORECASE):
+        return {"value": 0, "summary": "under_min_isr=0"}
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
     if re.search(r"no (?:under[-_ ]min|unavailable)|none|empty", text, re.IGNORECASE):
@@ -1408,6 +1420,93 @@ def parse_kafka_under_min_isr(output):
     else:
         value = sum(1 for line in lines if re.search(r"^\s*Topic:|under[-_ ]min|unavailable", line, re.IGNORECASE))
     return {"value": value, "summary": f"under_min_isr={value}"}
+
+
+def parse_kafka_topic_replica_distribution(output):
+    if re.search(r"KAFKA_NO_TOPICS\s*=\s*true", output or "", re.IGNORECASE):
+        return {"value": 0, "summary": "topic_replica_distribution_violations=0"}
+    lines = _typed_middleware_lines(output)
+    rows = [line for line in lines if re.search(r"\bTopic:\s*\S+", line, re.IGNORECASE)]
+    if not rows:
+        raise ParseError("Kafka Topic 副本输出格式非法")
+    violations = 0
+    for line in rows:
+        replicas = re.search(r"\bReplicas:\s*([^\s]+)", line, re.IGNORECASE)
+        isr = re.search(r"\bISR:\s*([^\s]+)", line, re.IGNORECASE)
+        if not replicas or not isr:
+            raise ParseError("Kafka Topic 副本输出缺少 Replicas/ISR")
+        replica_count = len([item for item in replicas.group(1).split(",") if item])
+        isr_count = len([item for item in isr.group(1).split(",") if item])
+        if replica_count != 3 or isr_count < 2:
+            violations += 1
+    return {"value": violations, "summary": f"topic_replica_distribution_violations={violations}"}
+
+
+def parse_kafka_consumer_lag(output):
+    if re.search(r"KAFKA_NO_CONSUMER_GROUPS\s*=\s*true", output or "", re.IGNORECASE):
+        return {"value": 0, "summary": "consumer_lag=0"}
+    lines = _typed_middleware_lines(output)
+    values = []
+    for line in lines:
+        if re.search(r"GROUP\s+TOPIC\s+PARTITION", line, re.IGNORECASE):
+            continue
+        match = re.search(r"(?:^|\s)(-?\d+)\s*$", line)
+        if match:
+            values.append(int(match.group(1)))
+    if not values:
+        raise ParseError("Kafka Consumer Lag 输出格式非法")
+    if any(value < 0 for value in values):
+        raise ParseError("Kafka Consumer Lag 存在不可解析值")
+    value = max(values)
+    return {"value": value, "summary": f"consumer_lag={value}"}
+
+
+def parse_kafka_error_log(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if re.search(r"KAFKA_LOG_OK\s*=\s*true", text, re.IGNORECASE):
+        return {"value": True, "summary": "critical_log_evidence=false"}
+    if re.search(r"KAFKA_LOG_PARSE_FAILED\s*=\s*true", text, re.IGNORECASE):
+        raise ParseError("Kafka 日志命令执行失败")
+    if re.search(r"ERROR|FATAL|OutOfMemory|NotLeader|UnderReplicated|IOException|Session expired", text, re.IGNORECASE):
+        return {"value": False, "summary": "critical_log_evidence=true"}
+    raise ParseError("Kafka 关键日志输出缺少可判定标记")
+
+
+def parse_kafka_config_baseline(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    required = (
+        r"listeners=.*SSL.*9093", r"advertised\.listeners=.*SSL.*9093",
+        r"default\.replication\.factor\s*=\s*3", r"min\.insync\.replicas\s*=\s*2",
+        r"unclean\.leader\.election\.enable\s*=\s*false",
+        r"auto\.create\.topics\.enable\s*=\s*false",
+    )
+    value = all(re.search(pattern, text, re.IGNORECASE) for pattern in required)
+    return {"value": value, "summary": f"kafka_config_baseline={str(value).lower()}"}
+
+
+def parse_kafka_ssl_certificate(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    if re.search(r"KAFKA_SSL_CERT_OK\s*=\s*true", text, re.IGNORECASE):
+        return {"value": True, "summary": "kafka_ssl_certificate=true"}
+    if re.search(r"KAFKA_SSL_CERT_(?:NOT_FOUND|FAILED)\s*=\s*true", text, re.IGNORECASE):
+        return {"value": False, "summary": "kafka_ssl_certificate=false"}
+    raise ParseError("Kafka SSL 证书输出缺少可判定标记")
+
+
+def parse_kafka_system_parameters(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    values = {}
+    for key in ("nofile", "nproc", "swap_used", "swappiness"):
+        match = re.search(rf"\b{key}\s*=\s*(-?\d+)", text, re.IGNORECASE)
+        if not match:
+            raise ParseError(f"Kafka 系统参数缺少 {key}")
+        values[key] = int(match.group(1))
+    value = values["nofile"] >= 65535 and values["nproc"] >= 4096 and values["swap_used"] == 0 and values["swappiness"] == 0
+    return {"value": value, **values, "summary": f"kafka_system_parameters={str(value).lower()}"}
 
 
 def parse_kafka_zookeeper_latency(output):
@@ -2441,6 +2540,8 @@ def _judge_middleware_text(parsed, resolved, profile=None):
 _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.kafka.under_replicated_partitions": (0, 2),
     "local.kafka.under_min_isr": (0, 0),
+    "local.kafka.topic.replica_distribution": (0, 1),
+    "local.kafka.consumer.lag": (0, 100),
     "local.zookeeper.ports.health": (3, 2),
     "local.zookeeper.mntr.health": (50, 200),
     "local.mysql.replication.lag": (0, 30),
