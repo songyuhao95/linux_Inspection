@@ -1811,16 +1811,21 @@ def parse_mysql_config_baseline(output):
 def parse_mysql_security_accounts(output):
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
+    locked_accounts = re.search(r"locked_accounts\s*[=:]?\s*(\d+)", text, re.IGNORECASE)
     required = (
         re.search(r"local_infile\s*[=:]?\s*OFF", text, re.IGNORECASE),
         re.search(r"skip_name_resolve\s*[=:]?\s*ON", text, re.IGNORECASE),
         re.search(r"secure_file_priv\s*[=:]?\s*\S+", text, re.IGNORECASE),
         re.search(r"mysqlx\s*[=:]?\s*OFF", text, re.IGNORECASE),
-        re.search(r"locked_accounts\s*[=:]?\s*0", text, re.IGNORECASE),
     )
-    if not all(required):
+    if not locked_accounts or not all(required):
         raise ParseError("MySQL 用户与安全配置输出格式非法")
-    return {"value": True, "summary": "mysql_security_accounts=true"}
+    count = int(locked_accounts.group(1))
+    return {
+        "value": True,
+        "locked_accounts": count,
+        "summary": f"mysql_security_accounts=true;locked_accounts={count}",
+    }
 
 
 def parse_mysql_backup_status(output):
