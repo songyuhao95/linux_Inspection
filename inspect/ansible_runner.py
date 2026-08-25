@@ -520,10 +520,10 @@ _ADDITIONAL_COMMANDS = {
     "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa '[k]afka.Kafka' | grep -v 'INSPECT_MIDDLEWARE_NOT_RUNNING='; ss -tlnp | grep ':9093'",
     "local.kafka.controller.health": "$kafka_bin_dir/zookeeper-shell.sh \"$kafka_zookeeper_connect\" get /controller",
     "local.kafka.broker.registration": "BROKER_ID=$(awk -F= '$1 ~ /^[[:space:]]*broker[.]id[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2; exit}' \"$kafka_conf\"); \"$kafka_bin_dir/zookeeper-shell.sh\" \"$kafka_zookeeper_connect\" get /brokers/ids/${BROKER_ID}",
-    "local.kafka.under_replicated_partitions": "out=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config <SSL_CONFIG> --describe --under-replicated-partitions); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_UNDER_REPLICATED=true\\n'; fi",
-    "local.kafka.under_min_isr": "out1=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config <SSL_CONFIG> --describe --under-min-isr-partitions); rc1=$?; out2=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config <SSL_CONFIG> --describe --unavailable-partitions); rc2=$?; if [ \"$rc1\" -ne 0 ] || [ \"$rc2\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out1$out2\" ]; then printf '%s\\n%s\\n' \"$out1\" \"$out2\"; else printf 'KAFKA_NO_UNDER_MIN_ISR=true\\n'; fi",
-    "local.kafka.topic.replica_distribution": "out=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config <SSL_CONFIG> --describe); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_TOPICS=true\\n'; fi",
-    "local.kafka.consumer.lag": "out=$(\"$kafka_consumer_groups\" --bootstrap-server \"$kafka_bootstrap\" --command-config <SSL_CONFIG> --describe --all-groups); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_CONSUMER_GROUPS=true\\n'; fi",
+    "local.kafka.under_replicated_partitions": "out=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --under-replicated-partitions); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_UNDER_REPLICATED=true\\n'; fi",
+    "local.kafka.under_min_isr": "out1=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --under-min-isr-partitions); rc1=$?; out2=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --unavailable-partitions); rc2=$?; if [ \"$rc1\" -ne 0 ] || [ \"$rc2\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out1$out2\" ]; then printf '%s\\n%s\\n' \"$out1\" \"$out2\"; else printf 'KAFKA_NO_UNDER_MIN_ISR=true\\n'; fi",
+    "local.kafka.topic.replica_distribution": "out=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_TOPICS=true\\n'; fi",
+    "local.kafka.consumer.lag": "out=$(\"$kafka_consumer_groups\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --all-groups); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_CONSUMER_GROUPS=true\\n'; fi",
     "local.kafka.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|UnderReplicated|IOException|Session expired' <KAFKA_LOG> 2>/dev/null | tail -30; grep_rc=${PIPESTATUS[0]}; if [ \"$grep_rc\" -eq 1 ]; then printf 'KAFKA_LOG_OK=true\\n'; elif [ \"$grep_rc\" -gt 1 ]; then printf 'KAFKA_LOG_PARSE_FAILED=true\\n'; fi",
     "local.kafka.config.baseline": "grep -E '^(listeners|advertised.listeners|inter.broker.listener.name|log.dirs|zookeeper.connect|default.replication.factor|min.insync.replicas|unclean.leader.election.enable|auto.create.topics.enable)' <KAFKA_CONF>",
     "local.kafka.ssl.certificate": "cert=$(find <KAFKA_CERTS> -type f \\( -name '*.crt' -o -name '*.pem' \\) -print 2>/dev/null | head -1); if [ -z \"$cert\" ]; then printf 'KAFKA_SSL_CERT_NOT_FOUND=true\\n'; elif openssl x509 -in \"$cert\" -noout -dates -checkend 2592000 >/dev/null 2>&1; then printf 'KAFKA_SSL_CERT_OK=true\\n'; else printf 'KAFKA_SSL_CERT_FAILED=true\\n'; fi; ls -l <KAFKA_CERTS>/*.p12 2>/dev/null",
@@ -593,18 +593,10 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
     "local.kafka.broker.registration": {
         "<KAFKA_CONF>": "kafka_conf",
     },
-    "local.kafka.under_replicated_partitions": {
-        "<SSL_CONFIG>": "kafka_ssl_config",
-    },
-    "local.kafka.under_min_isr": {
-        "<SSL_CONFIG>": "kafka_ssl_config",
-    },
-    "local.kafka.topic.replica_distribution": {
-        "<SSL_CONFIG>": "kafka_ssl_config",
-    },
-    "local.kafka.consumer.lag": {
-        "<SSL_CONFIG>": "kafka_ssl_config",
-    },
+    "local.kafka.under_replicated_partitions": {},
+    "local.kafka.under_min_isr": {},
+    "local.kafka.topic.replica_distribution": {},
+    "local.kafka.consumer.lag": {},
     "local.kafka.error_log": {"<KAFKA_LOG>": "kafka_log"},
     "local.kafka.config.baseline": {"<KAFKA_CONF>": "kafka_conf"},
     "local.kafka.ssl.certificate": {"<KAFKA_CERTS>": ("kafka_conf", "certs")},
@@ -759,12 +751,15 @@ def _kafka_runtime_prefix(profile: Dict[str, Any]) -> str:
     """Resolve Kafka tools and endpoints on the target, with conf fallbacks."""
     kafka_conf = _additional_profile_values(profile, "kafka_conf")
     kafka_bins = _additional_profile_values(profile, "kafka_bin")
+    kafka_ssl_configs = _additional_profile_values(profile, "kafka_ssl_config")
     zk_fallback = _additional_profile_value(profile, "kafka_zookeeper_connect")
     bootstrap_fallback = _additional_profile_value(profile, "kafka_bootstrap")
     conf_args = " ".join(shlex.quote(value) for value in kafka_conf)
     bin_args = " ".join(shlex.quote(value) for value in kafka_bins)
+    ssl_config_args = " ".join(shlex.quote(value) for value in kafka_ssl_configs)
     fallback_conf = shlex.quote(kafka_conf[0])
     fallback_bin_dir = shlex.quote(kafka_bins[0].rsplit("/", 1)[0])
+    fallback_ssl_config = shlex.quote(kafka_ssl_configs[0])
     zk_fallback_q = shlex.quote(zk_fallback)
     bootstrap_fallback_q = shlex.quote(bootstrap_fallback)
     return (
@@ -791,6 +786,19 @@ def _kafka_runtime_prefix(profile: Dict[str, Any]) -> str:
         "{gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); split($2, a, \",\"); "
         "sub(/^[^:]+:\\/\\//, \"\", a[1]); print a[1]; exit}' \"$kafka_conf\"); fi; "
         f"if [ -z \"$kafka_bootstrap\" ]; then kafka_bootstrap={bootstrap_fallback_q}; fi; "
+        "kafka_ssl_config=; kafka_ssl_config_temp=; "
+        f"for kafka_ssl_candidate in {ssl_config_args}; do "
+        "if [ -r \"$kafka_ssl_candidate\" ]; then "
+        "kafka_ssl_config=\"$kafka_ssl_candidate\"; break; fi; done; "
+        "if [ -z \"$kafka_ssl_config\" ] && [ -r \"$kafka_conf\" ]; then "
+        "kafka_ssl_config_temp=$(mktemp \"${TMPDIR:-/tmp}/inspect-kafka-client.XXXXXX\") || kafka_ssl_config_temp=; "
+        "if [ -n \"$kafka_ssl_config_temp\" ]; then "
+        "{ printf '%s\\n' 'security.protocol=SSL' 'ssl.endpoint.identification.algorithm='; "
+        "awk -F= '/^(ssl\\.(keystore|truststore)\\.(type|location|password)|ssl\\.key\\.password|ssl\\.(protocol|enabled\\.protocols))=/ {print}' \"$kafka_conf\"; "
+        "} > \"$kafka_ssl_config_temp\" || { rm -f -- \"$kafka_ssl_config_temp\"; kafka_ssl_config_temp=; }; "
+        "kafka_ssl_config=\"$kafka_ssl_config_temp\"; fi; fi; "
+        f"if [ -z \"$kafka_ssl_config\" ]; then kafka_ssl_config={fallback_ssl_config}; fi; "
+        "trap 'if [ -n \"$kafka_ssl_config_temp\" ]; then rm -f -- \"$kafka_ssl_config_temp\"; fi' EXIT HUP INT TERM; "
         "kafka_topics=\"$kafka_bin_dir/kafka-topics.sh\"; "
         "kafka_consumer_groups=\"$kafka_bin_dir/kafka-consumer-groups.sh\""
     )
