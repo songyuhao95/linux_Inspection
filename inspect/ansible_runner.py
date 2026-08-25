@@ -721,7 +721,7 @@ _ADDITIONAL_GENERATED_ALLOWED_BINARIES = (
     "ip", "jcmd", "jstat", "kafka-consumer-groups.sh", "kafka-topics.sh", "ls", "mqadmin", "mysql", "nc",
     "openssl",
     "pgrep", "ps", "rabbitmq-diagnostics", "rabbitmqctl", "redis-cli", "sed",
-    "ss", "su", "systemctl", "tail", "test", "unlink", "wc", "zookeeper-shell.sh", "zkServer.sh",
+    "ss", "su", "systemctl", "tail", "test", "wc", "zookeeper-shell.sh", "zkServer.sh",
 )
 _ADDITIONAL_UNSAFE_GENERATED_TOKENS = re.compile(
     r"\b(?:rm|rmdir|mkfs|dd|shutdown|reboot|poweroff|sudo|ssh|scp|wget|"
@@ -790,22 +790,11 @@ def _kafka_runtime_prefix(profile: Dict[str, Any]) -> str:
         "{gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); split($2, a, \",\"); "
         "sub(/^[^:]+:\\/\\//, \"\", a[1]); print a[1]; exit}' \"$kafka_conf\"); fi; "
         f"if [ -z \"$kafka_bootstrap\" ]; then kafka_bootstrap={bootstrap_fallback_q}; fi; "
-        "kafka_ssl_config=; kafka_ssl_config_temp=; "
+        "kafka_ssl_config=; "
         f"for kafka_ssl_candidate in {ssl_config_args}; do "
         "if [ -r \"$kafka_ssl_candidate\" ]; then "
-        "kafka_ssl_missing=0; for kafka_ssl_path in $(awk -F= '/^[[:space:]]*ssl\\.(keystore|truststore)\\.location[[:space:]]*=/ "
-        "{gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2}' \"$kafka_ssl_candidate\"); do "
-        "if [ ! -r \"$kafka_ssl_path\" ]; then kafka_ssl_missing=1; fi; done; "
-        "if [ \"$kafka_ssl_missing\" -eq 0 ]; then kafka_ssl_config=\"$kafka_ssl_candidate\"; break; fi; fi; done; "
-        "if [ -z \"$kafka_ssl_config\" ] && [ -r \"$kafka_conf\" ]; then "
-        "kafka_ssl_config_temp=$(mktemp \"${TMPDIR:-/tmp}/inspect-kafka-client.XXXXXX\") || kafka_ssl_config_temp=; "
-        "if [ -n \"$kafka_ssl_config_temp\" ]; then "
-        "{ printf '%s\\n' 'security.protocol=SSL' 'ssl.endpoint.identification.algorithm='; "
-        "awk -F= '/^(ssl\\.(keystore|truststore)\\.(type|location|password)|ssl\\.key\\.password|ssl\\.(protocol|enabled\\.protocols))=/ {print}' \"$kafka_conf\"; "
-        "} > \"$kafka_ssl_config_temp\" || { unlink \"$kafka_ssl_config_temp\"; kafka_ssl_config_temp=; }; "
-        "kafka_ssl_config=\"$kafka_ssl_config_temp\"; fi; fi; "
+        "kafka_ssl_config=\"$kafka_ssl_candidate\"; break; fi; done; "
         f"if [ -z \"$kafka_ssl_config\" ]; then kafka_ssl_config={fallback_ssl_config}; fi; "
-        "trap 'if [ -n \"$kafka_ssl_config_temp\" ]; then unlink \"$kafka_ssl_config_temp\"; fi' EXIT HUP INT TERM; "
         "kafka_topics=\"$kafka_bin_dir/kafka-topics.sh\"; "
         "kafka_consumer_groups=\"$kafka_bin_dir/kafka-consumer-groups.sh\""
     )
