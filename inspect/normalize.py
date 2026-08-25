@@ -1426,7 +1426,12 @@ def parse_kafka_topic_replica_distribution(output):
     if re.search(r"KAFKA_NO_TOPICS\s*=\s*true", output or "", re.IGNORECASE):
         return {"value": 0, "summary": "topic_replica_distribution_violations=0"}
     lines = _typed_middleware_lines(output)
-    rows = [line for line in lines if re.search(r"\bTopic:\s*\S+", line, re.IGNORECASE)]
+    rows = [
+        line
+        for line in lines
+        if re.search(r"\bTopic:\s*\S+", line, re.IGNORECASE)
+        and re.search(r"\bPartition:\s*\S+", line, re.IGNORECASE)
+    ]
     if not rows:
         raise ParseError("Kafka Topic 副本输出格式非法")
     violations = 0
