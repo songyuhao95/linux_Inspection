@@ -1915,14 +1915,22 @@ def parse_nacos_system_parameters(output):
 
 
 def parse_rabbitmq_service_health(output):
-    return _typed_bool(output, r"beam\.smp|rabbitmq-server|\bactive\b", negative=r"inactive|failed|not found|error")
+    return _typed_bool(output, r"RABBITMQ_SERVICE_OK=true", negative=r"RABBITMQ_SERVICE_OK=false")
 
 
 def parse_rabbitmq_node_health(output):
-    return _typed_bool(output, r"Ping succeeded|pong|running_applications|rabbit", negative=r"timeout|failed|error|not running")
+    return _typed_bool(output, r"RABBITMQ_NODE_OK=true", negative=r"RABBITMQ_NODE_OK=false")
+
+
+def parse_rabbitmq_core_ports_health(output):
+    return _typed_number(output, r"RABBITMQ_LISTENING_PORTS=(\d+)", cast=int, summary="rabbitmq_listening_ports={value}")
 
 
 def parse_rabbitmq_cluster_nodes(output):
+    marker = re.search(r"RABBITMQ_RUNNING_NODES=(\d+)", output or "", re.IGNORECASE)
+    if marker:
+        value = int(marker.group(1))
+        return {"value": value, "summary": f"rabbitmq_running_nodes={value}"}
     lines = _typed_middleware_lines(output)
     text = "\n".join(lines)
     if not re.search(r"rabbit@[-A-Za-z0-9_.]+|running_nodes", text, re.IGNORECASE):
@@ -1932,10 +1940,14 @@ def parse_rabbitmq_cluster_nodes(output):
 
 
 def parse_rabbitmq_alarm_partition(output):
-    return _typed_bool(output, r"no alarms|partitions\s*:\s*\[?\s*\]?", negative=r"memory alarm|disk alarm|partition|\balarm\b")
+    return _typed_bool(output, r"RABBITMQ_ALARM_OK=true", negative=r"RABBITMQ_ALARM_OK=false")
 
 
 def parse_rabbitmq_queue_backlog(output):
+    marker = re.search(r"RABBITMQ_QUEUE_BACKLOG=(\d+)", output or "", re.IGNORECASE)
+    if marker:
+        value = int(marker.group(1))
+        return {"value": value, "summary": f"rabbitmq_queue_backlog={value}"}
     lines = _typed_middleware_lines(output)
     values = [int(x) for x in re.findall(r"(?:messages(?:_ready|_unacknowledged)?|backlog)\s*[=:]?\s*([0-9]+)", "\n".join(lines), re.IGNORECASE)]
     if not values:
@@ -1945,12 +1957,52 @@ def parse_rabbitmq_queue_backlog(output):
 
 
 def parse_rabbitmq_connection_pressure(output):
+    marker = re.search(r"RABBITMQ_CONNECTION_PRESSURE=(\d+)", output or "", re.IGNORECASE)
+    if marker:
+        value = int(marker.group(1))
+        return {"value": value, "summary": f"rabbitmq_connection_pressure={value}"}
     lines = _typed_middleware_lines(output)
     values = [int(x) for x in re.findall(r"(?:send_pend|messages_unacknowledged)\s*[=:]?\s*([0-9]+)", "\n".join(lines), re.IGNORECASE)]
     if not values:
         raise ParseError("RabbitMQ 连接压力数值缺失")
     value = max(values)
     return {"value": value, "summary": f"rabbitmq_connection_pressure={value}"}
+
+
+def parse_rabbitmq_error_log(output):
+    return _typed_number(output, r"RABBITMQ_ERROR_LOG_HITS=(\d+)", cast=int, summary="rabbitmq_error_log_hits={value}")
+
+
+def parse_rabbitmq_config_baseline(output):
+    return _typed_bool(output, r"RABBITMQ_CONFIG_OK=true", negative=r"RABBITMQ_CONFIG_OK=false")
+
+
+def parse_rabbitmq_node_identity(output):
+    return _typed_bool(output, r"RABBITMQ_IDENTITY_OK=true", negative=r"RABBITMQ_IDENTITY_OK=false")
+
+
+def parse_rabbitmq_security_permissions(output):
+    return _typed_bool(output, r"RABBITMQ_PERMISSIONS_OK=true", negative=r"RABBITMQ_PERMISSIONS_OK=false")
+
+
+def parse_rabbitmq_topology(output):
+    return _typed_bool(output, r"RABBITMQ_TOPOLOGY_OK=true", negative=r"RABBITMQ_TOPOLOGY_OK=false")
+
+
+def parse_rabbitmq_queue_durability(output):
+    return _typed_bool(output, r"RABBITMQ_QUEUE_DURABILITY_OK=true", negative=r"RABBITMQ_QUEUE_DURABILITY_OK=false")
+
+
+def parse_rabbitmq_file_descriptor_limits(output):
+    return _typed_number(output, r"RABBITMQ_NOFILE=(\d+)", cast=int, summary="rabbitmq_nofile={value}")
+
+
+def parse_rabbitmq_systemd_unit(output):
+    return _typed_bool(output, r"RABBITMQ_SYSTEMD_OK=true", negative=r"RABBITMQ_SYSTEMD_OK=false")
+
+
+def parse_rabbitmq_log_data_retention(output):
+    return _typed_number(output, r"RABBITMQ_OLD_FILES=(\d+)", cast=int, summary="rabbitmq_old_files={value}")
 
 
 def parse_redis_service_health(output):
@@ -2824,8 +2876,12 @@ _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.nacos.system.parameters": (65535, 32768),
     "local.tomcat.access_log.errors": (0, 10),
     "local.rabbitmq.cluster.nodes": (3, 2),
+    "local.rabbitmq.core_ports.health": (4, 2),
     "local.rabbitmq.queue.backlog": (100, 1000),
     "local.rabbitmq.connection.pressure": (100, 1000),
+    "local.rabbitmq.error_log": (0, 10),
+    "local.rabbitmq.file_descriptor.limits": (65535, 32768),
+    "local.rabbitmq.log.data.retention": (50, 100),
     "local.rocketmq.consumer.lag": (0, 100),
     "local.tomcat.jvm.memory": (2048, 4096),
     "local.tomcat.thread_pool.pressure": (10000, 50000),
@@ -2869,12 +2925,12 @@ def _judge_typed_middleware(parsed, resolved, profile=None):
             if metric_id in {
                 "local.nacos.cluster.nodes",
                 "local.nacos.core_ports.health",
+                "local.rabbitmq.cluster.nodes",
+                "local.rabbitmq.core_ports.health",
                 "local.rocketmq.core_ports.health",
                 "local.tomcat.http.health",
                 "local.zookeeper.ports.health",
             }:
-                status = STATUS_OK if value >= ok_limit else STATUS_WARN if value >= warn_limit else STATUS_CRIT
-            elif metric_id == "local.rabbitmq.cluster.nodes":
                 status = STATUS_OK if value >= ok_limit else STATUS_WARN if value >= warn_limit else STATUS_CRIT
             else:
                 status = STATUS_OK if value <= ok_limit else STATUS_WARN if value <= warn_limit else STATUS_CRIT
@@ -2997,8 +3053,12 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.nacos.database.errors",
         "local.nacos.system.parameters",
         "local.rabbitmq.cluster.nodes",
+        "local.rabbitmq.core_ports.health",
         "local.rabbitmq.queue.backlog",
         "local.rabbitmq.connection.pressure",
+        "local.rabbitmq.error_log",
+        "local.rabbitmq.file_descriptor.limits",
+        "local.rabbitmq.log.data.retention",
         "local.rocketmq.consumer.lag",
         "local.tomcat.jvm.memory",
         "local.tomcat.thread_pool.pressure",
