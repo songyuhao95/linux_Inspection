@@ -1085,38 +1085,38 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             )
         elif metric_id == "local.redis.sentinel.health":
             command = command.replace(
-                "then printf 'REDIS_SENTINEL_OK=true\\n'",
-                "then printf 'INSPECT_METRIC_NOT_APPLICABLE=local.redis.sentinel.health\\n'",
+                "if [ \"$redis_mode\" != sentinel ]; then printf 'REDIS_SENTINEL_OK=true\\n'; else",
+                "if [ \"$redis_mode\" != sentinel ]; then printf 'INSPECT_METRIC_NOT_APPLICABLE=local.redis.sentinel.health\\n'; else",
             ).replace(
-                "INFO sentinel 2>&1);",
-                "INFO sentinel 2>&1); info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
+                "INFO sentinel 2>&1); info_rc=$?;",
+                "INFO sentinel 2>&1); info_rc=$?; info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
             ).replace(
-                "SENTINEL masters 2>&1);",
-                "SENTINEL masters 2>&1); masters=$(printf '%s\\n' \"$masters\" | sed 's/\\r$//');",
+                "SENTINEL masters 2>&1); masters_rc=$?;",
+                "SENTINEL masters 2>&1); masters_rc=$?; masters=$(printf '%s\\n' \"$masters\" | sed 's/\\r$//');",
             )
         elif metric_id == "local.redis.cluster.health":
             command = command.replace(
-                "then printf 'REDIS_CLUSTER_OK=true\\n'",
-                "then printf 'INSPECT_METRIC_NOT_APPLICABLE=local.redis.cluster.health\\n'",
+                "if [ \"$redis_mode\" != cluster ]; then printf 'REDIS_CLUSTER_OK=true\\n'; else",
+                "if [ \"$redis_mode\" != cluster ]; then printf 'INSPECT_METRIC_NOT_APPLICABLE=local.redis.cluster.health\\n'; else",
             ).replace(
-                "CLUSTER INFO 2>&1);",
-                "CLUSTER INFO 2>&1); info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
+                "CLUSTER INFO 2>&1); info_rc=$?;",
+                "CLUSTER INFO 2>&1); info_rc=$?; info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
             ).replace(
-                "CLUSTER NODES 2>&1);",
-                "CLUSTER NODES 2>&1); nodes=$(printf '%s\\n' \"$nodes\" | sed 's/\\r$//');",
+                "CLUSTER NODES 2>&1); nodes_rc=$?;",
+                "CLUSTER NODES 2>&1); nodes_rc=$?; nodes=$(printf '%s\\n' \"$nodes\" | sed 's/\\r$//');",
             ).replace(
                 "&& ! printf '%s\\n%s\\n' \"$info\" \"$nodes\" | grep -Eqi 'fail|noaddr|handshake'",
                 "&& ! printf '%s\\n' \"$info\" | grep -Eq '^cluster_(slots_pfail|slots_fail):[1-9][0-9]*$' && ! printf '%s\\n' \"$nodes\" | grep -Eqi '(^|[ ,])fail([ ,]|$)|(^|[ ,])noaddr([ ,]|$)|(^|[ ,])handshake([ ,]|$)'",
             )
         elif metric_id == "local.redis.memory.pressure":
             command = command.replace(
-                "INFO memory 2>&1);",
-                "INFO memory 2>&1); info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
+                "INFO memory 2>&1); if",
+                "INFO memory 2>&1); info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//'); if",
             )
         elif metric_id == "local.redis.clients.pressure":
             command = command.replace(
-                "INFO clients 2>&1);",
-                "INFO clients 2>&1); out=$(printf '%s\\n' \"$out\" | sed 's/\\r$//');",
+                "INFO clients 2>&1); clients=",
+                "INFO clients 2>&1); out=$(printf '%s\\n' \"$out\" | sed 's/\\r$//'); clients=",
             )
         elif metric_id == "local.redis.config.baseline":
             command = command.replace("grep -REc ", "grep -Ec ").replace(
