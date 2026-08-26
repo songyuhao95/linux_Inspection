@@ -553,7 +553,7 @@ _ADDITIONAL_COMMANDS = {
     "local.nacos.core_ports.health": "ports=$(ss -H -ltnp 2>/dev/null | egrep ':(<NACOS_HTTP_PORT>|<NACOS_GRPC_PORT>|<NACOS_GRPC_OFFSET>|<NACOS_RAFT_PORT>)\\b' | wc -l); printf 'NACOS_LISTENING_PORTS=%s\\n' \"$ports\"",
     "local.nacos.http.health": "code=$(curl -sS --connect-timeout 3 -o /dev/null -w '%{http_code}' <NACOS_ENDPOINT>/nacos/actuator/health 2>/dev/null); rc=$?; if [ \"$rc\" -ne 0 ]; then code=000; fi; printf 'NACOS_HTTP_CODE=%s\\n' \"$code\"; if [ \"$code\" = 200 ]; then printf 'NACOS_HTTP_OK=true\\n'; else printf 'NACOS_HTTP_OK=false\\n'; fi",
     "local.nacos.cluster.config": "cluster_count=$(grep -Ec '^[[:space:]]*[^#[:space:]]+:[0-9]+[[:space:]]*$' <NACOS_CLUSTER_CONF> 2>/dev/null || printf 0); server_ip=$(grep -E '^nacos.server.ip=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); if [ -r <NACOS_CLUSTER_CONF> ] && [ \"$cluster_count\" -ge <NACOS_EXPECTED_NODES> ] && ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -Fxq \"$server_ip\"; then printf 'NACOS_CLUSTER_CONFIG_OK=true\\n'; else printf 'NACOS_CLUSTER_CONFIG_OK=false\\n'; fi",
-    "local.nacos.cluster.nodes": "if [ -n \"${INSPECT_NACOS_TOKEN:-}\" ] && [ \"${INSPECT_NACOS_TOKEN:-}\" != CHANGE_ME ]; then out=$(curl -sS --connect-timeout 3 -G --data-urlencode \"accessToken=${INSPECT_NACOS_TOKEN}\" <NACOS_ENDPOINT>/nacos/v2/core/cluster/node/list 2>/dev/null); else out=$(curl -sS --connect-timeout 3 <NACOS_ENDPOINT>/nacos/v2/core/cluster/node/list 2>/dev/null); fi; rc=$?; if [ \"$rc\" -ne 0 ] || printf '%s\\n' \"$out\" | grep -Eqi '403|401|error|exception'; then printf 'NACOS_CLUSTER_API_FAILED=true\\n'; else alive=$(printf '%s\\n' \"$out\" | grep -Eo '\"state\"[[:space:]]*:[[:space:]]*\"UP\"|\"alive\"[[:space:]]*:[[:space:]]*true' | wc -l); if printf '%s\\n' \"$out\" | grep -Eqi '\"state\"[[:space:]]*:[[:space:]]*\"UP\"|\"alive\"[[:space:]]*:[[:space:]]*true'; then printf 'NACOS_ALIVE_NODES=%s\\n' \"$alive\"; else printf 'NACOS_CLUSTER_API_FAILED=true\\n'; fi; fi",
+    "local.nacos.cluster.nodes": "if [ -n \"${INSPECT_NACOS_USER:-}\" ] && [ \"${INSPECT_NACOS_USER:-}\" != CHANGE_ME ] && [ -n \"${INSPECT_NACOS_PASSWORD:-}\" ] && [ \"${INSPECT_NACOS_PASSWORD:-}\" != CHANGE_ME ]; then login=$(curl -sS --connect-timeout 3 -X POST <NACOS_ENDPOINT>/nacos/v1/auth/login --data-urlencode \"username=${INSPECT_NACOS_USER}\" --data-urlencode \"password=${INSPECT_NACOS_PASSWORD}\" 2>/dev/null); token=$(printf '%s\\n' \"$login\" | sed -nE 's/.*\"accessToken\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*/\\1/p'); if [ -n \"$token\" ]; then out=$(curl -sS --connect-timeout 3 -G --data-urlencode \"accessToken=$token\" <NACOS_ENDPOINT>/nacos/v2/core/cluster/node/list 2>/dev/null); rc=$?; else out=; rc=1; fi; else out=; rc=1; fi; if [ \"$rc\" -ne 0 ] || printf '%s\\n' \"$out\" | grep -Eqi '403|401|error|exception'; then printf 'NACOS_CLUSTER_API_FAILED=true\\n'; else alive=$(printf '%s\\n' \"$out\" | grep -Eo '\"state\"[[:space:]]*:[[:space:]]*\"UP\"|\"alive\"[[:space:]]*:[[:space:]]*true' | wc -l); if printf '%s\\n' \"$out\" | grep -Eqi '\"state\"[[:space:]]*:[[:space:]]*\"UP\"|\"alive\"[[:space:]]*:[[:space:]]*true'; then printf 'NACOS_ALIVE_NODES=%s\\n' \"$alive\"; else printf 'NACOS_CLUSTER_API_FAILED=true\\n'; fi; fi",
     "local.nacos.mysql.connectivity": "platform=$(grep -E '^spring.sql.init.platform=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); db_num=$(grep -E '^db.num=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); db_url=$(grep -E '^db.url.0=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); db_host=$(printf '%s\\n' \"$db_url\" | sed -nE 's#.*//([^:/]+).*#\\1#p'); db_port=$(printf '%s\\n' \"$db_url\" | sed -nE 's#.*//[^:/]+:([0-9]+).*#\\1#p'); if [ \"$db_port\" = '' ]; then db_port=3306; fi; if [ \"$platform\" = mysql ] && [ \"$db_num\" -ge 1 ] 2>/dev/null && [ -n \"$db_host\" ] && nc -z -w 3 \"$db_host\" \"$db_port\" >/dev/null 2>&1; then printf 'NACOS_MYSQL_OK=true\\n'; else printf 'NACOS_MYSQL_OK=false\\n'; fi",
     "local.nacos.error_log": "if [ ! -d <NACOS_LOG> ]; then printf 'NACOS_ERROR_LOG_UNAVAILABLE=true\\n'; else hits=$(grep -R -iE 'ERROR|FATAL|OutOfMemory|No DataSource|SQLException|Connection refused|raft|failed' <NACOS_LOG> 2>/dev/null | tail -80 | wc -l); printf 'NACOS_ERROR_LOG_HITS=%s\\n' \"$hits\"; fi",
     "local.nacos.auth.config": "auth=$(grep -E '^nacos.core.auth.enabled=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); system=$(grep -E '^nacos.core.auth.system.type=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); key=$(grep -E '^nacos.core.auth.server.identity.key=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); value=$(grep -E '^nacos.core.auth.server.identity.value=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); secret=$(grep -E '^nacos.core.auth.plugin.nacos.token.secret.key=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); if [ \"$auth\" = true ] && [ \"$system\" = nacos ] && [ -n \"$key\" ] && [ -n \"$value\" ] && [ -n \"$secret\" ]; then printf 'NACOS_AUTH_CONFIG_OK=true\\n'; else printf 'NACOS_AUTH_CONFIG_OK=false\\n'; fi",
@@ -760,7 +760,8 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "mysql_backup": "/opt/mysql/backuptest",
     "mysql_user": "Mysql_inspect",
     "mysql_host": "127.0.0.1",
-    "nacos_token": "CHANGE_ME",
+    "nacos_user": "nacos",
+    "nacos_passwd": "CHANGE_ME",
     "nacos_home": "/opt/nacos",
     "nacos_bin": "/opt/nacos/bin/startup.sh",
     "nacos_conf": "/opt/nacos/conf/application.properties",
@@ -1446,16 +1447,22 @@ def _mysql_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _nacos_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
-    """Pass the optional Nacos API token through Ansible's private env."""
-    values = profile.get("nacos_token") or []
-    if isinstance(values, str):
-        values = [values]
-    if not values:
+    """Pass Nacos login credentials through Ansible's private environment."""
+    def first_value(name: str) -> str:
+        values = profile.get(name) or []
+        if isinstance(values, str):
+            values = [values]
+        return str(values[0]).strip() if values else ""
+
+    user = first_value("nacos_user")
+    password = first_value("nacos_passwd")
+    placeholders = {"", "CHANGE_ME", "REPLACE_ME", "请填写"}
+    if user.upper() in placeholders or password.upper() in placeholders:
         return {}
-    token = str(values[0]).strip()
-    if not token or token.upper() in {"CHANGE_ME", "REPLACE_ME", "请填写"}:
-        return {}
-    return {"INSPECT_NACOS_TOKEN": token}
+    return {
+        "INSPECT_NACOS_USER": user,
+        "INSPECT_NACOS_PASSWORD": password,
+    }
 
 
 def _es_curl(path: str, options: str = "", *, timeout_sec: int = METRIC_TIMEOUT_SEC) -> str:
@@ -2103,7 +2110,8 @@ def validate_command_specs(
             "INSPECT_ES_API_USER",
             "INSPECT_ES_API_PASSWORD",
             "INSPECT_MYSQL_PASSWORD",
-            "INSPECT_NACOS_TOKEN",
+            "INSPECT_NACOS_USER",
+            "INSPECT_NACOS_PASSWORD",
         }
         if any(key not in allowed_environment for key in spec.task_environment):
             raise CommandNotAllowedError(
@@ -3227,6 +3235,8 @@ def _execute_real(plan: RunPlan) -> Dict[str, Any]:
                     "INSPECT_ES_API_USER",
                     "INSPECT_ES_API_PASSWORD",
                     "INSPECT_MYSQL_PASSWORD",
+                    "INSPECT_NACOS_USER",
+                    "INSPECT_NACOS_PASSWORD",
                 }:
                     env[key] = value
         for secret_name in ("ANSIBLE_PASSWORD", "ANSIBLE_NET_PASSWORD", "SSHPASS"):

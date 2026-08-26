@@ -1038,7 +1038,8 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "nacos_raft_port": ["7848"],
     "nacos_log": ["/opt/nacos/logs"],
     "nacos_expected_nodes": ["3"],
-    "nacos_token": ["CHANGE_ME"],
+    "nacos_user": ["nacos"],
+    "nacos_passwd": ["CHANGE_ME"],
     # RabbitMQ
     "rabbitmq_bin": ["/opt/rabbitmq/sbin/rabbitmq-server"],
     "rabbitmq_conf": ["/opt/rabbitmq/conf/rabbitmq.conf"],
