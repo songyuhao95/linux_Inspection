@@ -869,7 +869,7 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
 }
 _SAFE_ADDITIONAL_VALUE = re.compile(r"[A-Za-z0-9_./:@%+=,-]+")
 _ADDITIONAL_GENERATED_ALLOWED_BINARIES = (
-    "awk", "bash", "cat", "cut", "curl", "echo", "egrep", "find", "free", "grep", "head",
+    "awk", "bash", "cat", "cut", "curl", "echo", "egrep", "env", "find", "free", "grep", "head",
     "hostname", "ip", "jcmd", "jstat", "kafka-consumer-groups.sh", "kafka-topics.sh", "ls", "mqadmin", "mysql", "nc",
     "openssl",
     "pgrep", "ps", "rabbitmq-diagnostics", "rabbitmqctl", "redis-cli", "sed",
@@ -1093,6 +1093,9 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             ).replace(
                 "SENTINEL masters 2>&1); masters_rc=$?;",
                 "SENTINEL masters 2>&1); masters_rc=$?; masters=$(printf '%s\\n' \"$masters\" | sed 's/\\r$//');",
+            ).replace(
+                'REDISCLI_AUTH=\"\"',
+                'env -u REDISCLI_AUTH',
             )
         elif metric_id == "local.redis.cluster.health":
             command = command.replace(
