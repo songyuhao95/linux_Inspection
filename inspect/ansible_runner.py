@@ -770,7 +770,7 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
     "local.redis.slow_query": {},
     "local.redis.clients.pressure": {},
     "local.redis.keyspace.stats": {},
-    "local.redis.system.parameters": {"<REDIS_USER>": "redis_user"},
+    "local.redis.system.parameters": {},
     "local.redis.service.unit": {},
     "local.redis.log.data.retention": {"<REDIS_LOG>": "redis_log", "<REDIS_DATA>": "redis_data"},
     "local.rocketmq.namesrv.health": {"<ROCKETMQ_CONF>": "rocketmq_conf", "<ROCKETMQ_LOG>": "rocketmq_log", "<ROCKETMQ_HOME>": "rocketmq_home"},
@@ -942,6 +942,7 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
     expected_masters = shlex.quote(_additional_profile_value(profile, "redis_expected_masters"))
     expected_replicas = shlex.quote(_additional_profile_value(profile, "redis_expected_replicas"))
     expected_sentinels = shlex.quote(_additional_profile_value(profile, "redis_expected_sentinels"))
+    configured_system_user = shlex.quote(_additional_profile_value(profile, "redis_user"))
     return (
         f"redis_bin={fallback}; for redis_candidate in {words}; do "
         "if [ -x \"$redis_candidate\" ]; then redis_bin=\"$redis_candidate\"; break; fi; "
@@ -951,6 +952,9 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
         "redis_conf_glob=\"$redis_conf_dir/redis-*.conf\"; else "
         "redis_conf_dir=\"${redis_conf_path%/*}\"; redis_conf_glob=\"$redis_conf_path\"; fi; "
         "redis_cli=\"${redis_bin%/*}/redis-cli\"; "
+        "redis_system_user=$(ps -ww -eo user=,args= 2>/dev/null | "
+        "sed -nE 's/^[[:space:]]*([^[:space:]]+)[[:space:]].*redis-server.*/\\1/p' | head -1); "
+        f"if [ -z \"$redis_system_user\" ]; then redis_system_user={configured_system_user}; fi; "
         f"redis_mode={mode}; redis_host={host}; redis_port={port}; "
         f"redis_replica_port={replica_port}; redis_cluster_port={cluster_port}; "
         f"redis_expected_masters={expected_masters}; redis_expected_replicas={expected_replicas}; "
@@ -1068,6 +1072,45 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
     if metric_id.startswith("local.mysql."):
         command = 'export MYSQL_PWD="${INSPECT_MYSQL_PASSWORD:-}"; ' + command
     if metric_id.startswith("local.redis."):
+        if metric_id == "local.redis.sentinel.health":
+            command = command.replace(
+                "then printf 'REDIS_SENTINEL_OK=true\\n'",
+                "then printf 'INSPECT_METRIC_NOT_APPLICABLE=local.redis.sentinel.health\\n'",
+            ).replace(
+                "INFO sentinel 2>&1);",
+                "INFO sentinel 2>&1); info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
+            ).replace(
+                "SENTINEL masters 2>&1);",
+                "SENTINEL masters 2>&1); masters=$(printf '%s\\n' \"$masters\" | sed 's/\\r$//');",
+            )
+        elif metric_id == "local.redis.cluster.health":
+            command = command.replace(
+                "CLUSTER INFO 2>&1);",
+                "CLUSTER INFO 2>&1); info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
+            ).replace(
+                "CLUSTER NODES 2>&1);",
+                "CLUSTER NODES 2>&1); nodes=$(printf '%s\\n' \"$nodes\" | sed 's/\\r$//');",
+            ).replace(
+                "&& ! printf '%s\\n%s\\n' \"$info\" \"$nodes\" | grep -Eqi 'fail|noaddr|handshake'",
+                "&& ! printf '%s\\n' \"$info\" | grep -Eq '^cluster_(slots_pfail|slots_fail):[1-9][0-9]*$' && ! printf '%s\\n' \"$nodes\" | grep -Eqi '(^|[ ,])fail([ ,]|$)|(^|[ ,])noaddr([ ,]|$)|(^|[ ,])handshake([ ,]|$)'",
+            )
+        elif metric_id == "local.redis.memory.pressure":
+            command = command.replace(
+                "INFO memory 2>&1);",
+                "INFO memory 2>&1); info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
+            )
+        elif metric_id == "local.redis.clients.pressure":
+            command = command.replace(
+                "INFO clients 2>&1);",
+                "INFO clients 2>&1); out=$(printf '%s\\n' \"$out\" | sed 's/\\r$//');",
+            )
+        elif metric_id == "local.redis.config.baseline":
+            command = command.replace("grep -REc ", "grep -Ec ").replace(
+                "awk -F: '{s+=$2} END {print s+0}'",
+                "awk -F: '{s += (NF > 1 ? $NF : $1)} END {print s+0}'",
+            )
+        elif metric_id == "local.redis.system.parameters":
+            command = command.replace("<REDIS_USER>", '\"$redis_system_user\"')
         command = _redis_runtime_prefix(profile) + "; " + command
     typed_prefixes = (
         "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
@@ -2867,9 +2910,10 @@ MIDDLEWARE_METRIC_PREFIXES = (
 def select_middleware_metrics(
     metric_results: Sequence[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Drop every metric in a module when its process gate reports stopped."""
+    """Drop stopped middleware metrics and feature metrics marked not applicable."""
     results = list(metric_results)
     stopped_modules = set()
+    not_applicable = set()
     for item in results:
         metric_id = str(item.get("metric_id", ""))
         if not metric_id.startswith(MIDDLEWARE_METRIC_PREFIXES):
@@ -2878,11 +2922,17 @@ def select_middleware_metrics(
         match = re.search(r"INSPECT_MIDDLEWARE_NOT_RUNNING=([a-z0-9_]+)", stdout)
         if match:
             stopped_modules.add(match.group(1))
-    if not stopped_modules:
+        match = re.search(
+            r"INSPECT_METRIC_NOT_APPLICABLE=([a-z0-9_.]+)", stdout
+        )
+        if match:
+            not_applicable.add(match.group(1))
+    if not stopped_modules and not not_applicable:
         return results
     return [
         item for item in results
-        if not any(
+        if str(item.get("metric_id", "")) not in not_applicable
+        and not any(
             str(item.get("metric_id", "")).startswith(f"local.{module_id}.")
             for module_id in stopped_modules
         )
