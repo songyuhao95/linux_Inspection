@@ -939,6 +939,7 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
     port = shlex.quote(_additional_profile_value(profile, "redis_port"))
     replica_port = shlex.quote(_additional_profile_value(profile, "redis_replica_port"))
     cluster_port = shlex.quote(_additional_profile_value(profile, "redis_cluster_port"))
+    expected_version = shlex.quote(_additional_profile_value(profile, "redis_version"))
     expected_masters = shlex.quote(_additional_profile_value(profile, "redis_expected_masters"))
     expected_replicas = shlex.quote(_additional_profile_value(profile, "redis_expected_replicas"))
     expected_sentinels = shlex.quote(_additional_profile_value(profile, "redis_expected_sentinels"))
@@ -953,6 +954,7 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
         "redis_cli=\"${redis_bin%/*}/redis-cli\"; "
         f"redis_mode={mode}; redis_host={host}; redis_port={port}; "
         f"redis_replica_port={replica_port}; redis_cluster_port={cluster_port}; "
+        f"redis_expected_version={expected_version}; "
         f"redis_expected_masters={expected_masters}; redis_expected_replicas={expected_replicas}; "
         f"redis_expected_sentinels={expected_sentinels}; "
         "case \"$redis_mode\" in cluster) redis_data_port=\"$redis_cluster_port\";; "
@@ -1068,7 +1070,15 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
     if metric_id.startswith("local.mysql."):
         command = 'export MYSQL_PWD="${INSPECT_MYSQL_PASSWORD:-}"; ' + command
     if metric_id.startswith("local.redis."):
-        if metric_id == "local.redis.sentinel.health":
+        if metric_id == "local.redis.ping.version":
+            command = command.replace(
+                "INFO server 2>&1); info_rc=$?; if printf",
+                "INFO server 2>&1); info_rc=$?; info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//'); redis_version=$(printf '%s\\n' \"$info\" | sed -n 's/^redis_version:\\(.*\\)$/\\1/p'); if printf",
+            ).replace(
+                "printf '%s\\n' \"$info\" | grep -Eq '^redis_version:'",
+                '[ "$redis_version" = "$redis_expected_version" ]',
+            )
+        elif metric_id == "local.redis.sentinel.health":
             command = command.replace(
                 "then printf 'REDIS_SENTINEL_OK=true\\n'",
                 "then printf 'INSPECT_METRIC_NOT_APPLICABLE=local.redis.sentinel.health\\n'",
@@ -1117,6 +1127,17 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
                 "if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; "
                 "case \"$nofile\" in ''|*[!0-9]*) printf 'REDIS_SYSTEM_FACT_UNAVAILABLE=true\\n';; "
                 "*) printf 'REDIS_NOFILE=%s\\n' \"$nofile\";; esac; fi"
+            )
+        elif metric_id == "local.redis.security.baseline":
+            command = command.replace(
+                "COMMAND INFO FLUSHDB FLUSHALL KEYS",
+                "--json COMMAND INFO FLUSHDB FLUSHALL KEYS",
+            ).replace(
+                "command_rc=$?; if [ \"$command_rc\" -ne 0 ]",
+                "command_rc=$?; command_info=$(printf '%s\\n' \"$command_info\" | sed 's/\\r$//'); if [ \"$command_rc\" -ne 0 ]",
+            ).replace(
+                '[ -n "$command_info" ]',
+                "printf '%s\\n' \"$command_info\" | grep -Eq '^\\[null(,null){2}\\]$'",
             )
         command = _redis_runtime_prefix(profile) + "; " + command
     typed_prefixes = (

@@ -1065,6 +1065,7 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "redis_pid": ["/opt/redis/pid"],
     "redis_user": ["redis"],
     "redis_passwd": ["CHANGE_ME"],
+    "redis_version": ["7.4.2"],
     "redis_mode": ["cluster"],
     "redis_host": ["127.0.0.1"],
     "redis_port": ["6379"],
