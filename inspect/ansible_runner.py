@@ -942,7 +942,6 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
     expected_masters = shlex.quote(_additional_profile_value(profile, "redis_expected_masters"))
     expected_replicas = shlex.quote(_additional_profile_value(profile, "redis_expected_replicas"))
     expected_sentinels = shlex.quote(_additional_profile_value(profile, "redis_expected_sentinels"))
-    configured_system_user = shlex.quote(_additional_profile_value(profile, "redis_user"))
     return (
         f"redis_bin={fallback}; for redis_candidate in {words}; do "
         "if [ -x \"$redis_candidate\" ]; then redis_bin=\"$redis_candidate\"; break; fi; "
@@ -952,9 +951,6 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
         "redis_conf_glob=\"$redis_conf_dir/redis-*.conf\"; else "
         "redis_conf_dir=\"${redis_conf_path%/*}\"; redis_conf_glob=\"$redis_conf_path\"; fi; "
         "redis_cli=\"${redis_bin%/*}/redis-cli\"; "
-        "redis_system_user=$(ps -ww -eo user=,args= 2>/dev/null | "
-        "sed -nE 's/^[[:space:]]*([^[:space:]]+)[[:space:]].*redis-server.*/\\1/p' | head -1); "
-        f"if [ -z \"$redis_system_user\" ]; then redis_system_user={configured_system_user}; fi; "
         f"redis_mode={mode}; redis_host={host}; redis_port={port}; "
         f"redis_replica_port={replica_port}; redis_cluster_port={cluster_port}; "
         f"redis_expected_masters={expected_masters}; redis_expected_replicas={expected_replicas}; "
@@ -1113,7 +1109,15 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
                 "awk -F: '{s += (NF > 1 ? $NF : $1)} END {print s+0}'",
             )
         elif metric_id == "local.redis.system.parameters":
-            command = command.replace("<REDIS_USER>", '\"$redis_system_user\"')
+            command = (
+                "redis_pid=$(pgrep -f '[r]edis-server' | head -1); "
+                "if [ -z \"$redis_pid\" ] || [ ! -r \"/proc/$redis_pid/limits\" ]; then "
+                "printf 'REDIS_SYSTEM_FACT_UNAVAILABLE=true\\n'; else "
+                "nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$redis_pid/limits\"); "
+                "if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; "
+                "case \"$nofile\" in ''|*[!0-9]*) printf 'REDIS_SYSTEM_FACT_UNAVAILABLE=true\\n';; "
+                "*) printf 'REDIS_NOFILE=%s\\n' \"$nofile\";; esac; fi"
+            )
         command = _redis_runtime_prefix(profile) + "; " + command
     typed_prefixes = (
         "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
