@@ -1841,32 +1841,77 @@ def parse_mysql_backup_status(output):
 
 
 def parse_nacos_service_health(output):
-    return _typed_bool(output, r"com\.alibaba\.nacos|nacos\.home|startup|active", negative=r"inactive|failed|error|not found")
+    return _typed_bool(output, r"NACOS_SERVICE_OK=true", negative=r"NACOS_SERVICE_OK=false")
 
 
 def parse_nacos_core_ports_health(output):
-    return _typed_count(output, r":(?:8848|9848|9849|7848)\b.*LISTEN", summary="nacos_listening_ports={value}")
+    return _typed_number(output, r"NACOS_LISTENING_PORTS=(\d+)", cast=int, summary="nacos_listening_ports={value}")
 
 
 def parse_nacos_http_health(output):
-    return _typed_bool(output, r"\bUP\b|HTTP/1\.[01]\s+200|\"status\"\s*:\s*\"UP\"", negative=r"HTTP/1\.[01]\s+5|connection refused|timeout|failed")
+    return _typed_bool(output, r"NACOS_HTTP_OK=true", negative=r"NACOS_HTTP_OK=false")
+
+
+def parse_nacos_cluster_config(output):
+    return _typed_bool(output, r"NACOS_CLUSTER_CONFIG_OK=true", negative=r"NACOS_CLUSTER_CONFIG_OK=false")
 
 
 def parse_nacos_cluster_nodes(output):
-    lines = _typed_middleware_lines(output)
-    text = "\n".join(lines)
-    if not re.search(r"\"?alive\"?\s*[:=]\s*(?:true|false|1|0)", text, re.IGNORECASE):
-        raise ParseError("Nacos 集群节点输出格式非法")
-    value = sum(1 for line in lines if re.search(r"\"?alive\"?\s*[:=]\s*(?:true|1)", line, re.IGNORECASE))
-    return {"value": value, "summary": f"nacos_alive_nodes={value}"}
+    return _typed_number(output, r"NACOS_ALIVE_NODES=(\d+)", cast=int, summary="nacos_alive_nodes={value}")
 
 
 def parse_nacos_mysql_connectivity(output):
-    return _typed_bool(output, r"spring\.sql\.init\.platform|db\.url\.0|succeeded|open", negative=r"connection refused|failed|error|not found")
+    return _typed_bool(output, r"NACOS_MYSQL_OK=true", negative=r"NACOS_MYSQL_OK=false")
 
 
 def parse_nacos_error_log(output):
-    return _typed_count(output, r"OutOfMemory|No DataSource|SQLException|Connection refused|FATAL|\bERROR\b|raft.*failed", summary="nacos_error_log_hits={value}")
+    return _typed_number(output, r"NACOS_ERROR_LOG_HITS=(\d+)", cast=int, summary="nacos_error_log_hits={value}")
+
+
+def parse_nacos_auth_config(output):
+    return _typed_bool(output, r"NACOS_AUTH_CONFIG_OK=true", negative=r"NACOS_AUTH_CONFIG_OK=false")
+
+
+def parse_nacos_http_errors(output):
+    return _typed_number(output, r"NACOS_HTTP_5XX_COUNT=(\d+)", cast=int, summary="nacos_http_5xx={value}")
+
+
+def parse_nacos_jvm_parameters(output):
+    return _typed_bool(output, r"NACOS_JVM_CONFIG_OK=true", negative=r"NACOS_JVM_CONFIG_OK=false")
+
+
+def parse_nacos_thread_fd_pressure(output):
+    return _typed_number(output, r"NACOS_FD_COUNT=(\d+)", cast=int, summary="nacos_fd_count={value}")
+
+
+def parse_nacos_config_baseline(output):
+    return _typed_bool(output, r"NACOS_CONFIG_BASELINE_OK=true", negative=r"NACOS_CONFIG_BASELINE_OK=false")
+
+
+def parse_nacos_log_data_retention(output):
+    return _typed_number(output, r"NACOS_OLD_LOG_FILES=(\d+)", cast=int, summary="nacos_old_log_files={value}")
+
+
+def parse_nacos_metrics_collection(output):
+    return _typed_number(output, r"NACOS_METRICS_LINES=(\d+)", cast=int, summary="nacos_metrics_lines={value}")
+
+
+def parse_nacos_database_errors(output):
+    return _typed_number(output, r"NACOS_DATABASE_ERROR_COUNT=(\d+)", cast=int, summary="nacos_database_errors={value}")
+
+
+def parse_nacos_system_parameters(output):
+    lines = _typed_middleware_lines(output)
+    text = "\n".join(lines)
+    nofile = re.search(r"NACOS_NOFILE=(\d+)", text, re.IGNORECASE)
+    swap = re.search(r"NACOS_SWAP_USED=(\d+)", text, re.IGNORECASE)
+    if not nofile or not swap:
+        raise ParseError("Nacos 系统参数输出格式非法")
+    return {
+        "value": int(nofile.group(1)),
+        "swap_used": int(swap.group(1)),
+        "summary": f"nacos_nofile={nofile.group(1)};swap_used={swap.group(1)}",
+    }
 
 
 def parse_rabbitmq_service_health(output):
@@ -2771,6 +2816,12 @@ _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.rocketmq.core_ports.health": (4, 2),
     "local.tomcat.http.health": (3, 2),
     "local.nacos.error_log": (0, 10),
+    "local.nacos.http.errors": (0, 10),
+    "local.nacos.thread.fd.pressure": (10000, 50000),
+    "local.nacos.log.data.retention": (0, 50),
+    "local.nacos.metrics.collection": (1, 0),
+    "local.nacos.database.errors": (0, 10),
+    "local.nacos.system.parameters": (65535, 32768),
     "local.tomcat.access_log.errors": (0, 10),
     "local.rabbitmq.cluster.nodes": (3, 2),
     "local.rabbitmq.queue.backlog": (100, 1000),
@@ -2804,6 +2855,14 @@ def _judge_typed_middleware(parsed, resolved, profile=None):
                 STATUS_OK if value >= ok_limit
                 else STATUS_WARN if value >= warn_limit
                 else STATUS_CRIT
+            )
+        elif metric_id == "local.nacos.metrics.collection":
+            status = STATUS_OK if value > 0 else STATUS_CRIT
+        elif metric_id == "local.nacos.system.parameters":
+            status = (
+                STATUS_CRIT if value < 32768
+                else STATUS_WARN if value < 65535 or int(parsed.get("swap_used", 0)) > 0
+                else STATUS_OK
             )
         else:
             ok_limit, warn_limit = thresholds
@@ -2931,6 +2990,12 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.mysql.buffer_pool.hit_ratio",
         "local.mysql.sql.digest",
         "local.nacos.cluster.nodes",
+        "local.nacos.http.errors",
+        "local.nacos.thread.fd.pressure",
+        "local.nacos.log.data.retention",
+        "local.nacos.metrics.collection",
+        "local.nacos.database.errors",
+        "local.nacos.system.parameters",
         "local.rabbitmq.cluster.nodes",
         "local.rabbitmq.queue.backlog",
         "local.rabbitmq.connection.pressure",

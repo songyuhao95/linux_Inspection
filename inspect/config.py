@@ -1027,13 +1027,17 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "mysql_host": ["127.0.0.1"],
     # Nacos
     "nacos_home": ["/opt/nacos"],
+    "nacos_bin": ["/opt/nacos/bin/startup.sh"],
     "nacos_conf": ["/opt/nacos/conf/application.properties"],
+    "nacos_cluster_conf": ["/opt/nacos/conf/cluster.conf"],
+    "nacos_data": ["/opt/nacos/data"],
     "nacos_endpoint": ["http://127.0.0.1:8848"],
     "nacos_http_port": ["8848"],
     "nacos_grpc_port": ["9848"],
     "nacos_grpc_port_offset": ["9849"],
     "nacos_raft_port": ["7848"],
     "nacos_log": ["/opt/nacos/logs"],
+    "nacos_expected_nodes": ["3"],
     "nacos_token": ["CHANGE_ME"],
     # RabbitMQ
     "rabbitmq_bin": ["/opt/rabbitmq/sbin/rabbitmq-server"],

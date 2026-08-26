@@ -549,12 +549,22 @@ _ADDITIONAL_COMMANDS = {
     "local.mysql.config.baseline": "grep -E '^(bind-address|server_id|report_host|port|datadir|socket|log_error|slow_query_log|long_query_time|log_bin|gtid_mode|enforce_gtid_consistency|binlog_format|sync_binlog|relay_log|relay_log_recovery|read_only|super_read_only|innodb_buffer_pool_size|innodb_flush_log_at_trx_commit|max_connections)' <MYSQL_CONF>",
      "local.mysql.security.accounts": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('locked_accounts=',COUNT(*)) FROM mysql.user; SELECT CONCAT('local_infile=', VARIABLE_VALUE) FROM performance_schema.global_variables WHERE VARIABLE_NAME='local_infile'; SELECT CONCAT('skip_name_resolve=', VARIABLE_VALUE) FROM performance_schema.global_variables WHERE VARIABLE_NAME='skip_name_resolve'; SELECT CONCAT('secure_file_priv=', VARIABLE_VALUE) FROM performance_schema.global_variables WHERE VARIABLE_NAME='secure_file_priv'; SELECT CONCAT('mysqlx=', IF(COUNT(*)=0,'OFF',IF(MAX(VARIABLE_VALUE <> '0'),'ON','OFF'))) FROM performance_schema.global_variables WHERE VARIABLE_NAME IN ('mysqlx','mysqlx_port');\"",
     "local.mysql.backup.status": "if [ -d <MYSQL_BACKUP> ]; then printf 'BACKUP_FILES=%s\\n' \"$(find <MYSQL_BACKUP> -type f -mtime -2 -print 2>/dev/null | wc -l)\"; else printf 'MYSQL_BACKUP_UNAVAILABLE=true\\n'; fi",
-    "local.nacos.service.health": "test -x <NACOS_BIN>; pgrep -fa 'com.alibaba.nacos|nacos.home|<NACOS_HOME>'; tail -n 50 <NACOS_LOG>/start.out",
-    "local.nacos.core_ports.health": "ss -tlnp | egrep ':8848|:9848|:9849|:7848'",
-    "local.nacos.http.health": "curl -sS --connect-timeout 3 http://127.0.0.1:8848/nacos/actuator/health",
-    "local.nacos.cluster.nodes": "curl -sS 'http://127.0.0.1:8848/nacos/v2/core/cluster/node/list?accessToken=<TOKEN>'",
-    "local.nacos.mysql.connectivity": "grep -E '^(spring.sql.init.platform|db.num|db.url.0|db.user.0)' <NACOS_CONF>; nc -vz <MYSQL_HOST> 3306",
-    "local.nacos.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|No DataSource|SQLException|Connection refused|raft|failed' <NACOS_LOG> | tail -80",
+    "local.nacos.service.health": "if test -x <NACOS_BIN> && test -r <NACOS_CONF>; then printf 'NACOS_SERVICE_OK=true\\n'; else printf 'NACOS_SERVICE_OK=false\\n'; fi",
+    "local.nacos.core_ports.health": "ports=$(ss -H -ltnp 2>/dev/null | egrep ':(<NACOS_HTTP_PORT>|<NACOS_GRPC_PORT>|<NACOS_GRPC_OFFSET>|<NACOS_RAFT_PORT>)\\b' | wc -l); printf 'NACOS_LISTENING_PORTS=%s\\n' \"$ports\"",
+    "local.nacos.http.health": "code=$(curl -sS --connect-timeout 3 -o /dev/null -w '%{http_code}' <NACOS_ENDPOINT>/nacos/actuator/health 2>/dev/null); rc=$?; if [ \"$rc\" -ne 0 ]; then code=000; fi; printf 'NACOS_HTTP_CODE=%s\\n' \"$code\"; if [ \"$code\" = 200 ]; then printf 'NACOS_HTTP_OK=true\\n'; else printf 'NACOS_HTTP_OK=false\\n'; fi",
+    "local.nacos.cluster.config": "cluster_count=$(grep -Ec '^[[:space:]]*[^#[:space:]]+:[0-9]+[[:space:]]*$' <NACOS_CLUSTER_CONF> 2>/dev/null || printf 0); server_ip=$(grep -E '^nacos.server.ip=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); if [ -r <NACOS_CLUSTER_CONF> ] && [ \"$cluster_count\" -ge <NACOS_EXPECTED_NODES> ] && ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -Fxq \"$server_ip\"; then printf 'NACOS_CLUSTER_CONFIG_OK=true\\n'; else printf 'NACOS_CLUSTER_CONFIG_OK=false\\n'; fi",
+    "local.nacos.cluster.nodes": "if [ -n \"${INSPECT_NACOS_TOKEN:-}\" ] && [ \"${INSPECT_NACOS_TOKEN:-}\" != CHANGE_ME ]; then auth=\"?accessToken=${INSPECT_NACOS_TOKEN}\"; else auth=; fi; out=$(curl -sS --connect-timeout 3 <NACOS_ENDPOINT>/nacos/v2/core/cluster/node/list$auth 2>/dev/null); rc=$?; if [ \"$rc\" -ne 0 ] || printf '%s\\n' \"$out\" | grep -Eqi '403|401|error|exception'; then printf 'NACOS_CLUSTER_API_FAILED=true\\n'; else alive=$(printf '%s\\n' \"$out\" | grep -Eo '\"alive\"[[:space:]]*:[[:space:]]*true' | wc -l); if printf '%s\\n' \"$out\" | grep -Eqi '\"alive\"'; then printf 'NACOS_ALIVE_NODES=%s\\n' \"$alive\"; else printf 'NACOS_CLUSTER_API_FAILED=true\\n'; fi; fi",
+    "local.nacos.mysql.connectivity": "platform=$(grep -E '^spring.sql.init.platform=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); db_num=$(grep -E '^db.num=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); db_url=$(grep -E '^db.url.0=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); db_host=$(printf '%s\\n' \"$db_url\" | sed -nE 's#.*//([^:/]+).*#\\1#p'); db_port=$(printf '%s\\n' \"$db_url\" | sed -nE 's#.*//[^:/]+:([0-9]+).*#\\1#p'); if [ \"$db_port\" = '' ]; then db_port=3306; fi; if [ \"$platform\" = mysql ] && [ \"$db_num\" -ge 1 ] 2>/dev/null && [ -n \"$db_host\" ] && nc -z -w 3 \"$db_host\" \"$db_port\" >/dev/null 2>&1; then printf 'NACOS_MYSQL_OK=true\\n'; else printf 'NACOS_MYSQL_OK=false\\n'; fi",
+    "local.nacos.error_log": "if [ ! -d <NACOS_LOG> ]; then printf 'NACOS_ERROR_LOG_UNAVAILABLE=true\\n'; else hits=$(grep -R -iE 'ERROR|FATAL|OutOfMemory|No DataSource|SQLException|Connection refused|raft|failed' <NACOS_LOG> 2>/dev/null | tail -80 | wc -l); printf 'NACOS_ERROR_LOG_HITS=%s\\n' \"$hits\"; fi",
+    "local.nacos.auth.config": "auth=$(grep -E '^nacos.core.auth.enabled=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); system=$(grep -E '^nacos.core.auth.system.type=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); key=$(grep -E '^nacos.core.auth.server.identity.key=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); value=$(grep -E '^nacos.core.auth.server.identity.value=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); secret=$(grep -E '^nacos.core.auth.plugin.nacos.token.secret.key=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); if [ \"$auth\" = true ] && [ \"$system\" = nacos ] && [ -n \"$key\" ] && [ -n \"$value\" ] && [ -n \"$secret\" ]; then printf 'NACOS_AUTH_CONFIG_OK=true\\n'; else printf 'NACOS_AUTH_CONFIG_OK=false\\n'; fi",
+    "local.nacos.http.errors": "if [ ! -d <NACOS_LOG> ] || ! find <NACOS_LOG> -maxdepth 1 -type f -name 'access_log.*' -print 2>/dev/null | grep -q .; then printf 'NACOS_ACCESS_LOG_UNAVAILABLE=true\\n'; else hits=$(grep -R -h -E ' 5[0-9][0-9] ' <NACOS_LOG>/access_log.* 2>/dev/null | wc -l); printf 'NACOS_HTTP_5XX_COUNT=%s\\n' \"$hits\"; fi",
+    "local.nacos.jvm.parameters": "if grep -Eqs 'JAVA_HOME|NACOS_HOME|JAVA_OPT|Xms|Xmx|Xmn|server.port' /home/nacos/.bash_profile <NACOS_BIN> <NACOS_CONF> 2>/dev/null && grep -Eq 'server.port[=:][[:space:]]*<NACOS_HTTP_PORT>|/opt/nacos|NACOS_HOME' <NACOS_BIN> <NACOS_CONF> 2>/dev/null; then printf 'NACOS_JVM_CONFIG_OK=true\\n'; else printf 'NACOS_JVM_CONFIG_OK=false\\n'; fi",
+    "local.nacos.thread.fd.pressure": "PID=$(pgrep -f 'com.alibaba.nacos|nacos.home|/opt/nacos' | head -1); if [ -z \"$PID\" ]; then printf 'NACOS_PROCESS_FACT_UNAVAILABLE=true\\n'; else fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); threads=$(awk '/^Threads:/ {print $2; exit}' /proc/$PID/status 2>/dev/null); printf 'NACOS_FD_COUNT=%s\\nNACOS_THREADS=%s\\n' \"$fd\" \"$threads\"; fi",
+    "local.nacos.config.baseline": "count=$(grep -Ec '^(nacos.server.ip|spring.sql.init.platform|db.num|db.url.0|db.user.0|server.tomcat.accesslog.enabled|nacos.istio.mcp.server.enabled)=' <NACOS_CONF> 2>/dev/null || printf 0); if [ -r <NACOS_CONF> ] && [ \"$count\" -ge 5 ]; then printf 'NACOS_CONFIG_BASELINE_OK=true\\n'; else printf 'NACOS_CONFIG_BASELINE_OK=false\\n'; fi",
+    "local.nacos.log.data.retention": "if [ ! -d <NACOS_LOG> ] || [ ! -d <NACOS_DATA> ]; then printf 'NACOS_RETENTION_PATH_UNAVAILABLE=true\\n'; else old=$(find <NACOS_LOG> -type f -mtime +30 -print 2>/dev/null | wc -l); printf 'NACOS_OLD_LOG_FILES=%s\\n' \"$old\"; fi",
+    "local.nacos.metrics.collection": "out=$(curl -sS --connect-timeout 3 <NACOS_ENDPOINT>/nacos/actuator/prometheus 2>/dev/null); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'NACOS_METRICS_LINES=0\\n'; else lines=$(printf '%s\\n' \"$out\" | egrep -c 'jvm_memory|system_cpu|nacos' || printf 0); printf 'NACOS_METRICS_LINES=%s\\n' \"$lines\"; fi",
+    "local.nacos.database.errors": "if [ ! -d <NACOS_LOG> ]; then printf 'NACOS_DATABASE_LOG_UNAVAILABLE=true\\n'; else hits=$(grep -R -iE 'SQLException|Communications link failure|Access denied|connectionTimeout|No DataSource|HikariPool' <NACOS_LOG> 2>/dev/null | tail -80 | wc -l); printf 'NACOS_DATABASE_ERROR_COUNT=%s\\n' \"$hits\"; fi",
+    "local.nacos.system.parameters": "PID=$(pgrep -f 'com.alibaba.nacos|nacos.home|/opt/nacos' | head -1); if [ -z \"$PID\" ]; then printf 'NACOS_PROCESS_FACT_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' /proc/$PID/limits); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; swap=$(free -b | awk '/^Swap:/ {print $3}'); printf 'NACOS_NOFILE=%s\\nNACOS_SWAP_USED=%s\\n' \"$nofile\" \"$swap\"; fi",
     "local.rabbitmq.service.health": "test -r <RABBITMQ_CONF>; test -x <RABBITMQ_BIN>; pgrep -fa 'beam.smp|rabbitmq-server'; systemctl is-active rabbitmq; tail -n 50 <RABBITMQ_LOG>/rabbit.log",
     "local.rabbitmq.node.health": "<RABBITMQ_DIAGNOSTICS> ping; <RABBITMQ_DIAGNOSTICS> status",
     "local.rabbitmq.cluster.nodes": "<RABBITMQCTL> cluster_status",
@@ -668,11 +678,29 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
     },
     "local.mysql.backup.status": {"<MYSQL_BACKUP>": "mysql_backup"},
     "local.nacos.service.health": {
-        "<NACOS_BIN>": "nacos_bin", "<NACOS_HOME>": "nacos_home", "<NACOS_LOG>": "nacos_log",
+        "<NACOS_BIN>": "nacos_bin", "<NACOS_HOME>": "nacos_home", "<NACOS_CONF>": "nacos_conf", "<NACOS_LOG>": "nacos_log",
     },
-    "local.nacos.cluster.nodes": {"<TOKEN>": "nacos_token"},
-    "local.nacos.mysql.connectivity": {"<NACOS_CONF>": "nacos_conf", "<MYSQL_HOST>": "mysql_host"},
+    "local.nacos.core_ports.health": {
+        "<NACOS_HTTP_PORT>": "nacos_http_port", "<NACOS_GRPC_PORT>": "nacos_grpc_port",
+        "<NACOS_GRPC_OFFSET>": "nacos_grpc_port_offset", "<NACOS_RAFT_PORT>": "nacos_raft_port",
+    },
+    "local.nacos.http.health": {"<NACOS_ENDPOINT>": "nacos_endpoint"},
+    "local.nacos.cluster.config": {
+        "<NACOS_CLUSTER_CONF>": "nacos_cluster_conf", "<NACOS_CONF>": "nacos_conf",
+        "<NACOS_EXPECTED_NODES>": "nacos_expected_nodes",
+    },
+    "local.nacos.cluster.nodes": {"<NACOS_ENDPOINT>": "nacos_endpoint"},
+    "local.nacos.mysql.connectivity": {"<NACOS_CONF>": "nacos_conf"},
     "local.nacos.error_log": {"<NACOS_LOG>": "nacos_log"},
+    "local.nacos.auth.config": {"<NACOS_CONF>": "nacos_conf"},
+    "local.nacos.http.errors": {"<NACOS_LOG>": "nacos_log"},
+    "local.nacos.jvm.parameters": {"<NACOS_BIN>": "nacos_bin", "<NACOS_CONF>": "nacos_conf", "<NACOS_HTTP_PORT>": "nacos_http_port"},
+    "local.nacos.thread.fd.pressure": {},
+    "local.nacos.config.baseline": {"<NACOS_CONF>": "nacos_conf"},
+    "local.nacos.log.data.retention": {"<NACOS_LOG>": "nacos_log", "<NACOS_DATA>": "nacos_data"},
+    "local.nacos.metrics.collection": {"<NACOS_ENDPOINT>": "nacos_endpoint"},
+    "local.nacos.database.errors": {"<NACOS_LOG>": "nacos_log"},
+    "local.nacos.system.parameters": {},
     "local.rabbitmq.service.health": {
         "<RABBITMQ_CONF>": "rabbitmq_conf", "<RABBITMQ_BIN>": "rabbitmq_bin", "<RABBITMQ_LOG>": "rabbitmq_log",
     },
@@ -736,7 +764,15 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "nacos_home": "/opt/nacos",
     "nacos_bin": "/opt/nacos/bin/startup.sh",
     "nacos_conf": "/opt/nacos/conf/application.properties",
+    "nacos_cluster_conf": "/opt/nacos/conf/cluster.conf",
+    "nacos_data": "/opt/nacos/data",
+    "nacos_endpoint": "http://127.0.0.1:8848",
+    "nacos_http_port": "8848",
+    "nacos_grpc_port": "9848",
+    "nacos_grpc_port_offset": "9849",
+    "nacos_raft_port": "7848",
     "nacos_log": "/opt/nacos/logs",
+    "nacos_expected_nodes": "3",
     "rabbitmq_bin": "/opt/rabbitmq/sbin/rabbitmq-server",
     "rabbitmq_log": "/opt/rabbitmq/logs",
     "redis_bin": "/opt/redis/bin/redis-server",
@@ -915,7 +951,7 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             "keepalived": (r"keepalived", "keepalived_conf"),
             "kafka": (r"[k]afka\.Kafka", "kafka_conf"),
             "mysql": (r"[m]ysqld", "mysql_conf"),
-            "nacos": (r"com\.alibaba\.nacos|nacos", "nacos_home"),
+            "nacos": (r"com\.alibaba\.nacos|nacos\.home|/opt/nacos", "nacos_home"),
             "rabbitmq": (r"beam\.smp|rabbitmq-server", "rabbitmq_conf"),
             "redis": (r"redis-server", "redis_conf"),
             "rocketmq": (r"NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker", "rocketmq_conf"),
@@ -1409,6 +1445,19 @@ def _mysql_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
     return {"INSPECT_MYSQL_PASSWORD": password}
 
 
+def _nacos_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
+    """Pass the optional Nacos API token through Ansible's private env."""
+    values = profile.get("nacos_token") or []
+    if isinstance(values, str):
+        values = [values]
+    if not values:
+        return {}
+    token = str(values[0]).strip()
+    if not token or token.upper() in {"CHANGE_ME", "REPLACE_ME", "请填写"}:
+        return {}
+    return {"INSPECT_NACOS_TOKEN": token}
+
+
 def _es_curl(path: str, options: str = "", *, timeout_sec: int = METRIC_TIMEOUT_SEC) -> str:
     """Build a curl call using task-local auth/TLS arrays, never literals."""
     extra = f" {options}" if options else ""
@@ -1769,11 +1818,11 @@ def build_metric_command_specs(
             raise CommandConfigError(f"指标所需命令映射缺失: {metric_id}")
         if metric_id in _ADDITIONAL_COMMANDS:
             command = _build_additional_command(metric_id, profile)
-            task_environment = (
-                _mysql_task_environment(profile)
-                if metric_id.startswith("local.mysql.")
-                else {}
-            )
+            task_environment = {}
+            if metric_id.startswith("local.mysql."):
+                task_environment = _mysql_task_environment(profile)
+            elif metric_id == "local.nacos.cluster.nodes":
+                task_environment = _nacos_task_environment(profile)
             specs.append(
                 CommandSpec(
                     metric_id=metric_id,
@@ -2054,6 +2103,7 @@ def validate_command_specs(
             "INSPECT_ES_API_USER",
             "INSPECT_ES_API_PASSWORD",
             "INSPECT_MYSQL_PASSWORD",
+            "INSPECT_NACOS_TOKEN",
         }
         if any(key not in allowed_environment for key in spec.task_environment):
             raise CommandNotAllowedError(
