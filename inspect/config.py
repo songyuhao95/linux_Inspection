@@ -1049,6 +1049,7 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "rabbitmq_data": ["/opt/rabbitmq/data/mnesia"],
     "rabbitmq_run": ["/opt/rabbitmq/run"],
     "rabbitmq_cookie": ["/home/rabbitmq/.erlang.cookie"],
+    "rabbitmq_user": ["rabbitmq"],
     "rabbitmq_unit": ["rabbitmq"],
     "rabbitmq_expected_nodes": ["3"],
     "rabbitmq_port": ["5672"],
