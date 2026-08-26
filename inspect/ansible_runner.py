@@ -1096,6 +1096,30 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             ).replace(
                 'REDISCLI_AUTH=\"\"',
                 'unset REDISCLI_AUTH; ',
+            ).replace(
+                'info=$(unset REDISCLI_AUTH; ',
+                'info=$(',
+            ).replace(
+                'masters=$(unset REDISCLI_AUTH; ',
+                'masters=$(',
+            ).replace(
+                "if printf '%s\\n' \"$info\" | grep -Eqi 'NOAUTH|WRONGPASS'; then info=$(\"$redis_cli\"",
+                "if printf '%s\\n' \"$info\" | grep -Eqi 'ERR AUTH .*without any password configured'; then info=$(unset REDISCLI_AUTH; \"$redis_cli\"",
+            ).replace(
+                "if printf '%s\\n' \"$masters\" | grep -Eqi 'NOAUTH|WRONGPASS'; then masters=$(\"$redis_cli\"",
+                "if printf '%s\\n' \"$masters\" | grep -Eqi 'ERR AUTH .*without any password configured'; then masters=$(unset REDISCLI_AUTH; \"$redis_cli\"",
+            ).replace(
+                'info=$( \"$redis_cli\"',
+                'info=$(REDISCLI_AUTH=\"${INSPECT_REDIS_PASSWORD:-}\" \"$redis_cli\"',
+            ).replace(
+                'masters=$( \"$redis_cli\"',
+                'masters=$(REDISCLI_AUTH=\"${INSPECT_REDIS_PASSWORD:-}\" \"$redis_cli\"',
+            ).replace(
+                "if [ \"${info_master_count:-0}\" -ge 1 ] 2>/dev/null && [ \"${listed_master_count:-0}\" -ge \"${info_master_count:-1}\" ] 2>/dev/null && [ \"${sentinel_count:-0}\" -ge \"$redis_expected_sentinels\" ] 2>/dev/null && [ \"${bad_flags:-1}\" -eq 0 ] 2>/dev/null; then",
+                "if healthy_master_count=$(printf '%s\\n' \"$info\" | grep -Ec '^master[0-9]+:.*status=ok.*sentinels=[0-9]+([[:space:]]|$)' || printf 0); [ \"${info_master_count:-0}\" -ge 1 ] 2>/dev/null && [ \"${healthy_master_count:-0}\" -ge \"${info_master_count:-1}\" ] 2>/dev/null && [ \"${listed_master_count:-0}\" -ge \"${info_master_count:-1}\" ] 2>/dev/null && [ \"${sentinel_count:-0}\" -ge \"$redis_expected_sentinels\" ] 2>/dev/null && [ \"${bad_flags:-1}\" -eq 0 ] 2>/dev/null; then",
+            ).replace(
+                "elif printf '%s\\n%s\\n' \"$info\" \"$masters\" | grep -Eq 'sentinel_masters:1' && printf '%s\\n%s\\n' \"$info\" \"$masters\" | grep -Eq 'num-slaves[^0-9]*2' && ! printf '%s\\n%s\\n' \"$info\" \"$masters\" | grep -Eqi 's_down|o_down|disconnected'; then",
+                "elif info_master_count=$(printf '%s\\n' \"$info\" | sed -n 's/^sentinel_masters:\\([0-9][0-9]*\\)$/\\1/p'); healthy_master_count=$(printf '%s\\n' \"$info\" | grep -Ec '^master[0-9]+:.*status=ok.*sentinels=[0-9]+([[:space:]]|$)' || printf 0); sentinel_count=$(printf '%s\\n' \"$info\" | sed -n 's/^master[0-9]*:.*sentinels=\\([0-9][0-9]*\\).*$/\\1/p' | sort -n | tail -1); master_key_count=$(printf '%s\\n' \"$masters\" | grep -Ec '^name$' || printf 0); master_flag_count=$(printf '%s\\n' \"$masters\" | grep -Ec '^flags$' || printf 0); [ \"${info_master_count:-0}\" -ge 1 ] 2>/dev/null && [ \"${healthy_master_count:-0}\" -ge \"${info_master_count:-1}\" ] 2>/dev/null && [ \"${sentinel_count:-0}\" -ge \"$redis_expected_sentinels\" ] 2>/dev/null && [ \"${master_key_count:-0}\" -ge \"${info_master_count:-1}\" ] 2>/dev/null && [ \"${master_flag_count:-0}\" -ge \"${info_master_count:-1}\" ] 2>/dev/null && ! printf '%s\\n%s\\n' \"$info\" \"$masters\" | grep -Eqi 's_down|o_down|disconnected'; then",
             )
         elif metric_id == "local.redis.cluster.health":
             command = command.replace(
