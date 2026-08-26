@@ -1085,6 +1085,9 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             )
         elif metric_id == "local.redis.cluster.health":
             command = command.replace(
+                "then printf 'REDIS_CLUSTER_OK=true\\n'",
+                "then printf 'INSPECT_METRIC_NOT_APPLICABLE=local.redis.cluster.health\\n'",
+            ).replace(
                 "CLUSTER INFO 2>&1);",
                 "CLUSTER INFO 2>&1); info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//');",
             ).replace(
