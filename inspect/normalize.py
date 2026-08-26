@@ -2006,27 +2006,71 @@ def parse_rabbitmq_log_data_retention(output):
 
 
 def parse_redis_service_health(output):
-    return _typed_bool(output, r"redis-server|\bactive\b", negative=r"inactive|failed|not found|error")
+    return _typed_bool(output, r"REDIS_SERVICE_OK=true", negative=r"REDIS_SERVICE_OK=false")
 
 
 def parse_redis_ping_version(output):
-    return _typed_bool(output, r"\bPONG\b|redis_version:", negative=r"NOAUTH|connection refused|timeout|error")
+    return _typed_bool(output, r"REDIS_PING_OK=true", negative=r"REDIS_PING_OK=false")
+
+
+def parse_redis_core_ports_health(output):
+    return _typed_number(output, r"REDIS_LISTENING_PORTS=(\d+)", cast=int, summary="redis_listening_ports={value}")
 
 
 def parse_redis_replication_health(output):
-    return _typed_bool(output, r"role:(?:master|slave)|master_link_status:up", negative=r"master_link_status:down|fail|error")
+    return _typed_bool(output, r"REDIS_REPLICATION_OK=true", negative=r"REDIS_REPLICATION_OK=false")
 
 
 def parse_redis_sentinel_health(output):
-    return _typed_bool(output, r"master|sentinel_masters|num-slaves", negative=r"s_down|o_down|disconnected|fail")
+    return _typed_bool(output, r"REDIS_SENTINEL_OK=true", negative=r"REDIS_SENTINEL_OK=false")
 
 
 def parse_redis_cluster_health(output):
-    return _typed_bool(output, r"cluster_state:ok|cluster_slots_ok:16384", negative=r"fail|noaddr|cluster_state:fail")
+    return _typed_bool(output, r"REDIS_CLUSTER_OK=true", negative=r"REDIS_CLUSTER_OK=false")
+
+
+def parse_redis_memory_pressure(output):
+    return _typed_number(output, r"REDIS_MEMORY_USED_PERCENT=([0-9]+(?:\.[0-9]+)?)", cast=float, summary="redis_memory_used_percent={value}")
 
 
 def parse_redis_persistence_health(output):
-    return _typed_bool(output, r"loading:0|aof_enabled:1|appendfsync.*everysec", negative=r"aof_last_write_status:err|error|failed")
+    return _typed_bool(output, r"REDIS_PERSISTENCE_OK=true", negative=r"REDIS_PERSISTENCE_OK=false")
+
+
+def parse_redis_error_log(output):
+    return _typed_number(output, r"REDIS_ERROR_LOG_HITS=(\d+)", cast=int, summary="redis_error_log_hits={value}")
+
+
+def parse_redis_config_baseline(output):
+    return _typed_bool(output, r"REDIS_CONFIG_OK=true", negative=r"REDIS_CONFIG_OK=false")
+
+
+def parse_redis_security_baseline(output):
+    return _typed_bool(output, r"REDIS_SECURITY_OK=true", negative=r"REDIS_SECURITY_OK=false")
+
+
+def parse_redis_slow_query(output):
+    return _typed_number(output, r"REDIS_SLOWLOG_ENTRIES=(\d+)", cast=int, summary="redis_slowlog_entries={value}")
+
+
+def parse_redis_clients_pressure(output):
+    return _typed_number(output, r"REDIS_CONNECTED_CLIENTS=(\d+)", cast=int, summary="redis_connected_clients={value}")
+
+
+def parse_redis_keyspace_stats(output):
+    return _typed_number(output, r"REDIS_KEYS=(\d+)", cast=int, summary="redis_keys={value}")
+
+
+def parse_redis_system_parameters(output):
+    return _typed_number(output, r"REDIS_NOFILE=(\d+)", cast=int, summary="redis_nofile={value}")
+
+
+def parse_redis_service_unit(output):
+    return _typed_bool(output, r"REDIS_UNIT_OK=true", negative=r"REDIS_UNIT_OK=false")
+
+
+def parse_redis_log_data_retention(output):
+    return _typed_number(output, r"REDIS_OLD_FILES=(\d+)", cast=int, summary="redis_old_files={value}")
 
 
 def parse_rocketmq_namesrv_health(output):
@@ -2863,6 +2907,14 @@ _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.mysql.innodb.waits": (0, 5),
     "local.mysql.buffer_pool.hit_ratio": (99, 95),
     "local.mysql.sql.digest": (10, 50),
+    "local.redis.core_ports.health": (2, 1),
+    "local.redis.memory.pressure": (80, 95),
+    "local.redis.error_log": (0, 10),
+    "local.redis.slow_query": (10, 100),
+    "local.redis.clients.pressure": (100, 500),
+    "local.redis.keyspace.stats": (1000000, 10000000),
+    "local.redis.system.parameters": (65535, 32768),
+    "local.redis.log.data.retention": (50, 100),
     "local.nacos.cluster.nodes": (2, 1),
     "local.nacos.core_ports.health": (4, 2),
     "local.rocketmq.core_ports.health": (4, 2),
@@ -2925,6 +2977,7 @@ def _judge_typed_middleware(parsed, resolved, profile=None):
             if metric_id in {
                 "local.nacos.cluster.nodes",
                 "local.nacos.core_ports.health",
+                "local.redis.core_ports.health",
                 "local.rabbitmq.cluster.nodes",
                 "local.rabbitmq.core_ports.health",
                 "local.rocketmq.core_ports.health",
@@ -3045,6 +3098,14 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.mysql.innodb.waits",
         "local.mysql.buffer_pool.hit_ratio",
         "local.mysql.sql.digest",
+        "local.redis.core_ports.health",
+        "local.redis.memory.pressure",
+        "local.redis.error_log",
+        "local.redis.slow_query",
+        "local.redis.clients.pressure",
+        "local.redis.keyspace.stats",
+        "local.redis.system.parameters",
+        "local.redis.log.data.retention",
         "local.nacos.cluster.nodes",
         "local.nacos.http.errors",
         "local.nacos.thread.fd.pressure",

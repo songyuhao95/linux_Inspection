@@ -581,12 +581,23 @@ _ADDITIONAL_COMMANDS = {
     "local.rabbitmq.file_descriptor.limits": "PID=$(pgrep -f 'beam.smp' | head -1); if [ -z \"$PID\" ]; then printf 'RABBITMQ_FD_FACT_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' /proc/$PID/limits); nproc=$(awk '$1==\"Max\" && $2==\"processes\" {print $4; exit}' /proc/$PID/limits); [ \"$nofile\" = unlimited ] && nofile=999999; [ \"$nproc\" = unlimited ] && nproc=999999; if [ \"${nofile:-0}\" -ge 65535 ] 2>/dev/null && [ \"${nproc:-0}\" -ge 4096 ] 2>/dev/null; then printf 'RABBITMQ_NOFILE=%s\\n' \"$nofile\"; else printf 'RABBITMQ_NOFILE=%s\\n' \"${nofile:-0}\"; fi; fi",
     "local.rabbitmq.systemd.unit": "unit=$(systemctl cat <RABBITMQ_UNIT> 2>/dev/null); if printf '%s\\n' \"$unit\" | grep -Eq 'User=rabbitmq|Group=rabbitmq|ExecStart=.*rabbitmq|Restart='; then printf 'RABBITMQ_SYSTEMD_OK=true\\n'; else printf 'RABBITMQ_SYSTEMD_OK=false\\n'; fi",
     "local.rabbitmq.log.data.retention": "if [ ! -d <RABBITMQ_LOG> ] || [ ! -d <RABBITMQ_DATA> ]; then printf 'RABBITMQ_RETENTION_PATH_UNAVAILABLE=true\\n'; else old=$(find <RABBITMQ_LOG> -type f -mtime +30 -print 2>/dev/null | wc -l); printf 'RABBITMQ_OLD_FILES=%s\\n' \"$old\"; fi",
-    "local.redis.service.health": "test -x <REDIS_BIN>; test -r <REDIS_CONF>; pgrep -fa 'redis-server.*(6379|16379|7000)'; systemctl is-active redis; ls -ld <REDIS_LOG>",
-    "local.redis.ping.version": "<REDIS_CLI> -h 127.0.0.1 -p <PORT> PING; <REDIS_CLI> -h 127.0.0.1 -p <PORT> INFO server",
-    "local.redis.replication.health": "<REDIS_CLI> -p <PORT> INFO replication",
-    "local.redis.sentinel.health": "<REDIS_CLI> -p 26379 INFO sentinel; <REDIS_CLI> -p 26379 SENTINEL masters",
-    "local.redis.cluster.health": "<REDIS_CLI> -p 7000 CLUSTER INFO; <REDIS_CLI> -p 7000 CLUSTER NODES",
-    "local.redis.persistence.health": "<REDIS_CLI> -p <PORT> INFO persistence; <REDIS_CLI> -p <PORT> CONFIG GET appendonly appendfsync dir",
+    "local.redis.service.health": "if test -d <REDIS_CONF> && test -x <REDIS_BIN> && pgrep -fa 'redis-server' >/dev/null 2>&1; then printf 'REDIS_SERVICE_OK=true\\n'; else printf 'REDIS_SERVICE_OK=false\\n'; fi",
+    "local.redis.ping.version": "ping=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning PING 2>&1); ping_rc=$?; info=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning INFO server 2>&1); info_rc=$?; if printf '%s\\n%s\\n' \"$ping\" \"$info\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_PING_FACT_UNAVAILABLE=true\\n'; elif [ \"$ping_rc\" -eq 0 ] && [ \"$info_rc\" -eq 0 ] && printf '%s\\n' \"$ping\" | grep -Eq '^PONG$' && printf '%s\\n' \"$info\" | grep -Eq '^redis_version:'; then printf 'REDIS_PING_OK=true\\n'; else printf 'REDIS_PING_OK=false\\n'; fi",
+    "local.redis.core_ports.health": "case \"$redis_mode\" in cluster) expected=\"$redis_cluster_port|$redis_cluster_bus_port\";; sentinel) expected=\"$redis_replica_port|$redis_sentinel_port\";; *) expected=\"$redis_port\";; esac; count=$(ss -H -ltnp 2>/dev/null | egrep \"(:($expected))\\b\" | awk '{print $4}' | sed -E 's/.*:([0-9]+)$/\\1/' | sort -nu | wc -l); printf 'REDIS_LISTENING_PORTS=%s\\n' \"$count\"",
+    "local.redis.replication.health": "out=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning INFO replication 2>&1); rc=$?; if [ \"$rc\" -ne 0 ] || printf '%s\\n' \"$out\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_REPLICATION_FACT_UNAVAILABLE=true\\n'; elif printf '%s\\n' \"$out\" | grep -Eq 'role:(master|slave)' && ! printf '%s\\n' \"$out\" | grep -Eqi 'master_link_status:down|master_sync_in_progress:1|error'; then printf 'REDIS_REPLICATION_OK=true\\n'; else printf 'REDIS_REPLICATION_OK=false\\n'; fi",
+    "local.redis.sentinel.health": "if [ \"$redis_mode\" != sentinel ]; then printf 'REDIS_SENTINEL_OK=true\\n'; else info=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_sentinel_port\" --user \"$redis_user\" --no-auth-warning INFO sentinel 2>&1); info_rc=$?; masters=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_sentinel_port\" --user \"$redis_user\" --no-auth-warning SENTINEL masters 2>&1); masters_rc=$?; if [ \"$info_rc\" -ne 0 ] || [ \"$masters_rc\" -ne 0 ] || printf '%s\\n%s\\n' \"$info\" \"$masters\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_SENTINEL_FACT_UNAVAILABLE=true\\n'; elif printf '%s\\n%s\\n' \"$info\" \"$masters\" | grep -Eq 'sentinel_masters:1' && printf '%s\\n%s\\n' \"$info\" \"$masters\" | grep -Eq 'num-slaves[^0-9]*2' && ! printf '%s\\n%s\\n' \"$info\" \"$masters\" | grep -Eqi 's_down|o_down|disconnected'; then printf 'REDIS_SENTINEL_OK=true\\n'; else printf 'REDIS_SENTINEL_OK=false\\n'; fi; fi",
+    "local.redis.cluster.health": "if [ \"$redis_mode\" != cluster ]; then printf 'REDIS_CLUSTER_OK=true\\n'; else info=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning CLUSTER INFO 2>&1); info_rc=$?; nodes=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning CLUSTER NODES 2>&1); nodes_rc=$?; masters=$(printf '%s\\n' \"$nodes\" | awk '$3 ~ /(^|,)master(,|$)/ && $3 !~ /fail|noaddr/ {n++} END {print n+0}'); replicas=$(printf '%s\\n' \"$nodes\" | awk '$3 ~ /(^|,)slave(,|$)/ && $3 !~ /fail|noaddr/ {n++} END {print n+0}'); if [ \"$info_rc\" -ne 0 ] || [ \"$nodes_rc\" -ne 0 ] || printf '%s\\n%s\\n' \"$info\" \"$nodes\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_CLUSTER_FACT_UNAVAILABLE=true\\n'; elif printf '%s\\n' \"$info\" | grep -Eq '^cluster_state:ok$' && printf '%s\\n' \"$info\" | grep -Eq '^cluster_slots_ok:16384$' && [ \"${masters:-0}\" -ge \"$redis_expected_masters\" ] 2>/dev/null && [ \"${replicas:-0}\" -ge \"$redis_expected_replicas\" ] 2>/dev/null && ! printf '%s\\n%s\\n' \"$info\" \"$nodes\" | grep -Eqi 'fail|noaddr|handshake'; then printf 'REDIS_CLUSTER_OK=true\\n'; else printf 'REDIS_CLUSTER_OK=false\\n'; fi; fi",
+    "local.redis.memory.pressure": "info=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning INFO memory 2>&1); if printf '%s\\n' \"$info\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_MEMORY_FACT_UNAVAILABLE=true\\n'; else used=$(printf '%s\\n' \"$info\" | sed -n 's/^used_memory:\\([0-9][0-9]*\\)$/\\1/p'); max=$(printf '%s\\n' \"$info\" | sed -n 's/^maxmemory:\\([0-9][0-9]*\\)$/\\1/p'); if [ -n \"$used\" ] && [ -n \"$max\" ] && [ \"$max\" -gt 0 ] 2>/dev/null; then pct=$(awk -v u=\"$used\" -v m=\"$max\" 'BEGIN {printf \"%.2f\", u*100/m}'); printf 'REDIS_MEMORY_USED_PERCENT=%s\\n' \"$pct\"; else printf 'REDIS_MEMORY_FACT_UNAVAILABLE=true\\n'; fi; fi",
+    "local.redis.persistence.health": "info=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning INFO persistence 2>&1); info_rc=$?; config=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning CONFIG GET appendonly appendfsync dir 2>&1); config_rc=$?; if [ \"$info_rc\" -ne 0 ] || [ \"$config_rc\" -ne 0 ] || printf '%s\\n%s\\n' \"$info\" \"$config\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_PERSISTENCE_FACT_UNAVAILABLE=true\\n'; elif printf '%s\\n' \"$info\" | grep -Eq 'loading:0' && printf '%s\\n' \"$info\" | grep -Eq 'rdb_last_bgsave_status:ok|aof_enabled:1' && ! printf '%s\\n' \"$info\" | grep -Eqi 'rdb_last_bgsave_status:err|aof_last_write_status:err' && printf '%s\\n' \"$config\" | grep -Eq 'appendonly|dir'; then printf 'REDIS_PERSISTENCE_OK=true\\n'; else printf 'REDIS_PERSISTENCE_OK=false\\n'; fi",
+    "local.redis.error_log": "if [ ! -d <REDIS_LOG> ]; then printf 'REDIS_ERROR_LOG_UNAVAILABLE=true\\n'; else hits=$(grep -R -iE 'OOM|MISCONF|Background saving error|AOF.*error|RDB.*error|READONLY|MASTERDOWN|CLUSTERDOWN|invalid password|NOAUTH' <REDIS_LOG> 2>/dev/null | tail -80 | wc -l); printf 'REDIS_ERROR_LOG_HITS=%s\\n' \"$hits\"; fi",
+    "local.redis.config.baseline": "conf_file=$(find <REDIS_CONF> -maxdepth 1 -type f -name 'redis-*.conf' -print -quit 2>/dev/null); if [ -z \"$conf_file\" ]; then printf 'REDIS_CONFIG_FACT_UNAVAILABLE=true\\n'; else count=$(grep -REc '^[[:space:]]*(bind|protected-mode|port|tcp-backlog|daemonize|supervised|pidfile|logfile|dir|dbfilename|appendonly|appendfilename|appendfsync|maxmemory|maxmemory-policy|requirepass|masterauth|replicaof|cluster-enabled|cluster-config-file|cluster-node-timeout|rename-command)[[:space:]]+' <REDIS_CONF>/redis-*.conf 2>/dev/null | awk -F: '{s+=$2} END {print s+0}'); if [ \"$count\" -ge 8 ]; then printf 'REDIS_CONFIG_OK=true\\n'; else printf 'REDIS_CONFIG_OK=false\\n'; fi; fi",
+    "local.redis.security.baseline": "cfg=$(grep -REh '^[[:space:]]*(requirepass|masterauth|protected-mode|rename-command)[[:space:]]+' <REDIS_CONF>/redis-*.conf 2>/dev/null); command_info=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning COMMAND INFO FLUSHDB FLUSHALL KEYS 2>&1); command_rc=$?; if [ \"$command_rc\" -ne 0 ] || printf '%s\\n' \"$command_info\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_SECURITY_FACT_UNAVAILABLE=true\\n'; elif printf '%s\\n' \"$cfg\" | grep -Eq '^[[:space:]]*protected-mode[[:space:]]+yes' && printf '%s\\n' \"$cfg\" | grep -Eq '^[[:space:]]*(requirepass|masterauth)[[:space:]]+[^#[:space:]]+' && [ -n \"$command_info\" ]; then printf 'REDIS_SECURITY_OK=true\\n'; else printf 'REDIS_SECURITY_OK=false\\n'; fi",
+    "local.redis.slow_query": "out=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning SLOWLOG LEN 2>&1); if printf '%s\\n' \"$out\" | grep -Eq '^[0-9]+$'; then printf 'REDIS_SLOWLOG_ENTRIES=%s\\n' \"$out\"; else printf 'REDIS_SLOWLOG_QUERY_FAILED=true\\n'; fi",
+    "local.redis.clients.pressure": "out=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning INFO clients 2>&1); clients=$(printf '%s\\n' \"$out\" | sed -n 's/^connected_clients:\\([0-9][0-9]*\\)$/\\1/p'); if [ -n \"$clients\" ]; then printf 'REDIS_CONNECTED_CLIENTS=%s\\n' \"$clients\"; else printf 'REDIS_CLIENTS_QUERY_FAILED=true\\n'; fi",
+    "local.redis.keyspace.stats": "out=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning INFO keyspace 2>&1); keys=$(printf '%s\\n' \"$out\" | sed -n 's/.*keys=\\([0-9][0-9]*\\).*/\\1/p' | awk '{s+=$1} END {print s+0}'); if printf '%s\\n' \"$out\" | grep -Eqi 'NOAUTH|WRONGPASS|ERR '; then printf 'REDIS_KEYSPACE_QUERY_FAILED=true\\n'; else printf 'REDIS_KEYS=%s\\n' \"${keys:-0}\"; fi",
+    "local.redis.system.parameters": "nofile=$(su - <REDIS_USER> -c 'ulimit -n' 2>/dev/null); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; case \"$nofile\" in ''|*[!0-9]*) printf 'REDIS_SYSTEM_FACT_UNAVAILABLE=true\\n';; *) printf 'REDIS_NOFILE=%s\\n' \"$nofile\";; esac",
+    "local.redis.service.unit": "unit=$(systemctl cat redis 2>/dev/null); if printf '%s\\n' \"$unit\" | grep -Eq 'User=redis|ExecStart=.*redis-server|Restart='; then printf 'REDIS_UNIT_OK=true\\n'; else printf 'REDIS_UNIT_OK=false\\n'; fi",
+    "local.redis.log.data.retention": "if [ ! -d <REDIS_LOG> ] || [ ! -d <REDIS_DATA> ]; then printf 'REDIS_RETENTION_PATH_UNAVAILABLE=true\\n'; else old=$(find <REDIS_LOG> -type f -mtime +30 -print 2>/dev/null | wc -l); printf 'REDIS_OLD_FILES=%s\\n' \"$old\"; fi",
     "local.rocketmq.namesrv.health": "test -d <ROCKETMQ_CONF>; pgrep -fa 'NamesrvStartup|mqnamesrv'; tail -n 50 <ROCKETMQ_LOG>/rocketmqlogs/namesrv.log 2>/dev/null; tail -n 50 <ROCKETMQ_HOME>/logs/rocketmqlogs/namesrv.log",
     "local.rocketmq.broker.health": "test -d <ROCKETMQ_CONF>; pgrep -fa 'BrokerStartup|mqbroker'; tail -n 50 <ROCKETMQ_LOG>/rocketmqlogs/broker.log 2>/dev/null; tail -n 50 <ROCKETMQ_HOME>/logs/rocketmqlogs/broker.log",
     "local.rocketmq.core_ports.health": "ss -tlnp | egrep ':9876|:9877|:10911|:10912'",
@@ -740,13 +751,28 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
         "<RABBITMQ_LOG>": "rabbitmq_log", "<RABBITMQ_DATA>": "rabbitmq_data",
     },
     "local.redis.service.health": {
-        "<REDIS_BIN>": "redis_bin", "<REDIS_CONF>": ("redis_conf", "redis.conf"), "<REDIS_LOG>": "redis_log",
+        "<REDIS_BIN>": "redis_bin", "<REDIS_CONF>": "redis_conf",
     },
-    "local.redis.ping.version": {"<REDIS_CLI>": ("redis_bin", "redis-cli"), "<PORT>": "redis_port"},
-    "local.redis.replication.health": {"<REDIS_CLI>": ("redis_bin", "redis-cli"), "<PORT>": "redis_port"},
-    "local.redis.sentinel.health": {"<REDIS_CLI>": ("redis_bin", "redis-cli")},
-    "local.redis.cluster.health": {"<REDIS_CLI>": ("redis_bin", "redis-cli")},
-    "local.redis.persistence.health": {"<REDIS_CLI>": ("redis_bin", "redis-cli"), "<PORT>": "redis_port"},
+    "local.redis.ping.version": {},
+    "local.redis.core_ports.health": {
+        "<REDIS_PORT>": "redis_port", "<REDIS_REPLICA_PORT>": "redis_replica_port",
+        "<REDIS_SENTINEL_PORT>": "redis_sentinel_port", "<REDIS_CLUSTER_PORT>": "redis_cluster_port",
+        "<REDIS_CLUSTER_BUS_PORT>": "redis_cluster_bus_port",
+    },
+    "local.redis.replication.health": {},
+    "local.redis.sentinel.health": {"<REDIS_SENTINEL_PORT>": "redis_sentinel_port"},
+    "local.redis.cluster.health": {"<REDIS_CLUSTER_PORT>": "redis_cluster_port"},
+    "local.redis.memory.pressure": {},
+    "local.redis.persistence.health": {},
+    "local.redis.error_log": {"<REDIS_LOG>": "redis_log"},
+    "local.redis.config.baseline": {"<REDIS_CONF>": "redis_conf"},
+    "local.redis.security.baseline": {"<REDIS_CONF>": "redis_conf"},
+    "local.redis.slow_query": {},
+    "local.redis.clients.pressure": {},
+    "local.redis.keyspace.stats": {},
+    "local.redis.system.parameters": {"<REDIS_USER>": "redis_user"},
+    "local.redis.service.unit": {},
+    "local.redis.log.data.retention": {"<REDIS_LOG>": "redis_log", "<REDIS_DATA>": "redis_data"},
     "local.rocketmq.namesrv.health": {"<ROCKETMQ_CONF>": "rocketmq_conf", "<ROCKETMQ_LOG>": "rocketmq_log", "<ROCKETMQ_HOME>": "rocketmq_home"},
     "local.rocketmq.broker.health": {"<ROCKETMQ_CONF>": "rocketmq_conf", "<ROCKETMQ_LOG>": "rocketmq_log", "<ROCKETMQ_HOME>": "rocketmq_home"},
     "local.rocketmq.cluster.registration": {"<MQADMIN>": ("rocketmq_bin", "mqadmin"), "<NAMESRV_ADDR>": "rocketmq_namesrv_addr"},
@@ -816,10 +842,23 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "rabbitmq_cluster_port": "25672",
     "rabbitmq_epmd_port": "4369",
     "rabbitmq_expected_nodes": "3",
+    "redis_home": "/opt/redis",
     "redis_bin": "/opt/redis/bin/redis-server",
     "redis_conf": "/opt/redis/conf",
     "redis_log": "/opt/redis/logs",
+    "redis_data": "/opt/redis/data",
+    "redis_pid": "/opt/redis/pid",
+    "redis_user": "redis",
+    "redis_mode": "cluster",
+    "redis_host": "127.0.0.1",
     "redis_port": "6379",
+    "redis_replica_port": "16379",
+    "redis_sentinel_port": "26379",
+    "redis_cluster_port": "7000",
+    "redis_cluster_bus_port": "17000",
+    "redis_expected_masters": "3",
+    "redis_expected_replicas": "3",
+    "redis_expected_sentinels": "3",
     "rocketmq_namesrv_addr": "127.0.0.1:9876",
     "rocketmq_controller_addr": "127.0.0.1:9877",
     "rocketmq_broker": "broker-a",
@@ -873,6 +912,38 @@ def _mysql_runtime_prefix(profile: Dict[str, Any]) -> str:
         "done; "
         "if [ ! -x \"$mysql_bin\" ]; then "
         "printf '%s\\n' INSPECT_MYSQL_CLIENT_NOT_FOUND=true; exit 0; fi"
+    )
+
+
+def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
+    """Resolve Redis server candidates, mode ports and private CLI auth."""
+    candidates = _additional_profile_values(profile, "redis_bin")
+    words = " ".join(shlex.quote(value) for value in candidates)
+    fallback = shlex.quote(candidates[0])
+    mode = shlex.quote(_additional_profile_value(profile, "redis_mode"))
+    host = shlex.quote(_additional_profile_value(profile, "redis_host"))
+    port = shlex.quote(_additional_profile_value(profile, "redis_port"))
+    replica_port = shlex.quote(_additional_profile_value(profile, "redis_replica_port"))
+    cluster_port = shlex.quote(_additional_profile_value(profile, "redis_cluster_port"))
+    expected_masters = shlex.quote(_additional_profile_value(profile, "redis_expected_masters"))
+    expected_replicas = shlex.quote(_additional_profile_value(profile, "redis_expected_replicas"))
+    expected_sentinels = shlex.quote(_additional_profile_value(profile, "redis_expected_sentinels"))
+    return (
+        f"redis_bin={fallback}; for redis_candidate in {words}; do "
+        "if [ -x \"$redis_candidate\" ]; then redis_bin=\"$redis_candidate\"; break; fi; "
+        "done; redis_cli=\"${redis_bin%/*}/redis-cli\"; "
+        f"redis_mode={mode}; redis_host={host}; redis_port={port}; "
+        f"redis_replica_port={replica_port}; redis_cluster_port={cluster_port}; "
+        f"redis_expected_masters={expected_masters}; redis_expected_replicas={expected_replicas}; "
+        f"redis_expected_sentinels={expected_sentinels}; "
+        "case \"$redis_mode\" in cluster) redis_data_port=\"$redis_cluster_port\";; "
+        "sentinel) redis_data_port=\"$redis_replica_port\";; *) redis_data_port=\"$redis_port\";; esac; "
+        "if [ \"$redis_mode\" = cluster ]; then detected=$(ps -ww -eo args 2>/dev/null | "
+        "sed -nE 's#.*redis-server[[:space:]]+[^:[:space:]]+:([0-9]+)[[:space:]]+\\[cluster\\].*#\\1#p' | head -1); "
+        "if [ -n \"$detected\" ]; then redis_data_port=\"$detected\"; "
+        "redis_cluster_port=\"$detected\"; redis_cluster_bus_port=$((detected + 10000)); fi; fi; "
+        "export REDISCLI_AUTH=\"${INSPECT_REDIS_PASSWORD:-}\"; "
+        "redis_user=\"${INSPECT_REDIS_USER:-default}\""
     )
 
 
@@ -977,6 +1048,8 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         command = f"{_kafka_runtime_prefix(profile)}; {command}"
     if metric_id.startswith("local.mysql."):
         command = 'export MYSQL_PWD="${INSPECT_MYSQL_PASSWORD:-}"; ' + command
+    if metric_id.startswith("local.redis."):
+        command = _redis_runtime_prefix(profile) + "; " + command
     typed_prefixes = (
         "local.kafka.", "local.mysql.", "local.nacos.", "local.rabbitmq.",
         "local.redis.", "local.rocketmq.", "local.tomcat.", "local.zookeeper.",
@@ -1505,6 +1578,23 @@ def _nacos_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def _redis_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
+    """Pass Redis ACL/password credentials through Ansible's private environment."""
+    def first_value(name: str) -> str:
+        values = profile.get(name) or []
+        if isinstance(values, str):
+            values = [values]
+        return str(values[0]).strip() if values else ""
+
+    password = first_value("redis_passwd")
+    if not password or password.upper() in {"CHANGE_ME", "REPLACE_ME", "请填写"}:
+        return {}
+    return {
+        "INSPECT_REDIS_USER": first_value("redis_user") or "default",
+        "INSPECT_REDIS_PASSWORD": password,
+    }
+
+
 def _es_curl(path: str, options: str = "", *, timeout_sec: int = METRIC_TIMEOUT_SEC) -> str:
     """Build a curl call using task-local auth/TLS arrays, never literals."""
     extra = f" {options}" if options else ""
@@ -1870,6 +1960,8 @@ def build_metric_command_specs(
                 task_environment = _mysql_task_environment(profile)
             elif metric_id == "local.nacos.cluster.nodes":
                 task_environment = _nacos_task_environment(profile)
+            elif metric_id.startswith("local.redis."):
+                task_environment = _redis_task_environment(profile)
             specs.append(
                 CommandSpec(
                     metric_id=metric_id,
@@ -2152,6 +2244,8 @@ def validate_command_specs(
             "INSPECT_MYSQL_PASSWORD",
             "INSPECT_NACOS_USER",
             "INSPECT_NACOS_PASSWORD",
+            "INSPECT_REDIS_USER",
+            "INSPECT_REDIS_PASSWORD",
         }
         if any(key not in allowed_environment for key in spec.task_environment):
             raise CommandNotAllowedError(
