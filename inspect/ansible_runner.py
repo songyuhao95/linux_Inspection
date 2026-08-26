@@ -943,7 +943,7 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
         "if [ -n \"$detected\" ]; then redis_data_port=\"$detected\"; "
         "redis_cluster_port=\"$detected\"; redis_cluster_bus_port=$((detected + 10000)); fi; fi; "
         "export REDISCLI_AUTH=\"${INSPECT_REDIS_PASSWORD:-}\"; "
-        "redis_user=\"${INSPECT_REDIS_USER:-default}\""
+        "redis_user=default"
     )
 
 
@@ -1589,10 +1589,7 @@ def _redis_task_environment(profile: Dict[str, Any]) -> Dict[str, str]:
     password = first_value("redis_passwd")
     if not password or password.upper() in {"CHANGE_ME", "REPLACE_ME", "请填写"}:
         return {}
-    return {
-        "INSPECT_REDIS_USER": first_value("redis_user") or "default",
-        "INSPECT_REDIS_PASSWORD": password,
-    }
+    return {"INSPECT_REDIS_PASSWORD": password}
 
 
 def _es_curl(path: str, options: str = "", *, timeout_sec: int = METRIC_TIMEOUT_SEC) -> str:
