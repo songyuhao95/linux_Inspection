@@ -958,7 +958,7 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
         f"redis_expected_masters={expected_masters}; redis_expected_replicas={expected_replicas}; "
         f"redis_expected_sentinels={expected_sentinels}; "
         "case \"$redis_mode\" in cluster) redis_data_port=\"$redis_cluster_port\";; "
-        "sentinel) redis_data_port=\"$redis_replica_port\";; *) redis_data_port=\"$redis_port\";; esac; "
+        "sentinel) redis_data_port=\"$redis_port\";; *) redis_data_port=\"$redis_port\";; esac; "
         "if [ \"$redis_mode\" = cluster ]; then detected=$(ps -ww -eo args 2>/dev/null | "
         "sed -nE 's#.*redis-server[[:space:]]+[^:[:space:]]+:([0-9]+)[[:space:]]+\\[cluster\\].*#\\1#p' | head -1); "
         "if [ -n \"$detected\" ]; then redis_data_port=\"$detected\"; "
@@ -1070,7 +1070,12 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
     if metric_id.startswith("local.mysql."):
         command = 'export MYSQL_PWD="${INSPECT_MYSQL_PASSWORD:-}"; ' + command
     if metric_id.startswith("local.redis."):
-        if metric_id == "local.redis.ping.version":
+        if metric_id == "local.redis.core_ports.health":
+            command = command.replace(
+                'sentinel) expected="$redis_replica_port|$redis_sentinel_port"',
+                'sentinel) expected="$redis_port|$redis_sentinel_port"',
+            )
+        elif metric_id == "local.redis.ping.version":
             command = command.replace(
                 "INFO server 2>&1); info_rc=$?; if printf",
                 "INFO server 2>&1); info_rc=$?; info=$(printf '%s\\n' \"$info\" | sed 's/\\r$//'); redis_version=$(printf '%s\\n' \"$info\" | sed -n 's/^redis_version:\\(.*\\)$/\\1/p'); if printf",
