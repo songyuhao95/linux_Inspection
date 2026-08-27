@@ -2160,38 +2160,63 @@ def parse_rocketmq_log_data_retention(output):
 
 
 def parse_tomcat_service_health(output):
-    return _typed_bool(output, r"org\.apache\.catalina\.startup\.Bootstrap|active", negative=r"failed|inactive|not found")
+    return _typed_bool(output, r"TOMCAT_SERVICE_OK=true", negative=r"TOMCAT_SERVICE_OK=false")
 
 
 def parse_tomcat_http_health(output):
-    return _typed_count(output, r":(?:8080|8443|8005)\b.*LISTEN", summary="tomcat_listening_ports={value}")
+    return _typed_number(output, r"TOMCAT_LISTENING_PORTS=(\d+)", cast=int, summary="tomcat_listening_ports={value}")
+
+
+def parse_tomcat_http_reachability(output):
+    return _typed_bool(output, r"TOMCAT_HTTP_OK=true", negative=r"TOMCAT_HTTP_OK=false")
 
 
 def parse_tomcat_access_log_errors(output):
-    return _typed_count(output, r"SEVERE|Exception|OutOfMemoryError|Address already in use", summary="tomcat_error_log_hits={value}")
+    return _typed_number(output, r"TOMCAT_STARTUP_ERROR_HITS=(\d+)", cast=int, summary="tomcat_startup_error_hits={value}")
+
+
+def parse_tomcat_error_log_key_evidence(output):
+    return _typed_number(output, r"TOMCAT_ERROR_LOG_HITS=(\d+)", cast=int, summary="tomcat_error_log_hits={value}")
 
 
 def parse_tomcat_jvm_memory(output):
-    lines = _typed_middleware_lines(output)
-    match = re.search(r"^\s*\d+\s+(\d+)\s+\d+\s+[0-9.]+\s+", "\n".join(lines), re.MULTILINE)
-    if not match:
-        match = re.search(r"rss\s*[=:]\s*(\d+)", "\n".join(lines), re.IGNORECASE)
-    if not match:
-        raise ParseError("Tomcat JVM RSS 数值缺失")
-    value = round(int(match.group(1)) / 1024.0, 2)
-    return {"value": value, "summary": f"tomcat_rss={value}MB"}
+    return _typed_number(output, r"TOMCAT_RSS_MB=([0-9]+(?:\.[0-9]+)?)", cast=float, summary="tomcat_rss={value}MB")
 
 
 def parse_tomcat_thread_pool_pressure(output):
-    return _typed_number(output, r"\bfd\s*=\s*(\d+)", cast=int, summary="tomcat_open_fds={value}")
+    return _typed_number(output, r"TOMCAT_FD_COUNT=(\d+)", cast=int, summary="tomcat_open_fds={value}")
 
 
 def parse_tomcat_security_baseline(output):
-    return _typed_bool(
-        output,
-        r"<Server|<Connector|autoDeploy\s*=\s*[\"']?false|deployOnStartup\s*=\s*[\"']?false|server\s*=",
-        negative=r"autoDeploy\s*=\s*[\"']?true|deployOnStartup\s*=\s*[\"']?true|failed|error",
-    )
+    return _typed_bool(output, r"TOMCAT_CONFIG_OK=true", negative=r"TOMCAT_CONFIG_OK=false")
+
+
+def parse_tomcat_default_apps(output):
+    return _typed_number(output, r"TOMCAT_DEFAULT_APP_COUNT=(\d+)", cast=int, summary="tomcat_default_apps={value}")
+
+
+def parse_tomcat_java_environment(output):
+    return _typed_bool(output, r"TOMCAT_JAVA_OK=true", negative=r"TOMCAT_JAVA_OK=false")
+
+
+def parse_tomcat_access_log_5xx(output):
+    return _typed_number(output, r"TOMCAT_ACCESS_5XX=(\d+)", cast=int, summary="tomcat_access_5xx={value}")
+
+
+def parse_tomcat_connection_status(output):
+    return _typed_number(output, r"TOMCAT_CONNECTIONS=(\d+)", cast=int, summary="tomcat_connections={value}")
+
+
+def parse_tomcat_log_rotation(output):
+    return _typed_number(output, r"TOMCAT_LARGE_LOG_COUNT=(\d+)", cast=int, summary="tomcat_large_logs={value}")
+
+
+def parse_tomcat_jvm_crash_files(output):
+    return _typed_number(output, r"TOMCAT_JVM_CRASH_COUNT=(\d+)", cast=int, summary="tomcat_jvm_crash_files={value}")
+
+
+def parse_tomcat_port_isolation(output):
+    return _typed_bool(output, r"TOMCAT_PORT_ISOLATION_OK=true", negative=r"TOMCAT_PORT_ISOLATION_OK=false")
 
 
 def parse_keepalived_vip_present(output):
@@ -3005,6 +3030,12 @@ _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.nacos.database.errors": (0, 10),
     "local.nacos.system.parameters": (65535, 32768),
     "local.tomcat.access_log.errors": (0, 10),
+    "local.tomcat.error_log.key_evidence": (0, 10),
+    "local.tomcat.default_apps": (0, 1),
+    "local.tomcat.access_log.5xx": (0, 10),
+    "local.tomcat.connection.status": (1000, 5000),
+    "local.tomcat.log.rotation": (0, 1),
+    "local.tomcat.jvm.crash_files": (0, 1),
     "local.rabbitmq.cluster.nodes": (3, 2),
     "local.rabbitmq.core_ports.health": (4, 2),
     "local.rabbitmq.queue.backlog": (100, 1000),

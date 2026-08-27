@@ -820,9 +820,15 @@ def _middleware_metric(
         "local.rocketmq.system.parameters": "文件句柄数",
         "local.rocketmq.log.data.retention": "文件数",
         "local.tomcat.http.health": "端口数",
+        "local.tomcat.access_log.5xx": "条数",
         "local.tomcat.access_log.errors": "条数",
+        "local.tomcat.error_log.key_evidence": "条数",
         "local.tomcat.jvm.memory": "MB",
         "local.tomcat.thread_pool.pressure": "文件句柄数",
+        "local.tomcat.default_apps": "目录数",
+        "local.tomcat.connection.status": "连接数",
+        "local.tomcat.log.rotation": "文件数",
+        "local.tomcat.jvm.crash_files": "文件数",
     }
     is_typed = metric_id.startswith(typed_prefixes) or metric_id in typed_keepalived
     if is_typed:
@@ -957,10 +963,19 @@ _ADDITIONAL_MIDDLEWARE_METRICS = [
 
     _middleware_metric("local.tomcat.service.health", "Tomcat 服务健康", "ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "Tomcat 进程存在且服务 active → OK；否则 → CRIT"),
     _middleware_metric("local.tomcat.http.health", "Tomcat HTTP 健康", "ss -lntp | egrep '(:8080|:8443|:8005)\\b'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "HTTP 端口处于 LISTEN 且归属 Tomcat Java 进程 → OK；未监听或端口冲突 → CRIT"),
-    _middleware_metric("local.tomcat.access_log.errors", "Tomcat 访问与错误日志", "tail -200 /opt/tomcat/logs/catalina.out | egrep -i 'Server startup in|SEVERE|Exception|OutOfMemoryError|Address already in use'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "启动成功且无持续 SEVERE/OOM/端口占用等关键错误 → OK；关键错误 → CRIT"),
+    _middleware_metric("local.tomcat.http.reachability", "Tomcat 本地 HTTP", "curl -I --connect-timeout 5 http://127.0.0.1:8080/", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "本地 HTTP 返回有效响应 → OK；连接失败或无响应 → CRIT"),
+    _middleware_metric("local.tomcat.access_log.errors", "Tomcat 启动日志", "tail -200 /opt/tomcat/logs/catalina.out | egrep -i 'Server startup in|SEVERE|Exception|OutOfMemoryError|Address already in use'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "启动日志无持续 SEVERE/Exception/OOM/端口占用等关键错误 → OK；关键错误超过 10 条 → CRIT"),
+    _middleware_metric("local.tomcat.error_log.key_evidence", "Tomcat 近期严重错误日志", "find /opt/tomcat/logs -type f -mtime -1 \\( -name '*.log' -o -name 'catalina.out' \\) -print | xargs -r grep -HniE 'SEVERE|ERROR|Exception|OutOfMemoryError|StackOverflowError' | tail -50", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "近 1 日无严重错误 → OK，1-10 条 → WARN，超过 10 条 → CRIT"),
     _middleware_metric("local.tomcat.jvm.memory", "Tomcat JVM 内存", "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); ps -o pid,rss,vsz,%mem,etime,cmd -p \"$PID\"; free -h", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "RSS/JVM 配置与业务负载匹配且 available 内存充足、swap 未持续使用 → OK；内存压力或 OOM 风险 → WARN/CRIT"),
     _middleware_metric("local.tomcat.thread_pool.pressure", "Tomcat 文件句柄与线程压力", "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); echo fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); echo threads=$(ls /proc/$PID/task 2>/dev/null | wc -l); cat /proc/$PID/limits 2>/dev/null | egrep 'Max open files|Max processes'", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "文件句柄/线程数接近限制但未耗尽，且无 too many open files 或线程堆积 → OK；接近/超过限制 → WARN/CRIT"),
-    _middleware_metric("local.tomcat.security.baseline", "Tomcat 安全配置基线", "egrep -n '(<Server port=|<Connector|autoDeploy=|deployOnStartup=|server=)' /opt/tomcat/conf/server.xml", "Tomcat运维巡检手册v1.0.docx", "Tomcat-P1", "Connector/Server 端口符合规划，autoDeploy/deployOnStartup 按基线关闭且 Server 响应头受控 → OK；偏离 → WARN/CRIT"),
+    _middleware_metric("local.tomcat.security.baseline", "Tomcat 安全配置基线", "egrep -n '(<Server port=|<Connector|autoDeploy=|deployOnStartup=|server=)' /opt/tomcat/conf/server.xml", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "Connector/Server 端口符合规划，autoDeploy/deployOnStartup 按基线关闭且 Server 响应头受控 → OK；偏离 → CRIT"),
+    _middleware_metric("local.tomcat.default_apps", "Tomcat 默认应用清理", "find /opt/tomcat/webapps -maxdepth 1 -type d \\( -name docs -o -name examples -o -name manager -o -name host-manager \\) -print", "Tomcat运维巡检手册v1.0.docx", "P0-TABLE5", "docs/examples/manager/host-manager 默认应用目录数为 0 → OK；存在 → CRIT", unit="目录数"),
+    _middleware_metric("local.tomcat.java.environment", "Tomcat Java 环境", "/opt/jre1.8.0_421/bin/java -version; su - tomcat -c 'echo JAVA_HOME=$JAVA_HOME; java -version'", "Tomcat运维巡检手册v1.0.docx", "P1-TABLE6", "配置的 Java 可执行且运行环境可用 → OK；Java 缺失或环境不可用 → CRIT"),
+    _middleware_metric("local.tomcat.access_log.5xx", "Tomcat 访问日志 5xx", "tail -1000 /opt/tomcat/logs/localhost_access_log*.txt 2>/dev/null | awk '$9 ~ /^5/ {c++} END{print c+0}'", "Tomcat运维巡检手册v1.0.docx", "P1-TABLE6", "近千条访问日志 5xx 为 0 → OK，1-10 → WARN，超过 10 → CRIT"),
+    _middleware_metric("local.tomcat.connection.status", "Tomcat 连接状态", "ss -ant '( sport = :8080 )' | awk 'NR>1 {count[$1]++} END{for (s in count) print s,count[s]}'", "Tomcat运维巡检手册v1.0.docx", "P1-TABLE6", "连接总数 ≤1000 → OK，1001-5000 → WARN，超过 5000 → CRIT", unit="连接数"),
+    _middleware_metric("local.tomcat.log.rotation", "Tomcat 日志轮转与大文件", "du -sh /opt/tomcat/logs; find /opt/tomcat/logs -type f -size +1G -ls", "Tomcat运维巡检手册v1.0.docx", "P1-TABLE6", "日志目录可读且超过 1G 的日志文件为 0 → OK，1 个 → WARN，超过 1 个 → CRIT", unit="文件数"),
+    _middleware_metric("local.tomcat.jvm.crash_files", "Tomcat JVM 崩溃文件", "find /opt/tomcat/logs /opt/tomcat/temp -maxdepth 1 \\( -name '*.hprof' -o -name 'hs_err_pid*.log' \\) -ls 2>/dev/null", "Tomcat运维巡检手册v1.0.docx", "P1-TABLE6", "HeapDump/JVM 崩溃文件为 0 → OK，1 个 → WARN，超过 1 个 → CRIT", unit="文件数"),
+    _middleware_metric("local.tomcat.port.isolation", "Tomcat 多实例端口隔离", "egrep -n '(<Server port=|<Connector)' /opt/tomcat/conf/server.xml; ss -lntp | egrep ':(8080|8005|8443)\\b'", "Tomcat运维巡检手册v1.0.docx", "P1-TABLE6", "Server/Connector 端口规划清晰且核心端口无非 Tomcat 进程占用 → OK；端口冲突或配置异常 → CRIT"),
 ]
 
 METRICS.extend(_ADDITIONAL_MIDDLEWARE_METRICS)

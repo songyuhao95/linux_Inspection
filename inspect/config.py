@@ -1102,6 +1102,14 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "tomcat_bin": ["/opt/tomcat/bin"],
     "tomcat_log": ["/opt/tomcat/logs"],
     "tomcat_port": ["8080"],
+    "tomcat_https_port": ["8443"],
+    "tomcat_shutdown_port": ["8005"],
+    "tomcat_user": ["tomcat"],
+    "tomcat_java_home": ["/opt/jre1.8.0_421"],
+    "tomcat_version": ["9.0.110"],
+    "tomcat_webapps": ["/opt/tomcat/webapps"],
+    "tomcat_old_log_days": ["1"],
+    "tomcat_large_log_size": ["1G"],
 }
 
 _CONF_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")

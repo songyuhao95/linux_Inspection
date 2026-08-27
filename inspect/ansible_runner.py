@@ -631,12 +631,21 @@ _ADDITIONAL_COMMANDS = {
     "local.rocketmq.system.parameters": "pid=$(pgrep -f 'NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker' | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$pid/limits\"); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; case \"$nofile\" in ''|*[!0-9]*) printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_NOFILE=%s\\n' \"$nofile\";; esac; fi",
     "local.rocketmq.systemd.unit": "units=$(systemctl cat rocketmq-namesrv rocketmq-broker 2>&1); if printf '%s\\n' \"$units\" | grep -Eq 'ExecStart=.*(mqnamesrv|mqbroker)|User=|Restart='; then printf 'ROCKETMQ_SYSTEMD_OK=true\\n'; else printf 'ROCKETMQ_SYSTEMD_OK=false\\n'; fi",
     "local.rocketmq.log.data.retention": "if [ -d \"$rocketmq_log_dir\" ]; then old=$(find \"$rocketmq_log_dir\" -type f -mtime +\"$rocketmq_old_log_days\" -print 2>/dev/null | wc -l); printf 'ROCKETMQ_OLD_FILES=%s\\n' \"$old\"; else printf 'ROCKETMQ_RETENTION_UNAVAILABLE=true\\n'; fi",
-    "local.tomcat.service.health": "test -x <TOMCAT_BIN>; ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'",
-    "local.tomcat.http.health": "ss -lntp | egrep '(:8080|:8443|:8005)\\b'",
-    "local.tomcat.access_log.errors": "tail -200 <TOMCAT_LOG>/catalina.out | egrep -i 'Server startup in|SEVERE|Exception|OutOfMemoryError|Address already in use'",
-    "local.tomcat.jvm.memory": "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); ps -o pid,rss,vsz,%mem,etime,cmd -p \"$PID\"; free -h",
-    "local.tomcat.thread_pool.pressure": "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); echo fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); echo threads=$(ls /proc/$PID/task 2>/dev/null | wc -l); cat /proc/$PID/limits 2>/dev/null | egrep 'Max open files|Max processes'",
-    "local.tomcat.security.baseline": "egrep -n '(<Server port=|<Connector|autoDeploy=|deployOnStartup=|server=)' <TOMCAT_CONF>",
+    "local.tomcat.service.health": "if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && pgrep -fa 'org.apache.catalina.startup.Bootstrap' >/dev/null 2>&1; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
+    "local.tomcat.http.health": "ports=0; for p in \"$tomcat_port\" \"$tomcat_https_port\" \"$tomcat_shutdown_port\"; do n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$p\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); done; printf 'TOMCAT_LISTENING_PORTS=%s\\n' \"$ports\"",
+    "local.tomcat.http.reachability": "status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 \"http://127.0.0.1:$tomcat_port/\" 2>/dev/null); case \"$status\" in 2??|3??|4??) printf 'TOMCAT_HTTP_OK=true\\n';; *) printf 'TOMCAT_HTTP_OK=false\\n';; esac",
+    "local.tomcat.access_log.errors": "if [ -r \"$tomcat_log_dir/catalina.out\" ]; then hits=$(tail -200 \"$tomcat_log_dir/catalina.out\" | grep -Eic 'SEVERE|Exception|OutOfMemoryError|Address already in use'); printf 'TOMCAT_STARTUP_ERROR_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_STARTUP_FACT_UNAVAILABLE=true\\n'; fi",
+    "local.tomcat.error_log.key_evidence": "if [ -d \"$tomcat_log_dir\" ]; then hits=$(find \"$tomcat_log_dir\" -type f -mtime -1 \\( -name '*.log' -o -name 'catalina.out' \\) -exec grep -HniE 'SEVERE|ERROR|Exception|OutOfMemoryError|StackOverflowError' {} \\\\; 2>/dev/null | tail -50 | wc -l); printf 'TOMCAT_ERROR_LOG_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_ERROR_LOG_UNAVAILABLE=true\\n'; fi",
+    "local.tomcat.jvm.memory": "pid=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); rss=$(ps -o rss= -p \"$pid\" 2>/dev/null | awk '{print $1}'); case \"$rss\" in ''|*[!0-9]*) printf 'TOMCAT_JVM_MEMORY_UNAVAILABLE=true\\n';; *) mb=$(awk -v r=\"$rss\" 'BEGIN {printf \"%.2f\", r/1024}'); printf 'TOMCAT_RSS_MB=%s\\n' \"$mb\";; esac",
+    "local.tomcat.thread_pool.pressure": "pid=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'TOMCAT_THREAD_FACT_UNAVAILABLE=true\\n'; else fd=$(ls /proc/$pid/fd 2>/dev/null | wc -l); threads=$(ls /proc/$pid/task 2>/dev/null | wc -l); printf 'TOMCAT_FD_COUNT=%s\\n' \"$fd\"; printf 'TOMCAT_THREAD_COUNT=%s\\n' \"$threads\"; fi",
+    "local.tomcat.security.baseline": "if [ ! -r \"$tomcat_conf_file\" ]; then printf 'TOMCAT_CONFIG_FACT_UNAVAILABLE=true\\n'; elif grep -Eqi 'autoDeploy[[:space:]]*=[[:space:]]*\"?true|deployOnStartup[[:space:]]*=[[:space:]]*\"?true' \"$tomcat_conf_file\"; then printf 'TOMCAT_CONFIG_OK=false\\n'; else printf 'TOMCAT_CONFIG_OK=true\\n'; fi",
+    "local.tomcat.default_apps": "if [ -d \"$tomcat_webapps_dir\" ]; then count=$(find \"$tomcat_webapps_dir\" -maxdepth 1 -type d \\( -name docs -o -name examples -o -name manager -o -name host-manager \\) -print | wc -l); printf 'TOMCAT_DEFAULT_APP_COUNT=%s\\n' \"$count\"; else printf 'TOMCAT_DEFAULT_APP_FACT_UNAVAILABLE=true\\n'; fi",
+    "local.tomcat.java.environment": "if [ -x \"$tomcat_java_home/bin/java\" ] && \"$tomcat_java_home/bin/java\" -version 1>/dev/null 2>&1; then printf 'TOMCAT_JAVA_OK=true\\n'; else printf 'TOMCAT_JAVA_OK=false\\n'; fi",
+    "local.tomcat.access_log.5xx": "total=0; found=0; for file in \"$tomcat_log_dir\"/localhost_access_log*.txt; do if [ -f \"$file\" ]; then found=1; n=$(tail -1000 \"$file\" | awk '$9 ~ /^5/ {c++} END {print c+0}'); total=$((total+n)); fi; done; if [ \"$found\" -eq 1 ]; then printf 'TOMCAT_ACCESS_5XX=%s\\n' \"$total\"; else printf 'TOMCAT_ACCESS_LOG_UNAVAILABLE=true\\n'; fi",
+    "local.tomcat.connection.status": "count=$(ss -H -ant \"( sport = :$tomcat_port )\" 2>/dev/null | wc -l); case \"$count\" in ''|*[!0-9]*) printf 'TOMCAT_CONNECTION_FACT_UNAVAILABLE=true\\n';; *) printf 'TOMCAT_CONNECTIONS=%s\\n' \"$count\";; esac",
+    "local.tomcat.log.rotation": "if [ -d \"$tomcat_log_dir\" ]; then count=$(find \"$tomcat_log_dir\" -type f -size +\"$tomcat_large_log_size\" -print 2>/dev/null | wc -l); printf 'TOMCAT_LARGE_LOG_COUNT=%s\\n' \"$count\"; else printf 'TOMCAT_LOG_ROTATION_UNAVAILABLE=true\\n'; fi",
+    "local.tomcat.jvm.crash_files": "count=$(find \"$tomcat_log_dir\" \"$tomcat_home_dir/temp\" -maxdepth 1 \\( -name '*.hprof' -o -name 'hs_err_pid*.log' \\) -print 2>/dev/null | wc -l); printf 'TOMCAT_JVM_CRASH_COUNT=%s\\n' \"$count\"",
+    "local.tomcat.port.isolation": "listeners=0; bad=0; for p in \"$tomcat_port\" \"$tomcat_https_port\" \"$tomcat_shutdown_port\"; do line=$(ss -H -lntp 2>/dev/null | grep -E :$p$); if [ -n \"$line\" ]; then listeners=$((listeners+1)); if ! printf '%s\\n' \"$line\" | grep -q '\"java\"'; then bad=$((bad+1)); fi; fi; done; if [ -r \"$tomcat_conf_file\" ] && [ \"$listeners\" -gt 0 ] 2>/dev/null && [ \"$bad\" -eq 0 ] 2>/dev/null; then printf 'TOMCAT_PORT_ISOLATION_OK=true\\n'; else printf 'TOMCAT_PORT_ISOLATION_OK=false\\n'; fi",
 }
 # Tighten the two collectors whose command result can otherwise look healthy
 # merely because an error message contains a RocketMQ keyword.
@@ -828,8 +837,17 @@ _ADDITIONAL_PLACEHOLDER_KEYS = {
     },
     "local.rocketmq.consumer.lag": {"<MQADMIN>": ("rocketmq_bin", "mqadmin"), "<NAMESRV_ADDR>": "rocketmq_namesrv_addr"},
     "local.tomcat.service.health": {"<TOMCAT_BIN>": ("tomcat_bin", "catalina.sh")},
+    "local.tomcat.http.reachability": {},
     "local.tomcat.access_log.errors": {"<TOMCAT_LOG>": "tomcat_log"},
+    "local.tomcat.error_log.key_evidence": {"<TOMCAT_LOG>": "tomcat_log"},
     "local.tomcat.security.baseline": {"<TOMCAT_CONF>": ("tomcat_conf", "server.xml")},
+    "local.tomcat.default_apps": {"<TOMCAT_WEBAPPS>": "tomcat_webapps"},
+    "local.tomcat.java.environment": {"<JAVA_HOME>": "tomcat_java_home", "<TOMCAT_USER>": "tomcat_user"},
+    "local.tomcat.access_log.5xx": {"<TOMCAT_LOG>": "tomcat_log"},
+    "local.tomcat.connection.status": {},
+    "local.tomcat.log.rotation": {"<TOMCAT_LOG>": "tomcat_log"},
+    "local.tomcat.jvm.crash_files": {"<TOMCAT_LOG>": "tomcat_log", "<TOMCAT_HOME>": "tomcat_home"},
+    "local.tomcat.port.isolation": {"<TOMCAT_CONF>": ("tomcat_conf", "server.xml")},
 }
 
 _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
@@ -928,6 +946,16 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "tomcat_bin": "/opt/tomcat/bin",
     "tomcat_conf": "/opt/tomcat/conf",
     "tomcat_log": "/opt/tomcat/logs",
+    "tomcat_home": "/opt/tomcat",
+    "tomcat_webapps": "/opt/tomcat/webapps",
+    "tomcat_java_home": "/opt/jre1.8.0_421",
+    "tomcat_user": "tomcat",
+    "tomcat_port": "8080",
+    "tomcat_https_port": "8443",
+    "tomcat_shutdown_port": "8005",
+    "tomcat_version": "9.0.110",
+    "tomcat_old_log_days": "1",
+    "tomcat_large_log_size": "1G",
 }
 _SAFE_ADDITIONAL_VALUE = re.compile(r"[A-Za-z0-9_./:@%+=,-]+")
 _ADDITIONAL_GENERATED_ALLOWED_BINARIES = (
@@ -1158,6 +1186,38 @@ def _derive_additional_path(value: str, suffix: Optional[str]) -> str:
     return f"{parent}/{suffix}"
 
 
+def _tomcat_runtime_prefix(profile: Dict[str, Any]) -> str:
+    """Resolve Tomcat's configured paths and ports on the target host."""
+    homes = _additional_profile_values(profile, "tomcat_home")
+    bins = _additional_profile_values(profile, "tomcat_bin")
+    confs = _additional_profile_values(profile, "tomcat_conf")
+    logs = _additional_profile_values(profile, "tomcat_log")
+    webapps = _additional_profile_values(profile, "tomcat_webapps")
+    home_words = " ".join(shlex.quote(value) for value in homes)
+    bin_words = " ".join(shlex.quote(value) for value in bins)
+    conf_words = " ".join(shlex.quote(value) for value in confs)
+    log_words = " ".join(shlex.quote(value) for value in logs)
+    webapps_words = " ".join(shlex.quote(value) for value in webapps)
+    return (
+        f"tomcat_home_dir={shlex.quote(homes[0])}; for candidate in {home_words}; do "
+        "if [ -d \"$candidate\" ]; then tomcat_home_dir=\"$candidate\"; break; fi; done; "
+        f"tomcat_bin_dir={shlex.quote(bins[0])}; for candidate in {bin_words}; do "
+        "if [ -d \"$candidate\" ]; then tomcat_bin_dir=\"$candidate\"; break; fi; done; "
+        f"tomcat_conf_dir={shlex.quote(confs[0])}; for candidate in {conf_words}; do "
+        "if [ -d \"$candidate\" ]; then tomcat_conf_dir=\"$candidate\"; break; fi; done; "
+        f"tomcat_log_dir={shlex.quote(logs[0])}; for candidate in {log_words}; do "
+        "if [ -d \"$candidate\" ]; then tomcat_log_dir=\"$candidate\"; break; fi; done; "
+        f"tomcat_webapps_dir={shlex.quote(webapps[0])}; for candidate in {webapps_words}; do "
+        "if [ -d \"$candidate\" ]; then tomcat_webapps_dir=\"$candidate\"; break; fi; done; "
+        f"tomcat_java_home={shlex.quote(_additional_profile_value(profile, 'tomcat_java_home'))}; "
+        f"tomcat_user={shlex.quote(_additional_profile_value(profile, 'tomcat_user'))}; "
+        f"tomcat_port={shlex.quote(_additional_profile_value(profile, 'tomcat_port'))}; "
+        f"tomcat_https_port={shlex.quote(_additional_profile_value(profile, 'tomcat_https_port'))}; "
+        f"tomcat_shutdown_port={shlex.quote(_additional_profile_value(profile, 'tomcat_shutdown_port'))}; "
+        "tomcat_conf_file=\"$tomcat_conf_dir/server.xml\""
+    )
+
+
 def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
     command = _COMMAND_TEMPLATES[metric_id]["command"]
     if metric_id.startswith("local.mysql."):
@@ -1188,6 +1248,8 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         command = 'export MYSQL_PWD="${INSPECT_MYSQL_PASSWORD:-}"; ' + command
     if metric_id.startswith("local.rocketmq."):
         command = f"{_rocketmq_runtime_prefix(profile)}; {command}"
+    if metric_id.startswith("local.tomcat."):
+        command = f"{_tomcat_runtime_prefix(profile)}; {command}"
     if metric_id.startswith("local.redis."):
         if metric_id == "local.redis.core_ports.health":
             command = command.replace(
