@@ -2659,6 +2659,14 @@ def _metric_bundle_module(metric_id: str) -> str:
         ("local.nginx.", "nginx"),
         ("local.keepalived.", "keepalived"),
         ("local.elasticsearch.", "elasticsearch"),
+        ("local.kafka.", "kafka"),
+        ("local.zookeeper.", "zookeeper"),
+        ("local.mysql.", "mysql"),
+        ("local.nacos.", "nacos"),
+        ("local.rabbitmq.", "rabbitmq"),
+        ("local.redis.", "redis"),
+        ("local.rocketmq.", "rocketmq"),
+        ("local.tomcat.", "tomcat"),
     ):
         if metric_id.startswith(prefix):
             return module_id
