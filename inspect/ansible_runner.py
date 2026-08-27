@@ -1085,6 +1085,10 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             )
         elif metric_id == "local.redis.sentinel.health":
             command = command.replace(
+                "NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR ",
+                "NOAUTH|WRONGPASS|connection refused|Could not connect|(^|[[:space:]])timeout([[:space:]]|$)|(^|[[:space:]])ERR[[:space:]]",
+            )
+            command = command.replace(
                 "if [ \"$redis_mode\" != sentinel ]; then printf 'REDIS_SENTINEL_OK=true\\n'; else",
                 "if [ \"$redis_mode\" != sentinel ]; then printf 'INSPECT_METRIC_NOT_APPLICABLE=local.redis.sentinel.health\\n'; else",
             ).replace(
