@@ -631,7 +631,7 @@ _ADDITIONAL_COMMANDS = {
     "local.rocketmq.system.parameters": "pid=$(pgrep -f 'NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker' | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$pid/limits\"); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; case \"$nofile\" in ''|*[!0-9]*) printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_NOFILE=%s\\n' \"$nofile\";; esac; fi",
     "local.rocketmq.systemd.unit": "units=$(systemctl cat rocketmq-namesrv rocketmq-broker 2>&1); if printf '%s\\n' \"$units\" | grep -Eq 'ExecStart=.*(mqnamesrv|mqbroker)|User=|Restart='; then printf 'ROCKETMQ_SYSTEMD_OK=true\\n'; else printf 'ROCKETMQ_SYSTEMD_OK=false\\n'; fi",
     "local.rocketmq.log.data.retention": "if [ -d \"$rocketmq_log_dir\" ]; then old=$(find \"$rocketmq_log_dir\" -type f -mtime +\"$rocketmq_old_log_days\" -print 2>/dev/null | wc -l); printf 'ROCKETMQ_OLD_FILES=%s\\n' \"$old\"; else printf 'ROCKETMQ_RETENTION_UNAVAILABLE=true\\n'; fi",
-    "local.tomcat.service.health": "if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && pgrep -fa 'org\\.[a]pache\\.catalina\\.startup\\.Bootstrap' >/dev/null 2>&1; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
+    "local.tomcat.service.health": "if pgrep -fa 'org\\.[a]pache\\.catalina\\.startup\\.Bootstrap' >/dev/null 2>&1; then printf 'TOMCAT_PROCESS_PRESENT=true\\n'; else printf 'TOMCAT_PROCESS_PRESENT=false\\n'; fi; if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && pgrep -fa 'org\\.[a]pache\\.catalina\\.startup\\.Bootstrap' >/dev/null 2>&1; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
     "local.tomcat.http.health": "ports=0; for p in \"$tomcat_port\" \"$tomcat_shutdown_port\"; do n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$p\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); done; if [ \"$tomcat_https_enabled\" = true ]; then n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$tomcat_https_port\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); fi; printf 'TOMCAT_LISTENING_PORTS=%s\\n' \"$ports\"",
     "local.tomcat.http.reachability": "status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 \"http://127.0.0.1:$tomcat_port/\" 2>/dev/null); case \"$status\" in 2??|3??|4??) printf 'TOMCAT_HTTP_OK=true\\n';; *) printf 'TOMCAT_HTTP_OK=false\\n';; esac",
     "local.tomcat.access_log.errors": "if [ -r \"$tomcat_log_dir/catalina.out\" ]; then hits=$(tail -200 \"$tomcat_log_dir/catalina.out\" | grep -Eic 'SEVERE|Exception|OutOfMemoryError|Address already in use'); printf 'TOMCAT_STARTUP_ERROR_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_STARTUP_FACT_UNAVAILABLE=true\\n'; fi",
@@ -3172,6 +3172,10 @@ def select_middleware_metrics(
         match = re.search(r"INSPECT_MIDDLEWARE_NOT_RUNNING=([a-z0-9_]+)", stdout)
         if match:
             stopped_modules.add(match.group(1))
+        if metric_id == "local.tomcat.service.health" and re.search(
+            r"TOMCAT_PROCESS_PRESENT=false", stdout, re.IGNORECASE
+        ):
+            stopped_modules.add("tomcat")
         match = re.search(
             r"INSPECT_METRIC_NOT_APPLICABLE=([a-z0-9_.]+)", stdout
         )
