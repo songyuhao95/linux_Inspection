@@ -1102,6 +1102,7 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "tomcat_bin": ["/opt/tomcat/bin"],
     "tomcat_log": ["/opt/tomcat/logs"],
     "tomcat_port": ["8080"],
+    "tomcat_address": ["192.168.0.101"],
     "tomcat_https_port": ["8443"],
     "tomcat_shutdown_port": ["8005"],
     "tomcat_https_enabled": ["false"],

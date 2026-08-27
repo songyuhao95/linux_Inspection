@@ -636,7 +636,7 @@ _ADDITIONAL_COMMANDS = {
     # matching the inspection command itself on hosts without Tomcat.
     "local.tomcat.service.health": "tomcat_pattern='org'; tomcat_pattern=\"${tomcat_pattern}.apache\"; tomcat_pattern=\"${tomcat_pattern}.catalina\"; tomcat_pattern=\"${tomcat_pattern}.startup\"; tomcat_pattern=\"${tomcat_pattern}.Bootstrap\"; if pgrep -fa \"$tomcat_pattern\" >/dev/null 2>&1; then printf 'TOMCAT_PROCESS_PRESENT=true\\n'; else printf 'TOMCAT_PROCESS_PRESENT=false\\n'; fi; if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && pgrep -fa \"$tomcat_pattern\" >/dev/null 2>&1; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
     "local.tomcat.http.health": "ports=0; for p in \"$tomcat_port\" \"$tomcat_shutdown_port\"; do n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$p\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); done; if [ \"$tomcat_https_enabled\" = true ]; then n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$tomcat_https_port\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); fi; printf 'TOMCAT_LISTENING_PORTS=%s\\n' \"$ports\"",
-    "local.tomcat.http.reachability": "status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 \"http://127.0.0.1:$tomcat_port/\" 2>/dev/null); case \"$status\" in 2??|3??|4??) printf 'TOMCAT_HTTP_OK=true\\n';; *) printf 'TOMCAT_HTTP_OK=false\\n';; esac",
+    "local.tomcat.http.reachability": "status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 \"http://$tomcat_address:$tomcat_port/\" 2>/dev/null); case \"$status\" in 2??|3??|4??) printf 'TOMCAT_HTTP_OK=true\\n';; *) printf 'TOMCAT_HTTP_OK=false\\n';; esac",
     "local.tomcat.access_log.errors": "if [ -r \"$tomcat_log_dir/catalina.out\" ]; then hits=$(tail -200 \"$tomcat_log_dir/catalina.out\" | grep -Eic 'SEVERE|Exception|OutOfMemoryError|Address already in use'); printf 'TOMCAT_STARTUP_ERROR_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_STARTUP_FACT_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.error_log.key_evidence": "if [ -d \"$tomcat_log_dir\" ]; then hits=0; for file in $(find \"$tomcat_log_dir\" -type f -mtime -1 \\( -name '*.log' -o -name 'catalina.out' \\) -print 2>/dev/null); do n=$(grep -HniE 'SEVERE|ERROR|Exception|OutOfMemoryError|StackOverflowError' \"$file\" 2>/dev/null | tail -50 | wc -l); hits=$((hits+n)); done; if [ \"$hits\" -gt 50 ] 2>/dev/null; then hits=50; fi; printf 'TOMCAT_ERROR_LOG_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_ERROR_LOG_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.jvm.memory": "pid=$(pgrep -f \"$tomcat_process_pattern\" | head -1); rss=$(ps -o rss= -p \"$pid\" 2>/dev/null | awk '{print $1}'); case \"$rss\" in ''|*[!0-9]*) printf 'TOMCAT_JVM_MEMORY_UNAVAILABLE=true\\n';; *) mb=$(awk -v r=\"$rss\" 'BEGIN {printf \"%.2f\", r/1024}'); printf 'TOMCAT_RSS_MB=%s\\n' \"$mb\";; esac",
@@ -957,6 +957,7 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "tomcat_java_home": "/opt/jre1.8.0_421",
     "tomcat_user": "tomcat",
     "tomcat_port": "8080",
+    "tomcat_address": "192.168.0.101",
     "tomcat_https_port": "8443",
     "tomcat_shutdown_port": "8005",
     "tomcat_https_enabled": "false",
@@ -1221,6 +1222,7 @@ def _tomcat_runtime_prefix(profile: Dict[str, Any]) -> str:
         f"tomcat_port={shlex.quote(_additional_profile_value(profile, 'tomcat_port'))}; "
         f"tomcat_https_port={shlex.quote(_additional_profile_value(profile, 'tomcat_https_port'))}; "
         f"tomcat_shutdown_port={shlex.quote(_additional_profile_value(profile, 'tomcat_shutdown_port'))}; "
+        f"tomcat_address={shlex.quote(_additional_profile_value(profile, 'tomcat_address'))}; "
         f"tomcat_https_enabled={shlex.quote(_additional_profile_value(profile, 'tomcat_https_enabled'))}; "
         # Keep the complete Bootstrap class out of the generated shell
         # command.  The Tomcat process gate runs inside a bundle that also
