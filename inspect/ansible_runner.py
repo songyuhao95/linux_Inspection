@@ -639,8 +639,8 @@ _ADDITIONAL_COMMANDS = {
     "local.tomcat.http.reachability": "status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 \"http://127.0.0.1:$tomcat_port/\" 2>/dev/null); case \"$status\" in 2??|3??|4??) printf 'TOMCAT_HTTP_OK=true\\n';; *) printf 'TOMCAT_HTTP_OK=false\\n';; esac",
     "local.tomcat.access_log.errors": "if [ -r \"$tomcat_log_dir/catalina.out\" ]; then hits=$(tail -200 \"$tomcat_log_dir/catalina.out\" | grep -Eic 'SEVERE|Exception|OutOfMemoryError|Address already in use'); printf 'TOMCAT_STARTUP_ERROR_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_STARTUP_FACT_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.error_log.key_evidence": "if [ -d \"$tomcat_log_dir\" ]; then hits=0; for file in $(find \"$tomcat_log_dir\" -type f -mtime -1 \\( -name '*.log' -o -name 'catalina.out' \\) -print 2>/dev/null); do n=$(grep -HniE 'SEVERE|ERROR|Exception|OutOfMemoryError|StackOverflowError' \"$file\" 2>/dev/null | tail -50 | wc -l); hits=$((hits+n)); done; if [ \"$hits\" -gt 50 ] 2>/dev/null; then hits=50; fi; printf 'TOMCAT_ERROR_LOG_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_ERROR_LOG_UNAVAILABLE=true\\n'; fi",
-    "local.tomcat.jvm.memory": "pid=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); rss=$(ps -o rss= -p \"$pid\" 2>/dev/null | awk '{print $1}'); case \"$rss\" in ''|*[!0-9]*) printf 'TOMCAT_JVM_MEMORY_UNAVAILABLE=true\\n';; *) mb=$(awk -v r=\"$rss\" 'BEGIN {printf \"%.2f\", r/1024}'); printf 'TOMCAT_RSS_MB=%s\\n' \"$mb\";; esac",
-    "local.tomcat.thread_pool.pressure": "pid=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'TOMCAT_THREAD_FACT_UNAVAILABLE=true\\n'; else fd=$(ls /proc/$pid/fd 2>/dev/null | wc -l); threads=$(ls /proc/$pid/task 2>/dev/null | wc -l); printf 'TOMCAT_FD_COUNT=%s\\n' \"$fd\"; printf 'TOMCAT_THREAD_COUNT=%s\\n' \"$threads\"; fi",
+    "local.tomcat.jvm.memory": "pid=$(pgrep -f \"$tomcat_process_pattern\" | head -1); rss=$(ps -o rss= -p \"$pid\" 2>/dev/null | awk '{print $1}'); case \"$rss\" in ''|*[!0-9]*) printf 'TOMCAT_JVM_MEMORY_UNAVAILABLE=true\\n';; *) mb=$(awk -v r=\"$rss\" 'BEGIN {printf \"%.2f\", r/1024}'); printf 'TOMCAT_RSS_MB=%s\\n' \"$mb\";; esac",
+    "local.tomcat.thread_pool.pressure": "pid=$(pgrep -f \"$tomcat_process_pattern\" | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'TOMCAT_THREAD_FACT_UNAVAILABLE=true\\n'; else fd=$(ls /proc/$pid/fd 2>/dev/null | wc -l); threads=$(ls /proc/$pid/task 2>/dev/null | wc -l); printf 'TOMCAT_FD_COUNT=%s\\n' \"$fd\"; printf 'TOMCAT_THREAD_COUNT=%s\\n' \"$threads\"; fi",
     "local.tomcat.security.baseline": "if [ ! -r \"$tomcat_conf_file\" ]; then printf 'TOMCAT_CONFIG_FACT_UNAVAILABLE=true\\n'; elif grep -Eqi 'autoDeploy[[:space:]]*=[[:space:]]*\"?true|deployOnStartup[[:space:]]*=[[:space:]]*\"?true' \"$tomcat_conf_file\"; then printf 'TOMCAT_CONFIG_OK=false\\n'; else printf 'TOMCAT_CONFIG_OK=true\\n'; fi",
     "local.tomcat.default_apps": "if [ -d \"$tomcat_webapps_dir\" ]; then count=$(find \"$tomcat_webapps_dir\" -maxdepth 1 -type d \\( -name docs -o -name examples -o -name manager -o -name host-manager \\) -print | wc -l); printf 'TOMCAT_DEFAULT_APP_COUNT=%s\\n' \"$count\"; else printf 'TOMCAT_DEFAULT_APP_FACT_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.java.environment": "if [ -x \"$tomcat_java_home/bin/java\" ] && \"$tomcat_java_home/bin/java\" -version 1>/dev/null 2>&1; then printf 'TOMCAT_JAVA_OK=true\\n'; else printf 'TOMCAT_JAVA_OK=false\\n'; fi",
@@ -1219,6 +1219,15 @@ def _tomcat_runtime_prefix(profile: Dict[str, Any]) -> str:
         f"tomcat_https_port={shlex.quote(_additional_profile_value(profile, 'tomcat_https_port'))}; "
         f"tomcat_shutdown_port={shlex.quote(_additional_profile_value(profile, 'tomcat_shutdown_port'))}; "
         f"tomcat_https_enabled={shlex.quote(_additional_profile_value(profile, 'tomcat_https_enabled'))}; "
+        # Keep the complete Bootstrap class out of the generated shell
+        # command.  The Tomcat process gate runs inside a bundle that also
+        # contains all collectors, so a literal pattern in any collector
+        # would make the outer inspection shell match itself.
+        "tomcat_process_pattern='org'; "
+        "tomcat_process_pattern=\"${tomcat_process_pattern}.apache\"; "
+        "tomcat_process_pattern=\"${tomcat_process_pattern}.catalina\"; "
+        "tomcat_process_pattern=\"${tomcat_process_pattern}.startup\"; "
+        "tomcat_process_pattern=\"${tomcat_process_pattern}.Bootstrap\"; "
         "tomcat_conf_file=\"$tomcat_conf_dir/server.xml\""
     )
 
@@ -1394,14 +1403,14 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         _additional_profile_value(profile, config_key)
         if module_id == "tomcat":
             pattern_setup = (
-                "tomcat_pattern='org'; "
-                "tomcat_pattern=\"${tomcat_pattern}.apache\"; "
-                "tomcat_pattern=\"${tomcat_pattern}.catalina\"; "
-                "tomcat_pattern=\"${tomcat_pattern}.startup\"; "
-                "tomcat_pattern=\"${tomcat_pattern}.Bootstrap\""
+                "tomcat_process_pattern='org'; "
+                "tomcat_process_pattern=\"${tomcat_process_pattern}.apache\"; "
+                "tomcat_process_pattern=\"${tomcat_process_pattern}.catalina\"; "
+                "tomcat_process_pattern=\"${tomcat_process_pattern}.startup\"; "
+                "tomcat_process_pattern=\"${tomcat_process_pattern}.Bootstrap\""
             )
             gate = (
-                f"{pattern_setup}; if ! pgrep -fa \"$tomcat_pattern\" "
+                f"{pattern_setup}; if ! pgrep -fa \"$tomcat_process_pattern\" "
                 ">/dev/null 2>&1; then printf '%s\\n' "
                 f"INSPECT_MIDDLEWARE_NOT_RUNNING={module_id}; exit 0; fi"
             )
