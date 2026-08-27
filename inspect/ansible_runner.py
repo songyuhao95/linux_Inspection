@@ -938,6 +938,7 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
     host = shlex.quote(_additional_profile_value(profile, "redis_host"))
     port = shlex.quote(_additional_profile_value(profile, "redis_port"))
     replica_port = shlex.quote(_additional_profile_value(profile, "redis_replica_port"))
+    sentinel_port = shlex.quote(_additional_profile_value(profile, "redis_sentinel_port"))
     cluster_port = shlex.quote(_additional_profile_value(profile, "redis_cluster_port"))
     expected_version = shlex.quote(_additional_profile_value(profile, "redis_version"))
     expected_masters = shlex.quote(_additional_profile_value(profile, "redis_expected_masters"))
@@ -953,7 +954,8 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
         "redis_conf_dir=\"${redis_conf_path%/*}\"; redis_conf_glob=\"$redis_conf_path\"; fi; "
         "redis_cli=\"${redis_bin%/*}/redis-cli\"; "
         f"redis_mode={mode}; redis_host={host}; redis_port={port}; "
-        f"redis_replica_port={replica_port}; redis_cluster_port={cluster_port}; "
+        f"redis_replica_port={replica_port}; redis_sentinel_port={sentinel_port}; "
+        f"redis_cluster_port={cluster_port}; "
         f"redis_expected_version={expected_version}; "
         f"redis_expected_masters={expected_masters}; redis_expected_replicas={expected_replicas}; "
         f"redis_expected_sentinels={expected_sentinels}; "
