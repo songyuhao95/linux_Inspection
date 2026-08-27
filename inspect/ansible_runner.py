@@ -631,7 +631,10 @@ _ADDITIONAL_COMMANDS = {
     "local.rocketmq.system.parameters": "pid=$(pgrep -f 'NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker' | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$pid/limits\"); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; case \"$nofile\" in ''|*[!0-9]*) printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_NOFILE=%s\\n' \"$nofile\";; esac; fi",
     "local.rocketmq.systemd.unit": "units=$(systemctl cat rocketmq-namesrv rocketmq-broker 2>&1); if printf '%s\\n' \"$units\" | grep -Eq 'ExecStart=.*(mqnamesrv|mqbroker)|User=|Restart='; then printf 'ROCKETMQ_SYSTEMD_OK=true\\n'; else printf 'ROCKETMQ_SYSTEMD_OK=false\\n'; fi",
     "local.rocketmq.log.data.retention": "if [ -d \"$rocketmq_log_dir\" ]; then old=$(find \"$rocketmq_log_dir\" -type f -mtime +\"$rocketmq_old_log_days\" -print 2>/dev/null | wc -l); printf 'ROCKETMQ_OLD_FILES=%s\\n' \"$old\"; else printf 'ROCKETMQ_RETENTION_UNAVAILABLE=true\\n'; fi",
-    "local.tomcat.service.health": "if pgrep -fa 'org\\.[a]pache\\.catalina\\.startup\\.Bootstrap' >/dev/null 2>&1; then printf 'TOMCAT_PROCESS_PRESENT=true\\n'; else printf 'TOMCAT_PROCESS_PRESENT=false\\n'; fi; if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && pgrep -fa 'org\\.[a]pache\\.catalina\\.startup\\.Bootstrap' >/dev/null 2>&1; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
+    # Build the pgrep expression from fragments.  Keeping the complete
+    # Bootstrap class out of the shell command line prevents pgrep from
+    # matching the inspection command itself on hosts without Tomcat.
+    "local.tomcat.service.health": "tomcat_pattern='org'; tomcat_pattern=\"${tomcat_pattern}.apache\"; tomcat_pattern=\"${tomcat_pattern}.catalina\"; tomcat_pattern=\"${tomcat_pattern}.startup\"; tomcat_pattern=\"${tomcat_pattern}.Bootstrap\"; if pgrep -fa \"$tomcat_pattern\" >/dev/null 2>&1; then printf 'TOMCAT_PROCESS_PRESENT=true\\n'; else printf 'TOMCAT_PROCESS_PRESENT=false\\n'; fi; if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && pgrep -fa \"$tomcat_pattern\" >/dev/null 2>&1; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
     "local.tomcat.http.health": "ports=0; for p in \"$tomcat_port\" \"$tomcat_shutdown_port\"; do n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$p\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); done; if [ \"$tomcat_https_enabled\" = true ]; then n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$tomcat_https_port\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); fi; printf 'TOMCAT_LISTENING_PORTS=%s\\n' \"$ports\"",
     "local.tomcat.http.reachability": "status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 \"http://127.0.0.1:$tomcat_port/\" 2>/dev/null); case \"$status\" in 2??|3??|4??) printf 'TOMCAT_HTTP_OK=true\\n';; *) printf 'TOMCAT_HTTP_OK=false\\n';; esac",
     "local.tomcat.access_log.errors": "if [ -r \"$tomcat_log_dir/catalina.out\" ]; then hits=$(tail -200 \"$tomcat_log_dir/catalina.out\" | grep -Eic 'SEVERE|Exception|OutOfMemoryError|Address already in use'); printf 'TOMCAT_STARTUP_ERROR_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_STARTUP_FACT_UNAVAILABLE=true\\n'; fi",
@@ -1378,6 +1381,8 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             "rabbitmq": (r"beam\.smp|rabbitmq-server", "rabbitmq_conf"),
             "redis": (r"redis-server", "redis_conf"),
             "rocketmq": (r"[N]amesrvStartup|[B]rokerStartup|[m]qnamesrv|[m]qbroker", "rocketmq_conf"),
+            # See the service collector above: the complete process pattern
+            # must not occur literally in the pgrep command line.
             "tomcat": (r"org\.[a]pache\.catalina\.startup\.Bootstrap", "tomcat_conf"),
             "zookeeper": (r"QuorumPeerMain|org\.apache\.zookeeper\.server\.quorum\.QuorumPeerMain", "zookeeper_conf"),
         }
@@ -1387,10 +1392,24 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         # Java/native service managers commonly keep the config in an
         # environment or unit file rather than argv.
         _additional_profile_value(profile, config_key)
-        gate = (
-            f"if ! pgrep -fa '{pattern}' >/dev/null 2>&1; then printf '%s\\n' "
-            f"INSPECT_MIDDLEWARE_NOT_RUNNING={module_id}; exit 0; fi"
-        )
+        if module_id == "tomcat":
+            pattern_setup = (
+                "tomcat_pattern='org'; "
+                "tomcat_pattern=\"${tomcat_pattern}.apache\"; "
+                "tomcat_pattern=\"${tomcat_pattern}.catalina\"; "
+                "tomcat_pattern=\"${tomcat_pattern}.startup\"; "
+                "tomcat_pattern=\"${tomcat_pattern}.Bootstrap\""
+            )
+            gate = (
+                f"{pattern_setup}; if ! pgrep -fa \"$tomcat_pattern\" "
+                ">/dev/null 2>&1; then printf '%s\\n' "
+                f"INSPECT_MIDDLEWARE_NOT_RUNNING={module_id}; exit 0; fi"
+            )
+        else:
+            gate = (
+                f"if ! pgrep -fa '{pattern}' >/dev/null 2>&1; then printf '%s\\n' "
+                f"INSPECT_MIDDLEWARE_NOT_RUNNING={module_id}; exit 0; fi"
+            )
         command = f"{gate}; {command}"
     return command
 
