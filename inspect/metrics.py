@@ -1,4 +1,4 @@
-"""10 个共同 P0 指标注册表（linux-common-p0-v1，T-101）。
+"""12 个共同 P0 指标注册表（linux-common-p0-v1，T-101）。
 
 每条指标定义锚定 docs/specs/local-metrics-requirements.md §5（字段与来源锚点）
 与 docs/specs/technical-design.md §5.2（采集命令、超时、解析器约定）。
@@ -117,7 +117,7 @@ METRICS = [
     },
     {
         "metric_id": "local.cpu.load_1m",
-        "name": "系统负载",
+        "name": "1分钟系统负载",
         "command": "cat /proc/loadavg；nproc（或 /proc/cpuinfo 核数）",
         "timeout_sec": 10,
         "parser": "parse_cpu_load_1m",
@@ -127,12 +127,47 @@ METRICS = [
             "（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8）；"
             + _MANUAL_SHA
         ),
-        "threshold_layer": "文档基线 + 缺失边界 → 默认 UNKNOWN，外部配置可覆盖",
+        "threshold_layer": "文档基线 + 外部配置覆盖",
         "threshold_rule_ids": [f"{_RULE_PREFIX}:local.cpu.load_1m"],
-        "conflicts": ["C5（持续>核数的告警等级缺失）"],
-        "doc_baseline": "load_1m ≤ 核数 → OK；持续 > 核数 → 等级缺失 → UNKNOWN"
-                        "（建议外部配置：如持续 > 核数 → WARN）",
-        "unknown_conditions": "核数无法获取、/proc 不可读、持续性确认采样不足 → UNKNOWN",
+        "conflicts": [],
+        "doc_baseline": "load_1m < 核数 → OK；load_1m = 核数 → WARN；load_1m > 核数 → CRIT",
+        "unknown_conditions": "核数无法获取、/proc 不可读 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.cpu.load_5m",
+        "name": "5分钟系统负载",
+        "command": "cat /proc/loadavg；nproc（或 /proc/cpuinfo 核数）",
+        "timeout_sec": 10,
+        "parser": "parse_cpu_load_1m",
+        "unit": "5分钟系统负载（数值）",
+        "source_anchor": (
+            "9 份巡检手册 P0 CPU 行正常标准“load_5m 与 CPU 核数比较”"
+            "（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线 + 外部配置覆盖",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.cpu.load_5m"],
+        "conflicts": [],
+        "doc_baseline": "load_5m < 核数 → OK；load_5m = 核数 → WARN；load_5m > 核数 → CRIT",
+        "unknown_conditions": "核数无法获取、/proc 不可读 → UNKNOWN",
+    },
+    {
+        "metric_id": "local.cpu.load_15m",
+        "name": "15分钟系统负载",
+        "command": "cat /proc/loadavg；nproc（或 /proc/cpuinfo 核数）",
+        "timeout_sec": 10,
+        "parser": "parse_cpu_load_1m",
+        "unit": "15分钟系统负载（数值）",
+        "source_anchor": (
+            "9 份巡检手册 P0 CPU 行正常标准“load_15m 与 CPU 核数比较”"
+            "（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8）；"
+            + _MANUAL_SHA
+        ),
+        "threshold_layer": "文档基线 + 外部配置覆盖",
+        "threshold_rule_ids": [f"{_RULE_PREFIX}:local.cpu.load_15m"],
+        "conflicts": [],
+        "doc_baseline": "load_15m < 核数 → OK；load_15m = 核数 → WARN；load_15m > 核数 → CRIT",
+        "unknown_conditions": "核数无法获取、/proc 不可读 → UNKNOWN",
     },
     {
         "metric_id": "local.memory.available_percent",

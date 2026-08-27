@@ -51,13 +51,29 @@ metrics:
       CRIT: { rule: ">90% 且伴随业务证据", rule_id: "linux-common-p0-v1.cpu.utilization.crit", reason: null, note: null }
       UNKNOWN: { rule: null, rule_id: null, reason: none, note: "Nginx/Tomcat 差异 C2" }
   local.cpu.load_1m:
-    name: 系统负载
-    source_anchor: "9 份巡检手册 P0 CPU 行正常标准“load_1m 不持续高于 CPU 核数”（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
+    name: 1分钟系统负载
+    source_anchor: "9 份巡检手册 P0 CPU 行正常标准“load_1m 与 CPU 核数比较”（ES T5R3、Kafka T5R7、Nacos T5R7、Rabbitmq T5R8、Redis T5R9、Rocketmq T5R8）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"
     boundaries:
-      OK: { rule: "≤核数", rule_id: "linux-common-p0-v1.cpu.load_1m.ok", reason: null, note: null }
-      WARN: { rule: null, rule_id: null, reason: missing, note: "MR §6：（文档未定义）" }
-      CRIT: { rule: null, rule_id: null, reason: missing, note: "MR §6：（文档未定义）" }
-      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "持续>核数 → 缺失 → UNKNOWN" }
+      OK: { rule: "<核数", rule_id: "linux-common-p0-v1.cpu.load_1m.ok", reason: null, note: null }
+      WARN: { rule: "=核数", rule_id: "linux-common-p0-v1.cpu.load_1m.warn", reason: null, note: null }
+      CRIT: { rule: ">核数", rule_id: "linux-common-p0-v1.cpu.load_1m.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "核数无法获取或负载输出解析失败 → UNKNOWN" }
+  local.cpu.load_5m:
+    name: 5分钟系统负载
+    source_anchor: "9 份巡检手册 P0 CPU 行 load_5m 指标；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Nacos=43cad170, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c"
+    boundaries:
+      OK: { rule: "<核数", rule_id: "linux-common-p0-v1.cpu.load_5m.ok", reason: null, note: null }
+      WARN: { rule: "=核数", rule_id: "linux-common-p0-v1.cpu.load_5m.warn", reason: null, note: null }
+      CRIT: { rule: ">核数", rule_id: "linux-common-p0-v1.cpu.load_5m.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "核数无法获取或负载输出解析失败 → UNKNOWN" }
+  local.cpu.load_15m:
+    name: 15分钟系统负载
+    source_anchor: "9 份巡检手册 P0 CPU 行 load_15m 指标；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Nacos=43cad170, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c"
+    boundaries:
+      OK: { rule: "<核数", rule_id: "linux-common-p0-v1.cpu.load_15m.ok", reason: null, note: null }
+      WARN: { rule: "=核数", rule_id: "linux-common-p0-v1.cpu.load_15m.warn", reason: null, note: null }
+      CRIT: { rule: ">核数", rule_id: "linux-common-p0-v1.cpu.load_15m.crit", reason: null, note: null }
+      UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "核数无法获取或负载输出解析失败 → UNKNOWN" }
   local.memory.available_percent:
     name: 可用内存百分比
     source_anchor: "9 份巡检手册 P0 内存行（ES T5R4、Kafka T5R8、Mysql T5R8、Nacos T5R8、Rabbitmq T5R9、Rocketmq T5R9、Nginx T5R9、Tomcat T5R7、Redis T5R7）；巡检手册 sha256[:8]: ES=bb8ff97e, Kafka=0772f967, Mysql=67ae309b, Nacos=43cad170, Nginx=72b0834d, Rabbitmq=a6e0861f, Redis=e5cf1a4d, Rocketmq=9d70e22c, Tomcat=49aa5707"

@@ -10,6 +10,8 @@ from .registry import MonitorModule
 BASIC_METRIC_IDS = (
     "local.cpu.utilization",
     "local.cpu.load_1m",
+    "local.cpu.load_5m",
+    "local.cpu.load_15m",
     "local.memory.available_percent",
     "local.swap.used_percent",
     "local.filesystem.used_percent",

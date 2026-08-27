@@ -318,6 +318,18 @@ _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "become": False,
         "anchor": "MR §5.4 CPU 行 + TD §5.2 local.cpu.load_1m",
     },
+    "local.cpu.load_5m": {
+        "command": "cat /proc/loadavg; nproc",
+        "profile_keys": (),
+        "become": False,
+        "anchor": "MR §5.4 CPU 行 + TD §5.2 local.cpu.load_5m",
+    },
+    "local.cpu.load_15m": {
+        "command": "cat /proc/loadavg; nproc",
+        "profile_keys": (),
+        "become": False,
+        "anchor": "MR §5.4 CPU 行 + TD §5.2 local.cpu.load_15m",
+    },
     "local.memory.available_percent": {
         "command": "free -m",
         "profile_keys": (),

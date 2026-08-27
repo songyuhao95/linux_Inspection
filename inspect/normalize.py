@@ -415,6 +415,13 @@ def parse_cpu_load_1m(output: str) -> Dict[str, Any]:
     }
 
 
+_CPU_LOAD_METRIC_KEYS = {
+    "local.cpu.load_1m": "load_1m",
+    "local.cpu.load_5m": "load_5m",
+    "local.cpu.load_15m": "load_15m",
+}
+
+
 # -- local.memory.available_percent ------------------------------------------
 
 
@@ -2425,17 +2432,38 @@ def _judge_cpu_utilization(
 def _judge_cpu_load_1m(
     parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """系统负载（MR §5.5 / TD §5.2）。
+    """1 分钟系统负载：低于核数 OK，等于核数 WARN，高于核数 CRIT。"""
+    return _judge_cpu_load_window(parsed, resolved, "load_1m")
 
-      - 核数不可得 → UNKNOWN（missing，判据不可用）；
-      - load_1m ≤ 核数 → OK；
-      - load_1m > 核数 → 告警等级缺失（C5）→ UNKNOWN（外部配置可覆盖）。
-    """
+
+def _judge_cpu_load_window(
+    parsed: Dict[str, Any],
+    resolved: Dict[str, Any],
+    load_key: str,
+) -> Dict[str, Any]:
+    """按指定时间窗口与 CPU 核数比较系统负载。"""
     if parsed["nproc"] is None:
         return _unknown_decision(resolved, extra_note="核数无法获取，判据不可用")
-    if parsed["load_1m"] <= parsed["nproc"]:
+    value = float(parsed[load_key])
+    if value < parsed["nproc"]:
         return {"status": STATUS_OK, "rule": _baseline_rule(resolved, STATUS_OK)}
-    return _unknown_decision(resolved)
+    if value == parsed["nproc"]:
+        return {"status": STATUS_WARN, "rule": _baseline_rule(resolved, STATUS_WARN)}
+    return {"status": STATUS_CRIT, "rule": _baseline_rule(resolved, STATUS_CRIT)}
+
+
+def _judge_cpu_load_5m(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """5 分钟系统负载：低于核数 OK，等于核数 WARN，高于核数 CRIT。"""
+    return _judge_cpu_load_window(parsed, resolved, "load_5m")
+
+
+def _judge_cpu_load_15m(
+    parsed: Dict[str, Any], resolved: Dict[str, Any], profile: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """15 分钟系统负载：低于核数 OK，等于核数 WARN，高于核数 CRIT。"""
+    return _judge_cpu_load_window(parsed, resolved, "load_15m")
 
 
 def _judge_memory_available_percent(
@@ -3054,6 +3082,8 @@ JUDGERS: Dict[str, Any] = {
     "local.port.listening": _judge_port_listening,
     "local.cpu.utilization": _judge_cpu_utilization,
     "local.cpu.load_1m": _judge_cpu_load_1m,
+    "local.cpu.load_5m": _judge_cpu_load_5m,
+    "local.cpu.load_15m": _judge_cpu_load_15m,
     "local.memory.available_percent": _judge_memory_available_percent,
     "local.swap.used_percent": _judge_swap_used_percent,
     "local.filesystem.used_percent": _judge_filesystem_used_percent,
@@ -3124,6 +3154,8 @@ NUMERIC_METRIC_IDS = frozenset(
     {
         "local.cpu.utilization",
         "local.cpu.load_1m",
+        "local.cpu.load_5m",
+        "local.cpu.load_15m",
         "local.memory.available_percent",
         "local.swap.used_percent",
         "local.filesystem.used_percent",
@@ -3199,8 +3231,8 @@ def _normalized_value(metric_id: str, parsed: Dict[str, Any]) -> Optional[float]
     """规范化数值（统一单位可比较；MR §5 各指标计算列；非数值 → None）。"""
     if metric_id == "local.cpu.utilization":
         return float(parsed["total"])
-    if metric_id == "local.cpu.load_1m":
-        return float(parsed["load_1m"])
+    if metric_id in _CPU_LOAD_METRIC_KEYS:
+        return float(parsed[_CPU_LOAD_METRIC_KEYS[metric_id]])
     if metric_id == "local.memory.available_percent":
         return float(parsed["pct"])
     if metric_id == "local.swap.used_percent":
@@ -3257,8 +3289,8 @@ def _raw_value(metric_id: str, parsed: Dict[str, Any]) -> Any:
         return ",".join(str(p) for p in parsed["ports"])
     if metric_id == "local.cpu.utilization":
         return str(parsed["total"])
-    if metric_id == "local.cpu.load_1m":
-        return str(parsed["load_1m"])
+    if metric_id in _CPU_LOAD_METRIC_KEYS:
+        return str(parsed[_CPU_LOAD_METRIC_KEYS[metric_id]])
     if metric_id == "local.memory.available_percent":
         return str(parsed["pct"])
     if metric_id == "local.swap.used_percent":
@@ -3376,30 +3408,6 @@ def _filesystem_detail_status(
     return str(JUDGERS[metric_id](detail_parsed, resolved, profile)["status"])
 
 
-def _cpu_load_detail_decision(
-    load: float,
-    parsed: Dict[str, Any],
-    resolved: Dict[str, Any],
-    profile: Optional[Dict[str, Any]] = None,
-) -> Dict[str, str]:
-    """为单个负载时间窗口生成状态和人类可读判定说明。
-
-    判定仍复用现有 1 分钟负载规则：负载不高于 CPU 核数为 OK；超过核数
-    的告警等级在文档中未定义，默认 UNKNOWN。渲染层只读取这里落盘的结果。
-    """
-    detail_parsed = dict(parsed)
-    detail_parsed["load_1m"] = float(load)
-    decision = _judge_cpu_load_1m(detail_parsed, resolved, profile)
-    status = str(decision["status"])
-    if parsed.get("nproc") is None:
-        judgement = "CPU 核数无法获取：无法判定"
-    elif float(load) <= int(parsed["nproc"]):
-        judgement = "负载 <= CPU 核数：正常"
-    else:
-        judgement = "负载 > CPU 核数：告警等级未定义，暂为 UNKNOWN"
-    return {"status": status, "judgement": judgement}
-
-
 def _evidence_details(
     metric_id: str,
     parsed: Dict[str, Any],
@@ -3408,24 +3416,9 @@ def _evidence_details(
 ) -> Optional[List[Dict[str, Any]]]:
     """返回可直接被报表消费的结构化证据明细。
 
-    文件系统指标保存挂载点级状态；系统负载指标保存 1/5/15 分钟窗口、
-    CPU 核数和对应判定。``normalized_value``/``raw_value`` 仍保持旧的
-    1 分钟负载兼容语义。
+    文件系统指标保存挂载点级状态；系统负载的 1/5/15 分钟窗口已经是
+    独立 metric，不再通过单个指标的 details 重复展开。
     """
-    if metric_id == "local.cpu.load_1m":
-        rows: List[Dict[str, Any]] = []
-        for window, key in (("1 分钟", "load_1m"), ("5 分钟", "load_5m"), ("15 分钟", "load_15m")):
-            decision = _cpu_load_detail_decision(parsed[key], parsed, resolved, profile)
-            rows.append(
-                {
-                    "window": window,
-                    "load": float(parsed[key]),
-                    "cpu_cores": parsed["nproc"],
-                    "status": decision["status"],
-                    "judgement": decision["judgement"],
-                }
-            )
-        return rows
     if metric_id not in {
         "local.filesystem.used_percent",
         "local.filesystem.inode_used_percent",
@@ -3462,12 +3455,10 @@ def _output_summary(metric_id: str, parsed: Dict[str, Any]) -> str:
             f"%Cpu(s): {parsed['us']} us, {parsed['sy']} sy"
             f"（us+sy={parsed['total']}）; top-rows={parsed['top_rows']}"
         )
-    if metric_id == "local.cpu.load_1m":
+    if metric_id in _CPU_LOAD_METRIC_KEYS:
+        load_key = _CPU_LOAD_METRIC_KEYS[metric_id]
         nproc = parsed["nproc"] if parsed["nproc"] is not None else "N/A"
-        return (
-            f"load_1m={parsed['load_1m']} load_5m={parsed['load_5m']} "
-            f"load_15m={parsed['load_15m']} nproc={nproc}"
-        )
+        return f"{load_key}={parsed[load_key]} nproc={nproc}"
     if metric_id == "local.memory.available_percent":
         return f"available={parsed['available']}MB total={parsed['total']}MB → {parsed['pct']}%"
     if metric_id == "local.swap.used_percent":

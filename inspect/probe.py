@@ -148,6 +148,8 @@ _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
     "local.port.listening": ("bash", "ss", "grep"),
     "local.cpu.utilization": ("bash", "top", "grep", "tail", "ps", "head"),
     "local.cpu.load_1m": ("bash", "cat", "nproc"),
+    "local.cpu.load_5m": ("bash", "cat", "nproc"),
+    "local.cpu.load_15m": ("bash", "cat", "nproc"),
     "local.memory.available_percent": ("bash", "free"),
     "local.swap.used_percent": ("bash", "free"),
     "local.filesystem.used_percent": ("bash", "df"),
