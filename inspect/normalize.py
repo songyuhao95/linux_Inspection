@@ -2074,32 +2074,82 @@ def parse_redis_log_data_retention(output):
 
 
 def parse_rocketmq_namesrv_health(output):
-    return _typed_bool(output, r"NamesrvStartup|mqnamesrv|start(?:ed|up)", negative=r"inactive|failed|error")
+    return _typed_bool(output, r"ROCKETMQ_NAMESRV_OK=true", negative=r"ROCKETMQ_NAMESRV_OK=false")
 
 
 def parse_rocketmq_broker_health(output):
-    return _typed_bool(output, r"BrokerStartup|mqbroker|start(?:ed|up)", negative=r"FATAL|\bERROR\b|failed")
+    return _typed_bool(output, r"ROCKETMQ_BROKER_OK=true", negative=r"ROCKETMQ_BROKER_OK=false")
+
+
+def _rocketmq_bool(output, positive: str, negative: str):
+    lines = _typed_middleware_lines(output)
+    if re.search(r"ROCKETMQ_[A-Z_]+_UNAVAILABLE=true", "\n".join(lines)):
+        raise ParseError("RocketMQ 命令或事实源不可用")
+    return _typed_bool(output, positive, negative=negative)
 
 
 def parse_rocketmq_core_ports_health(output):
-    return _typed_count(output, r":(?:9876|9877|10911|10912)\b.*LISTEN", summary="rocketmq_listening_ports={value}")
+    return _typed_number(output, r"ROCKETMQ_LISTENING_PORTS=(\d+)", cast=int, summary="rocketmq_listening_ports={value}")
 
 
 def parse_rocketmq_cluster_registration(output):
-    return _typed_bool(output, r"BrokerName|Master|clusterName", negative=r"broker.*missing|failed|error")
+    return _rocketmq_bool(output, r"ROCKETMQ_CLUSTER_OK=true", r"ROCKETMQ_CLUSTER_OK=false")
 
 
 def parse_rocketmq_controller_sync_set(output):
-    return _typed_bool(output, r"leader|SyncStateSet|controller", negative=r"no leader|failed|error")
+    return _typed_bool(output, r"ROCKETMQ_CONTROLLER_OK=true", negative=r"ROCKETMQ_CONTROLLER_OK=false")
 
 
 def parse_rocketmq_consumer_lag(output):
-    lines = _typed_middleware_lines(output)
-    values = [int(x) for x in re.findall(r"(?:diff|lag|behind)\s*[=:]?\s*([0-9]+)", "\n".join(lines), re.IGNORECASE)]
-    if not values:
-        raise ParseError("RocketMQ 消费堆积数值缺失")
-    value = max(values)
-    return {"value": value, "summary": f"rocketmq_consumer_lag={value}"}
+    return _typed_number(output, r"ROCKETMQ_CONSUMER_LAG=(\d+)", cast=int, summary="rocketmq_consumer_lag={value}")
+
+
+def parse_rocketmq_java_environment(output):
+    return _typed_bool(output, r"ROCKETMQ_JAVA_OK=true", negative=r"ROCKETMQ_JAVA_OK=false")
+
+
+def parse_rocketmq_jvm_memory(output):
+    return _typed_number(output, r"ROCKETMQ_JVM_MEMORY_USED_PERCENT=([0-9]+(?:\.[0-9]+)?)", cast=float, summary="rocketmq_memory_used_percent={value}")
+
+
+def parse_rocketmq_storage_health(output):
+    return _typed_bool(output, r"ROCKETMQ_STORAGE_OK=true", negative=r"ROCKETMQ_STORAGE_OK=false")
+
+
+def parse_rocketmq_error_log(output):
+    return _typed_number(output, r"ROCKETMQ_ERROR_LOG_HITS=(\d+)", cast=int, summary="rocketmq_error_log_hits={value}")
+
+
+def parse_rocketmq_config_baseline(output):
+    return _typed_bool(output, r"ROCKETMQ_CONFIG_OK=true", negative=r"ROCKETMQ_CONFIG_OK=false")
+
+
+def parse_rocketmq_topic_route(output):
+    return _rocketmq_bool(output, r"ROCKETMQ_TOPIC_OK=true", r"ROCKETMQ_TOPIC_OK=false")
+
+
+def parse_rocketmq_consumer_groups(output):
+    return _typed_bool(output, r"ROCKETMQ_GROUPS_OK=true", negative=r"ROCKETMQ_GROUPS_OK=false")
+
+
+def parse_rocketmq_broker_runtime(output):
+    return _typed_number(output, r"ROCKETMQ_BROKER_QUEUE_MAX=(\d+)", cast=int, summary="rocketmq_broker_queue_max={value}")
+
+
+def parse_rocketmq_jvm_gc(output):
+    return _typed_number(output, r"ROCKETMQ_JVM_GC_EVENTS=(\d+)", cast=int, summary="rocketmq_jvm_gc_events={value}")
+
+
+def parse_rocketmq_system_parameters(output):
+    return _typed_number(output, r"ROCKETMQ_NOFILE=(\d+)", cast=int, summary="rocketmq_nofile={value}")
+
+
+def parse_rocketmq_systemd_unit(output):
+    return _typed_bool(output, r"ROCKETMQ_SYSTEMD_OK=true", negative=r"ROCKETMQ_SYSTEMD_OK=false")
+
+
+def parse_rocketmq_log_data_retention(output):
+    return _typed_number(output, r"ROCKETMQ_OLD_FILES=(\d+)", cast=int, summary="rocketmq_old_files={value}")
 
 
 def parse_tomcat_service_health(output):
@@ -2935,6 +2985,12 @@ _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.rabbitmq.file_descriptor.limits": (65535, 32768),
     "local.rabbitmq.log.data.retention": (50, 100),
     "local.rocketmq.consumer.lag": (0, 100),
+    "local.rocketmq.jvm.memory": (80, 90),
+    "local.rocketmq.error_log": (0, 10),
+    "local.rocketmq.broker.runtime": (100, 1000),
+    "local.rocketmq.jvm.gc": (0, 10),
+    "local.rocketmq.system.parameters": (65535, 32768),
+    "local.rocketmq.log.data.retention": (50, 100),
     "local.tomcat.jvm.memory": (2048, 4096),
     "local.tomcat.thread_pool.pressure": (10000, 50000),
 }
@@ -2981,6 +3037,7 @@ def _judge_typed_middleware(parsed, resolved, profile=None):
                 "local.rabbitmq.cluster.nodes",
                 "local.rabbitmq.core_ports.health",
                 "local.rocketmq.core_ports.health",
+                "local.rocketmq.system.parameters",
                 "local.tomcat.http.health",
                 "local.zookeeper.ports.health",
             }:
@@ -3121,6 +3178,12 @@ NUMERIC_METRIC_IDS = frozenset(
         "local.rabbitmq.file_descriptor.limits",
         "local.rabbitmq.log.data.retention",
         "local.rocketmq.consumer.lag",
+        "local.rocketmq.jvm.memory",
+        "local.rocketmq.error_log",
+        "local.rocketmq.broker.runtime",
+        "local.rocketmq.jvm.gc",
+        "local.rocketmq.system.parameters",
+        "local.rocketmq.log.data.retention",
         "local.tomcat.jvm.memory",
         "local.tomcat.thread_pool.pressure",
     }

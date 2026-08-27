@@ -598,12 +598,27 @@ _ADDITIONAL_COMMANDS = {
     "local.redis.system.parameters": "nofile=$(su - <REDIS_USER> -c 'ulimit -n' 2>/dev/null); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; case \"$nofile\" in ''|*[!0-9]*) printf 'REDIS_SYSTEM_FACT_UNAVAILABLE=true\\n';; *) printf 'REDIS_NOFILE=%s\\n' \"$nofile\";; esac",
     "local.redis.service.unit": "unit=$(systemctl cat redis 2>/dev/null); if printf '%s\\n' \"$unit\" | grep -Eq 'User=redis|ExecStart=.*redis-server|Restart='; then printf 'REDIS_UNIT_OK=true\\n'; else printf 'REDIS_UNIT_OK=false\\n'; fi",
     "local.redis.log.data.retention": "if [ ! -d <REDIS_LOG> ] || [ ! -d <REDIS_DATA> ]; then printf 'REDIS_RETENTION_PATH_UNAVAILABLE=true\\n'; else old=$(find <REDIS_LOG> -type f -mtime +30 -print 2>/dev/null | wc -l); printf 'REDIS_OLD_FILES=%s\\n' \"$old\"; fi",
-    "local.rocketmq.namesrv.health": "test -d <ROCKETMQ_CONF>; pgrep -fa 'NamesrvStartup|mqnamesrv'; tail -n 50 <ROCKETMQ_LOG>/rocketmqlogs/namesrv.log 2>/dev/null; tail -n 50 <ROCKETMQ_HOME>/logs/rocketmqlogs/namesrv.log",
-    "local.rocketmq.broker.health": "test -d <ROCKETMQ_CONF>; pgrep -fa 'BrokerStartup|mqbroker'; tail -n 50 <ROCKETMQ_LOG>/rocketmqlogs/broker.log 2>/dev/null; tail -n 50 <ROCKETMQ_HOME>/logs/rocketmqlogs/broker.log",
-    "local.rocketmq.core_ports.health": "ss -tlnp | egrep ':9876|:9877|:10911|:10912'",
-    "local.rocketmq.cluster.registration": "<MQADMIN> clusterList -n <NAMESRV_ADDR>",
-    "local.rocketmq.controller.sync_set": "<MQADMIN> getControllerMetaData -a <CONTROLLER_ADDR>; <MQADMIN> getSyncStateSet -a <CONTROLLER_ADDR> -b <BROKER>",
-    "local.rocketmq.consumer.lag": "<MQADMIN> consumerProgress -n <NAMESRV_ADDR>; <MQADMIN> statsAll -n <NAMESRV_ADDR>",
+    # RocketMQ collectors emit only typed markers.  The original manual
+    # commands live in metrics.py for report provenance; these commands are
+    # the target-side, read-only implementations consumed by normalize.py.
+    "local.rocketmq.java.environment": "java_bin=\"$rocketmq_jdk_home/bin/java\"; javac_bin=\"$rocketmq_jdk_home/bin/javac\"; if [ ! -x \"$java_bin\" ]; then java_bin=java; fi; if [ ! -x \"$javac_bin\" ]; then javac_bin=javac; fi; if \"$java_bin\" -version 1>/dev/null 2>&1 && \"$javac_bin\" -version 1>/dev/null 2>&1 && [ -n \"$rocketmq_home_dir\" ]; then printf 'ROCKETMQ_JAVA_OK=true\\n'; else printf 'ROCKETMQ_JAVA_OK=false\\n'; fi",
+    "local.rocketmq.namesrv.health": "if pgrep -fa 'NamesrvStartup|mqnamesrv' 1>/dev/null 2>&1; then printf 'ROCKETMQ_NAMESRV_OK=true\\n'; else printf 'ROCKETMQ_NAMESRV_OK=false\\n'; fi",
+    "local.rocketmq.broker.health": "if pgrep -fa 'BrokerStartup|mqbroker' 1>/dev/null 2>&1; then printf 'ROCKETMQ_BROKER_OK=true\\n'; else printf 'ROCKETMQ_BROKER_OK=false\\n'; fi",
+    "local.rocketmq.core_ports.health": "expected=\"$rocketmq_namesrv_port|$rocketmq_controller_port|$rocketmq_broker_port|$rocketmq_broker_ha_port\"; if [ \"$rocketmq_mode\" != cluster ]; then expected=\"$rocketmq_namesrv_port|$rocketmq_broker_port|$rocketmq_broker_ha_port\"; fi; ports=$(ss -H -ltn 2>/dev/null | awk -v p=\"$expected\" '$4 ~ \"(:|\\\\.)\"p\"$\" {n=$4; sub(/^.*:/,\"\",n); print n}' | sort -u | wc -l); printf 'ROCKETMQ_LISTENING_PORTS=%s\\n' \"$ports\"",
+    "local.rocketmq.cluster.registration": "out=$(\"$rocketmq_mqadmin\" clusterList -n \"$rocketmq_namesrv_addr\" 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_CLUSTER_UNAVAILABLE=true\\n'; elif printf '%s\\n' \"$out\" | grep -Eqi 'BrokerName|brokerName|Master'; then printf 'ROCKETMQ_CLUSTER_OK=true\\n'; else printf 'ROCKETMQ_CLUSTER_OK=false\\n'; fi",
+    "local.rocketmq.controller.sync_set": "if [ \"$rocketmq_mode\" != cluster ]; then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; else meta=$(\"$rocketmq_mqadmin\" getControllerMetaData -a \"$rocketmq_controller_addr\" 2>&1); sync=$(\"$rocketmq_mqadmin\" getSyncStateSet -a \"$rocketmq_controller_addr\" -b \"$rocketmq_broker\" 2>&1); if printf '%s\\n%s\\n' \"$meta\" \"$sync\" | grep -Eqi 'leader|Controller|SyncStateSet'; then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; else printf 'ROCKETMQ_CONTROLLER_OK=false\\n'; fi; fi",
+    "local.rocketmq.consumer.lag": "out=$(\"$rocketmq_mqadmin\" consumerProgress -n \"$rocketmq_namesrv_addr\" 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_CONSUMER_UNAVAILABLE=true\\n'; else lag=$(printf '%s\\n' \"$out\" | awk 'BEGIN{m=0; found=0} /diff|Diff|lag|Lag/ {for(i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {v=$i+0; if(v>m)m=v; found=1}} END{if(found) print m; else print 0}'); case \"$lag\" in ''|*[!0-9]*) printf 'ROCKETMQ_CONSUMER_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_CONSUMER_LAG=%s\\n' \"$lag\";; esac; fi",
+    "local.rocketmq.jvm.memory": "used=$(free -b | awk '/^Mem:/ {if ($2>0) printf \"%.1f\", (($2-$7)/$2)*100}'); case \"$used\" in ''|*[!0-9.]* ) printf 'ROCKETMQ_JVM_MEMORY_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_JVM_MEMORY_USED_PERCENT=%s\\n' \"$used\";; esac",
+    "local.rocketmq.storage.health": "if [ -r \"$rocketmq_broker_conf\" ] && [ -r \"$rocketmq_namesrv_conf\" ] && [ -d \"$rocketmq_home_dir\" ] && [ -d \"$rocketmq_log_dir\" ]; then printf 'ROCKETMQ_STORAGE_OK=true\\n'; else printf 'ROCKETMQ_STORAGE_OK=false\\n'; fi",
+    "local.rocketmq.error_log": "if [ -d \"$rocketmq_log_dir\" ]; then hits=$(grep -R -iE 'ERROR|FATAL|OutOfMemory|Address already in use|BrokerStartup failed|NamesrvStartup failed' \"$rocketmq_log_dir\" 2>/dev/null | tail -100 | wc -l); printf 'ROCKETMQ_ERROR_LOG_HITS=%s\\n' \"$hits\"; else printf 'ROCKETMQ_ERROR_LOG_UNAVAILABLE=true\\n'; fi",
+    "local.rocketmq.config.baseline": "if [ -r \"$rocketmq_broker_conf\" ] && [ -r \"$rocketmq_namesrv_conf\" ] && grep -Eq '(^|[[:space:]])(brokerClusterName|brokerName|brokerId|namesrvAddr|listenPort|haListenPort|storePathRootDir|autoCreateTopicEnable)[=:]' \"$rocketmq_broker_conf\" && grep -Eq '(^|[[:space:]])(listenPort|kvConfigPath|configStorePath)[=:]' \"$rocketmq_namesrv_conf\"; then printf 'ROCKETMQ_CONFIG_OK=true\\n'; else printf 'ROCKETMQ_CONFIG_OK=false\\n'; fi",
+    "local.rocketmq.topic.route": "out=$(\"$rocketmq_mqadmin\" topicList -n \"$rocketmq_namesrv_addr\" 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_TOPIC_UNAVAILABLE=true\\n'; else printf 'ROCKETMQ_TOPIC_OK=true\\n'; fi",
+    "local.rocketmq.consumer.groups": "out=$(\"$rocketmq_mqadmin\" consumerProgress -n \"$rocketmq_namesrv_addr\" 2>&1); rc=$?; if [ \"$rc\" -eq 0 ]; then printf 'ROCKETMQ_GROUPS_OK=true\\n'; else printf 'ROCKETMQ_GROUPS_OK=false\\n'; fi",
+    "local.rocketmq.broker.runtime": "out=$(\"$rocketmq_mqadmin\" brokerStatus -n \"$rocketmq_namesrv_addr\" -b \"$rocketmq_broker\" 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_BROKER_RUNTIME_UNAVAILABLE=true\\n'; else value=$(printf '%s\\n' \"$out\" | awk -F= '/sendThreadPoolQueueSize|pullThreadPoolQueueSize/ {if ($2+0>m)m=$2+0} END{if(m!="")print m}'); case \"$value\" in ''|*[!0-9]*) printf 'ROCKETMQ_BROKER_RUNTIME_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_BROKER_QUEUE_MAX=%s\\n' \"$value\";; esac; fi",
+    "local.rocketmq.jvm.gc": "if [ -d \"$rocketmq_log_dir\" ]; then hits=$(grep -R -iE 'Full GC|OutOfMemory|GC overhead' \"$rocketmq_log_dir\" 2>/dev/null | wc -l); printf 'ROCKETMQ_JVM_GC_EVENTS=%s\\n' \"$hits\"; else printf 'ROCKETMQ_JVM_GC_UNAVAILABLE=true\\n'; fi",
+    "local.rocketmq.system.parameters": "pid=$(pgrep -f 'NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker' | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$pid/limits\"); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; case \"$nofile\" in ''|*[!0-9]*) printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_NOFILE=%s\\n' \"$nofile\";; esac; fi",
+    "local.rocketmq.systemd.unit": "units=$(systemctl cat rocketmq-namesrv rocketmq-broker 2>&1); if printf '%s\\n' \"$units\" | grep -Eq 'ExecStart=.*(mqnamesrv|mqbroker)|User=|Restart='; then printf 'ROCKETMQ_SYSTEMD_OK=true\\n'; else printf 'ROCKETMQ_SYSTEMD_OK=false\\n'; fi",
+    "local.rocketmq.log.data.retention": "if [ -d \"$rocketmq_log_dir\" ]; then old=$(find \"$rocketmq_log_dir\" -type f -mtime +\"$rocketmq_old_log_days\" -print 2>/dev/null | wc -l); printf 'ROCKETMQ_OLD_FILES=%s\\n' \"$old\"; else printf 'ROCKETMQ_RETENTION_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.service.health": "test -x <TOMCAT_BIN>; ps -ef | grep '[o]rg.apache.catalina.startup.Bootstrap'",
     "local.tomcat.http.health": "ss -lntp | egrep '(:8080|:8443|:8005)\\b'",
     "local.tomcat.access_log.errors": "tail -200 <TOMCAT_LOG>/catalina.out | egrep -i 'Server startup in|SEVERE|Exception|OutOfMemoryError|Address already in use'",
@@ -611,6 +626,27 @@ _ADDITIONAL_COMMANDS = {
     "local.tomcat.thread_pool.pressure": "PID=$(pgrep -f 'org.apache.catalina.startup.Bootstrap' | head -1); echo fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); echo threads=$(ls /proc/$PID/task 2>/dev/null | wc -l); cat /proc/$PID/limits 2>/dev/null | egrep 'Max open files|Max processes'",
     "local.tomcat.security.baseline": "egrep -n '(<Server port=|<Connector|autoDeploy=|deployOnStartup=|server=)' <TOMCAT_CONF>",
 }
+# Tighten the two collectors whose command result can otherwise look healthy
+# merely because an error message contains a RocketMQ keyword.
+_ADDITIONAL_COMMANDS["local.rocketmq.controller.sync_set"] = (
+    "if [ \"$rocketmq_mode\" != cluster ]; then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; "
+    "else meta=$(\"$rocketmq_mqadmin\" getControllerMetaData -a \"$rocketmq_controller_addr\" 2>&1); "
+    "meta_rc=$?; sync=$(\"$rocketmq_mqadmin\" getSyncStateSet -a \"$rocketmq_controller_addr\" "
+    "-b \"$rocketmq_broker\" 2>&1); sync_rc=$?; "
+    "if [ \"$meta_rc\" -eq 0 ] && [ \"$sync_rc\" -eq 0 ] && "
+    "printf '%s\\n%s\\n' \"$meta\" \"$sync\" | grep -Eqi 'leader|Controller|SyncStateSet'; "
+    "then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; else printf 'ROCKETMQ_CONTROLLER_OK=false\\n'; fi; fi"
+)
+_ADDITIONAL_COMMANDS["local.rocketmq.broker.runtime"] = (
+    "out=$(\"$rocketmq_mqadmin\" brokerStatus -n \"$rocketmq_namesrv_addr\" "
+    "-b \"$rocketmq_broker\" 2>&1); rc=$?; "
+    "if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_BROKER_RUNTIME_UNAVAILABLE=true\\n'; "
+    "else value=$(printf '%s\\n' \"$out\" | awk -F '[=:]' "
+    "'/sendThreadPoolQueueSize|pullThreadPoolQueueSize/ {if ($2+0>m)m=$2+0} "
+    "END{if(m!=\"\")print m}'); case \"$value\" in ''|*[!0-9]*) "
+    "printf 'ROCKETMQ_BROKER_RUNTIME_UNAVAILABLE=true\\n';; *) "
+    "printf 'ROCKETMQ_BROKER_QUEUE_MAX=%s\\n' \"$value\";; esac; fi"
+)
 for _middleware_metric_id, _middleware_command in _ADDITIONAL_COMMANDS.items():
     _COMMAND_TEMPLATES[_middleware_metric_id] = {
         "command": _middleware_command,
@@ -862,6 +898,21 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "rocketmq_namesrv_addr": "127.0.0.1:9876",
     "rocketmq_controller_addr": "127.0.0.1:9877",
     "rocketmq_broker": "broker-a",
+    "rocketmq_home": "/opt/rocketmq",
+    "rocketmq_jdk_home": "/opt/jdk1.8.0_421",
+    "rocketmq_profile": "/home/rocketmq/.bash_profile",
+    "rocketmq_mode": "cluster",
+    "rocketmq_conf": "/opt/rocketmq/conf",
+    "rocketmq_bin": "/opt/rocketmq/bin/mqnamesrv",
+    "rocketmq_broker_conf": "/opt/rocketmq/conf/broker.conf",
+    "rocketmq_namesrv_conf": "/opt/rocketmq/conf/namesrv.properties",
+    "rocketmq_namesrv_port": "9876",
+    "rocketmq_controller_port": "9877",
+    "rocketmq_broker_port": "10911",
+    "rocketmq_broker_ha_port": "10912",
+    "rocketmq_expected_nodes": "3",
+    "rocketmq_expected_sync_replicas": "2",
+    "rocketmq_old_log_days": "30",
     "rocketmq_log": "/opt/rabbitmq/logs",
     "tomcat_bin": "/opt/tomcat/bin",
     "tomcat_conf": "/opt/tomcat/conf",
@@ -970,6 +1021,50 @@ def _redis_runtime_prefix(profile: Dict[str, Any]) -> str:
     )
 
 
+def _rocketmq_runtime_prefix(profile: Dict[str, Any]) -> str:
+    """Resolve RocketMQ paths and endpoints on the target host.
+
+    RocketMQ's shell tools are often installed outside PATH and the manual
+    uses a profile-defined home.  Resolve candidates on the managed host,
+    then let every collector consume only these variables.  No command in
+    this prefix changes RocketMQ state.
+    """
+    home = _additional_profile_values(profile, "rocketmq_home")
+    jdk = _additional_profile_values(profile, "rocketmq_jdk_home")
+    conf = _additional_profile_values(profile, "rocketmq_conf")
+    bin_paths = _additional_profile_values(profile, "rocketmq_bin")
+    broker_conf = _additional_profile_values(profile, "rocketmq_broker_conf")
+    namesrv_conf = _additional_profile_values(profile, "rocketmq_namesrv_conf")
+    log = _additional_profile_values(profile, "rocketmq_log")
+    words = lambda values: " ".join(shlex.quote(value) for value in values)
+    return (
+        f"rocketmq_home_dir={shlex.quote(home[0])}; "
+        f"for candidate in {words(home)}; do if [ -d \"$candidate\" ]; then rocketmq_home_dir=\"$candidate\"; break; fi; done; "
+        f"rocketmq_jdk_home={shlex.quote(jdk[0])}; "
+        f"for candidate in {words(jdk)}; do if [ -d \"$candidate\" ]; then rocketmq_jdk_home=\"$candidate\"; break; fi; done; "
+        f"rocketmq_conf_dir={shlex.quote(conf[0])}; "
+        f"for candidate in {words(conf)}; do if [ -d \"$candidate\" ]; then rocketmq_conf_dir=\"$candidate\"; break; fi; done; "
+        f"rocketmq_bin={shlex.quote(bin_paths[0])}; "
+        f"for candidate in {words(bin_paths)}; do if [ -x \"$candidate\" ]; then rocketmq_bin=\"$candidate\"; break; fi; done; "
+        f"rocketmq_broker_conf={shlex.quote(broker_conf[0])}; "
+        f"for candidate in {words(broker_conf)}; do if [ -r \"$candidate\" ]; then rocketmq_broker_conf=\"$candidate\"; break; fi; done; "
+        f"rocketmq_namesrv_conf={shlex.quote(namesrv_conf[0])}; "
+        f"for candidate in {words(namesrv_conf)}; do if [ -r \"$candidate\" ]; then rocketmq_namesrv_conf=\"$candidate\"; break; fi; done; "
+        f"rocketmq_log_dir={shlex.quote(log[0])}; "
+        f"for candidate in {words(log)}; do if [ -d \"$candidate\" ]; then rocketmq_log_dir=\"$candidate\"; break; fi; done; "
+        "rocketmq_mqadmin=\"${rocketmq_bin%/*}/mqadmin\"; "
+        f"rocketmq_mode={shlex.quote(_additional_profile_value(profile, 'rocketmq_mode'))}; "
+        f"rocketmq_namesrv_port={shlex.quote(_additional_profile_value(profile, 'rocketmq_namesrv_port'))}; "
+        f"rocketmq_controller_port={shlex.quote(_additional_profile_value(profile, 'rocketmq_controller_port'))}; "
+        f"rocketmq_broker_port={shlex.quote(_additional_profile_value(profile, 'rocketmq_broker_port'))}; "
+        f"rocketmq_broker_ha_port={shlex.quote(_additional_profile_value(profile, 'rocketmq_broker_ha_port'))}; "
+        f"rocketmq_namesrv_addr={shlex.quote(_additional_profile_value(profile, 'rocketmq_namesrv_addr'))}; "
+        f"rocketmq_controller_addr={shlex.quote(_additional_profile_value(profile, 'rocketmq_controller_addr'))}; "
+        f"rocketmq_broker={shlex.quote(_additional_profile_value(profile, 'rocketmq_broker'))}; "
+        f"rocketmq_old_log_days={shlex.quote(_additional_profile_value(profile, 'rocketmq_old_log_days'))}"
+    )
+
+
 def _kafka_runtime_prefix(profile: Dict[str, Any]) -> str:
     """Resolve Kafka tools and endpoints on the target, with conf fallbacks."""
     kafka_conf = _additional_profile_values(profile, "kafka_conf")
@@ -1071,6 +1166,8 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         command = f"{_kafka_runtime_prefix(profile)}; {command}"
     if metric_id.startswith("local.mysql."):
         command = 'export MYSQL_PWD="${INSPECT_MYSQL_PASSWORD:-}"; ' + command
+    if metric_id.startswith("local.rocketmq."):
+        command = f"{_rocketmq_runtime_prefix(profile)}; {command}"
     if metric_id.startswith("local.redis."):
         if metric_id == "local.redis.core_ports.health":
             command = command.replace(
@@ -1196,7 +1293,7 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             "nacos": (r"com\.alibaba\.nacos|nacos\.home|/opt/nacos", "nacos_home"),
             "rabbitmq": (r"beam\.smp|rabbitmq-server", "rabbitmq_conf"),
             "redis": (r"redis-server", "redis_conf"),
-            "rocketmq": (r"NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker", "rocketmq_conf"),
+            "rocketmq": (r"[N]amesrvStartup|[B]rokerStartup|[m]qnamesrv|[m]qbroker", "rocketmq_conf"),
             "tomcat": (r"org\.apache\.catalina\.startup\.Bootstrap", "tomcat_conf"),
             "zookeeper": (r"QuorumPeerMain|org\.apache\.zookeeper\.server\.quorum\.QuorumPeerMain", "zookeeper_conf"),
         }
@@ -1223,6 +1320,9 @@ _LOG_METRIC_IDS = {
     "local.keepalived.capability.stability",
     "local.elasticsearch.heap.gc",
     "local.elasticsearch.slowlog.key_evidence",
+    "local.rocketmq.error_log",
+    "local.rocketmq.jvm.gc",
+    "local.rocketmq.log.data.retention",
 }
 
 

@@ -1078,6 +1078,9 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "redis_expected_sentinels": ["3"],
     # RocketMQ
     "rocketmq_home": ["/opt/rocketmq"],
+    "rocketmq_jdk_home": ["/opt/jdk1.8.0_421"],
+    "rocketmq_profile": ["/home/rocketmq/.bash_profile"],
+    "rocketmq_mode": ["cluster"],
     "rocketmq_bin": ["/opt/rocketmq/bin/mqnamesrv"],
     "rocketmq_conf": ["/opt/rocketmq/conf"],
     "rocketmq_log": ["/opt/rabbitmq/logs"],
@@ -1090,6 +1093,9 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "rocketmq_namesrv_addr": ["127.0.0.1:9876"],
     "rocketmq_controller_addr": ["127.0.0.1:9877"],
     "rocketmq_broker": ["broker-a"],
+    "rocketmq_expected_nodes": ["3"],
+    "rocketmq_expected_sync_replicas": ["2"],
+    "rocketmq_old_log_days": ["30"],
     # Tomcat
     "tomcat_home": ["/opt/tomcat"],
     "tomcat_conf": ["/opt/tomcat/conf"],
