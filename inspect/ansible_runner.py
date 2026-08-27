@@ -1388,42 +1388,47 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
     if metric_id.startswith(typed_prefixes) or metric_id in typed_keepalived:
         module_id = metric_id.split(".", 2)[1]
         gate_specs = {
-            "keepalived": (r"keepalived", "keepalived_conf"),
-            "kafka": (r"[k]afka\.Kafka", "kafka_conf"),
-            "mysql": (r"[m]ysqld", "mysql_conf"),
-            "nacos": (r"com\.alibaba\.nacos|nacos\.home|/opt/nacos", "nacos_home"),
-            "rabbitmq": (r"beam\.smp|rabbitmq-server", "rabbitmq_conf"),
-            "redis": (r"redis-server", "redis_conf"),
-            "rocketmq": (r"[N]amesrvStartup|[B]rokerStartup|[m]qnamesrv|[m]qbroker", "rocketmq_conf"),
-            # See the service collector above: the complete process pattern
-            # must not occur literally in the pgrep command line.
-            "tomcat": (r"org\.[a]pache\.catalina\.startup\.Bootstrap", "tomcat_conf"),
-            "zookeeper": (r"QuorumPeerMain|org\.apache\.zookeeper\.server\.quorum\.QuorumPeerMain", "zookeeper_conf"),
+            "keepalived": ('$1 == "keepalived"', "keepalived_conf"),
+            "kafka": ('$1 == "java" && $0 ~ /kafka[.]Kafka/', "kafka_conf"),
+            "mysql": ('$1 == "mysqld"', "mysql_conf"),
+            "nacos": (
+                '$1 == "java" && $0 ~ /(com[.]alibaba[.]nacos|nacos[.]home)/',
+                "nacos_home",
+            ),
+            "rabbitmq": (
+                '$1 == "beam.smp" && $0 ~ /rabbit/',
+                "rabbitmq_conf",
+            ),
+            "redis": ('$1 == "redis-server"', "redis_conf"),
+            "rocketmq": (
+                '$1 == "java" && $0 ~ /(NamesrvStartup|BrokerStartup)/',
+                "rocketmq_conf",
+            ),
+            "tomcat": (
+                '$1 == "java" && $0 ~ /org[.]apache[.]catalina[.]startup[.]Bootstrap/',
+                "tomcat_conf",
+            ),
+            "zookeeper": (
+                '$1 == "java" && $0 ~ /org[.]apache[.]zookeeper[.]server[.]quorum[.]QuorumPeerMain/',
+                "zookeeper_conf",
+            ),
         }
-        pattern, config_key = gate_specs[module_id]
+        process_predicate, config_key = gate_specs[module_id]
         # Resolve the module's configured path to select/validate the gate,
         # but do not require that path to appear in a process command line.
         # Java/native service managers commonly keep the config in an
         # environment or unit file rather than argv.
         _additional_profile_value(profile, config_key)
-        if module_id == "tomcat":
-            pattern_setup = (
-                "tomcat_process_pattern='org'; "
-                "tomcat_process_pattern=\"${tomcat_process_pattern}.apache\"; "
-                "tomcat_process_pattern=\"${tomcat_process_pattern}.catalina\"; "
-                "tomcat_process_pattern=\"${tomcat_process_pattern}.startup\"; "
-                "tomcat_process_pattern=\"${tomcat_process_pattern}.Bootstrap\""
-            )
-            gate = (
-                f"{pattern_setup}; if ! pgrep -fa \"$tomcat_process_pattern\" "
-                ">/dev/null 2>&1; then printf '%s\\n' "
-                f"INSPECT_MIDDLEWARE_NOT_RUNNING={module_id}; exit 0; fi"
-            )
-        else:
-            gate = (
-                f"if ! pgrep -fa '{pattern}' >/dev/null 2>&1; then printf '%s\\n' "
-                f"INSPECT_MIDDLEWARE_NOT_RUNNING={module_id}; exit 0; fi"
-            )
+        # Match the process executable (comm) before inspecting Java args.
+        # The Ansible timeout/bash wrapper contains the complete bundle in its
+        # argv, so pgrep -fa can otherwise discover the inspection command as
+        # the middleware it is trying to detect.
+        gate = (
+            "if ! ps -ww -eo comm=,args= 2>/dev/null | "
+            f"awk '{process_predicate} {{ found=1 }} "
+            "END { exit(found ? 0 : 1) }'; then printf '%s\\n' "
+            f"INSPECT_MIDDLEWARE_NOT_RUNNING={module_id}; exit 0; fi"
+        )
         command = f"{gate}; {command}"
     return command
 
