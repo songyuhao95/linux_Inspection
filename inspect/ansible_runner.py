@@ -605,7 +605,7 @@ _ADDITIONAL_COMMANDS = {
     "local.rocketmq.namesrv.health": "if pgrep -fa 'NamesrvStartup|mqnamesrv' 1>/dev/null 2>&1; then printf 'ROCKETMQ_NAMESRV_OK=true\\n'; else printf 'ROCKETMQ_NAMESRV_OK=false\\n'; fi",
     "local.rocketmq.broker.health": "if pgrep -fa 'BrokerStartup|mqbroker' 1>/dev/null 2>&1; then printf 'ROCKETMQ_BROKER_OK=true\\n'; else printf 'ROCKETMQ_BROKER_OK=false\\n'; fi",
     "local.rocketmq.core_ports.health": "expected=\"$rocketmq_namesrv_port|$rocketmq_controller_port|$rocketmq_broker_port|$rocketmq_broker_ha_port\"; if [ \"$rocketmq_mode\" != cluster ]; then expected=\"$rocketmq_namesrv_port|$rocketmq_broker_port|$rocketmq_broker_ha_port\"; fi; ports=$(ss -H -ltn 2>/dev/null | awk -v p=\"$expected\" '$4 ~ \"(:|\\\\.)\"p\"$\" {n=$4; sub(/^.*:/,\"\",n); print n}' | sort -u | wc -l); printf 'ROCKETMQ_LISTENING_PORTS=%s\\n' \"$ports\"",
-    "local.rocketmq.cluster.registration": "out=$(\"$rocketmq_mqadmin\" clusterList -n \"$rocketmq_namesrv_addr\" 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_CLUSTER_UNAVAILABLE=true\\n'; elif printf '%s\\n' \"$out\" | grep -Eqi 'BrokerName|brokerName|Master'; then printf 'ROCKETMQ_CLUSTER_OK=true\\n'; else printf 'ROCKETMQ_CLUSTER_OK=false\\n'; fi",
+    "local.rocketmq.cluster.registration": "out=$(\"$rocketmq_mqadmin\" clusterList -n \"$rocketmq_namesrv_addr\" 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_CLUSTER_UNAVAILABLE=true\\n'; elif printf '%s\\n' \"$out\" | grep -Eqi 'Broker[[:space:]]+Name|brokerName|#Cluster[[:space:]]+Name'; then printf 'ROCKETMQ_CLUSTER_OK=true\\n'; else printf 'ROCKETMQ_CLUSTER_OK=false\\n'; fi",
     "local.rocketmq.controller.sync_set": "if [ \"$rocketmq_mode\" != cluster ]; then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; else meta=$(\"$rocketmq_mqadmin\" getControllerMetaData -a \"$rocketmq_controller_addr\" 2>&1); sync=$(\"$rocketmq_mqadmin\" getSyncStateSet -a \"$rocketmq_controller_addr\" -b \"$rocketmq_broker\" 2>&1); if printf '%s\\n%s\\n' \"$meta\" \"$sync\" | grep -Eqi 'leader|Controller|SyncStateSet'; then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; else printf 'ROCKETMQ_CONTROLLER_OK=false\\n'; fi; fi",
     "local.rocketmq.consumer.lag": "out=$(\"$rocketmq_mqadmin\" consumerProgress -n \"$rocketmq_namesrv_addr\" 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_CONSUMER_UNAVAILABLE=true\\n'; else lag=$(printf '%s\\n' \"$out\" | awk 'BEGIN{m=0; found=0} /diff|Diff|lag|Lag/ {for(i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {v=$i+0; if(v>m)m=v; found=1}} END{if(found) print m; else print 0}'); case \"$lag\" in ''|*[!0-9]*) printf 'ROCKETMQ_CONSUMER_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_CONSUMER_LAG=%s\\n' \"$lag\";; esac; fi",
     "local.rocketmq.jvm.memory": "used=$(free -b | awk '/^Mem:/ {if ($2>0) printf \"%.1f\", (($2-$7)/$2)*100}'); case \"$used\" in ''|*[!0-9.]* ) printf 'ROCKETMQ_JVM_MEMORY_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_JVM_MEMORY_USED_PERCENT=%s\\n' \"$used\";; esac",
@@ -631,11 +631,13 @@ _ADDITIONAL_COMMANDS = {
 _ADDITIONAL_COMMANDS["local.rocketmq.controller.sync_set"] = (
     "if [ \"$rocketmq_mode\" != cluster ]; then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; "
     "else meta=$(\"$rocketmq_mqadmin\" getControllerMetaData -a \"$rocketmq_controller_addr\" 2>&1); "
-    "meta_rc=$?; sync=$(timeout 5 \"$rocketmq_mqadmin\" getSyncStateSet -a \"$rocketmq_controller_addr\" "
-    "-b \"$rocketmq_broker\" 2>&1); sync_rc=$?; in_sync=$(printf '%s\\n' \"$sync\" | grep -Ec '^InSyncReplica:' || printf 0); "
-    "if [ \"$meta_rc\" -eq 0 ] && { [ \"$sync_rc\" -eq 0 ] || printf '%s\\n' \"$sync\" | grep -Eq 'SyncStateSetNums'; } && "
-    "[ \"$in_sync\" -ge \"$rocketmq_expected_sync_replicas\" ] 2>/dev/null && "
-    "printf '%s\\n%s\\n' \"$meta\" \"$sync\" | grep -Eqi 'leader|Controller|SyncStateSet'; "
+    "meta_rc=$?; cluster=$(\"$rocketmq_mqadmin\" clusterList -n \"$rocketmq_namesrv_addr\" 2>&1); cluster_rc=$?; "
+    "peer_count=$(printf '%s\\n' \"$meta\" | grep -Ec '^#Peer:' || printf 0); "
+    "broker_count=$(printf '%s\\n' \"$cluster\" | grep -Ec '^[^#[:space:]]+[[:space:]]+broker' || printf 0); "
+    "if [ \"$meta_rc\" -eq 0 ] && [ \"$cluster_rc\" -eq 0 ] && "
+    "[ \"$peer_count\" -ge \"$rocketmq_expected_sync_replicas\" ] 2>/dev/null && "
+    "[ \"$broker_count\" -ge \"$rocketmq_expected_sync_replicas\" ] 2>/dev/null && "
+    "printf '%s\\n' \"$meta\" | grep -Eqi 'leader|Controller'; "
     "then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; else printf 'ROCKETMQ_CONTROLLER_OK=false\\n'; fi; fi"
 )
 _ADDITIONAL_COMMANDS["local.rocketmq.broker.runtime"] = (
