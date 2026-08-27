@@ -641,8 +641,8 @@ _ADDITIONAL_COMMANDS["local.rocketmq.broker.runtime"] = (
     "out=$(timeout 5 \"$rocketmq_mqadmin\" brokerStatus -n \"$rocketmq_namesrv_addr\" "
     "-b \"$rocketmq_broker_addr\" 2>&1 | grep -m 2 -E 'sendThreadPoolQueueSize|pullThreadPoolQueueSize'); "
     "value=$(printf '%s\\n' \"$out\" | awk -F '[=:]' "
-    "'{if ($1 ~ /sendThreadPoolQueueSize|pullThreadPoolQueueSize/ && $2+0>m)m=$2+0} "
-    "END{if(m!=\"\")print m}'); case \"$value\" in ''|*[!0-9]*) "
+    "'BEGIN{m=-1} {if ($1 ~ /sendThreadPoolQueueSize|pullThreadPoolQueueSize/ && $2+0>m)m=$2+0} "
+    "END{if(m>=0)print m}'); case \"$value\" in ''|*[!0-9]*) "
     "printf 'ROCKETMQ_BROKER_RUNTIME_UNAVAILABLE=true\\n';; *) "
     "printf 'ROCKETMQ_BROKER_QUEUE_MAX=%s\\n' \"$value\";; esac"
 )
@@ -1065,6 +1065,7 @@ def _rocketmq_runtime_prefix(profile: Dict[str, Any]) -> str:
         "if [ -n \"$detected_namesrv\" ]; then rocketmq_namesrv_addr=\"$detected_namesrv\"; fi; "
         "detected_controller=$(awk -F= '$1 ~ /^[[:space:]]*controllerAddr[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2; exit}' \"$rocketmq_broker_conf\"); "
         "if [ -n \"$detected_controller\" ]; then rocketmq_controller_addr=\"$detected_controller\"; fi; "
+        "rocketmq_controller_addr=$(printf '%s\\n' \"$rocketmq_controller_addr\" | cut -d ';' -f1); "
         "rocketmq_broker_ip=$(awk -F= '$1 ~ /^[[:space:]]*brokerIP1[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2; exit}' \"$rocketmq_broker_conf\"); "
         "if [ -z \"$rocketmq_broker_ip\" ]; then rocketmq_broker_ip=127.0.0.1; fi; "
         "rocketmq_broker_addr=\"$rocketmq_broker_ip:$rocketmq_broker_port\"; "
