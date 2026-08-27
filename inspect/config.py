@@ -1104,6 +1104,7 @@ INSPECT_CONF_EMPTY_DEFAULTS: Dict[str, List[str]] = {
     "tomcat_port": ["8080"],
     "tomcat_https_port": ["8443"],
     "tomcat_shutdown_port": ["8005"],
+    "tomcat_https_enabled": ["false"],
     "tomcat_user": ["tomcat"],
     "tomcat_java_home": ["/opt/jre1.8.0_421"],
     "tomcat_version": ["9.0.110"],

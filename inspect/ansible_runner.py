@@ -632,7 +632,7 @@ _ADDITIONAL_COMMANDS = {
     "local.rocketmq.systemd.unit": "units=$(systemctl cat rocketmq-namesrv rocketmq-broker 2>&1); if printf '%s\\n' \"$units\" | grep -Eq 'ExecStart=.*(mqnamesrv|mqbroker)|User=|Restart='; then printf 'ROCKETMQ_SYSTEMD_OK=true\\n'; else printf 'ROCKETMQ_SYSTEMD_OK=false\\n'; fi",
     "local.rocketmq.log.data.retention": "if [ -d \"$rocketmq_log_dir\" ]; then old=$(find \"$rocketmq_log_dir\" -type f -mtime +\"$rocketmq_old_log_days\" -print 2>/dev/null | wc -l); printf 'ROCKETMQ_OLD_FILES=%s\\n' \"$old\"; else printf 'ROCKETMQ_RETENTION_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.service.health": "if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && pgrep -fa 'org.apache.catalina.startup.Bootstrap' >/dev/null 2>&1; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
-    "local.tomcat.http.health": "ports=0; for p in \"$tomcat_port\" \"$tomcat_https_port\" \"$tomcat_shutdown_port\"; do n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$p\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); done; printf 'TOMCAT_LISTENING_PORTS=%s\\n' \"$ports\"",
+    "local.tomcat.http.health": "ports=0; for p in \"$tomcat_port\" \"$tomcat_shutdown_port\"; do n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$p\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); done; if [ \"$tomcat_https_enabled\" = true ]; then n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$tomcat_https_port\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); fi; printf 'TOMCAT_LISTENING_PORTS=%s\\n' \"$ports\"",
     "local.tomcat.http.reachability": "status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 \"http://127.0.0.1:$tomcat_port/\" 2>/dev/null); case \"$status\" in 2??|3??|4??) printf 'TOMCAT_HTTP_OK=true\\n';; *) printf 'TOMCAT_HTTP_OK=false\\n';; esac",
     "local.tomcat.access_log.errors": "if [ -r \"$tomcat_log_dir/catalina.out\" ]; then hits=$(tail -200 \"$tomcat_log_dir/catalina.out\" | grep -Eic 'SEVERE|Exception|OutOfMemoryError|Address already in use'); printf 'TOMCAT_STARTUP_ERROR_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_STARTUP_FACT_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.error_log.key_evidence": "if [ -d \"$tomcat_log_dir\" ]; then hits=0; for file in $(find \"$tomcat_log_dir\" -type f -mtime -1 \\( -name '*.log' -o -name 'catalina.out' \\) -print 2>/dev/null); do n=$(grep -HniE 'SEVERE|ERROR|Exception|OutOfMemoryError|StackOverflowError' \"$file\" 2>/dev/null | tail -50 | wc -l); hits=$((hits+n)); done; printf 'TOMCAT_ERROR_LOG_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_ERROR_LOG_UNAVAILABLE=true\\n'; fi",
@@ -645,7 +645,7 @@ _ADDITIONAL_COMMANDS = {
     "local.tomcat.connection.status": "count=$(ss -H -ant \"( sport = :$tomcat_port )\" 2>/dev/null | wc -l); case \"$count\" in ''|*[!0-9]*) printf 'TOMCAT_CONNECTION_FACT_UNAVAILABLE=true\\n';; *) printf 'TOMCAT_CONNECTIONS=%s\\n' \"$count\";; esac",
     "local.tomcat.log.rotation": "if [ -d \"$tomcat_log_dir\" ]; then count=$(find \"$tomcat_log_dir\" -type f -size +\"$tomcat_large_log_size\" -print 2>/dev/null | wc -l); printf 'TOMCAT_LARGE_LOG_COUNT=%s\\n' \"$count\"; else printf 'TOMCAT_LOG_ROTATION_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.jvm.crash_files": "count=$(find \"$tomcat_log_dir\" \"$tomcat_home_dir/temp\" -maxdepth 1 \\( -name '*.hprof' -o -name 'hs_err_pid*.log' \\) -print 2>/dev/null | wc -l); printf 'TOMCAT_JVM_CRASH_COUNT=%s\\n' \"$count\"",
-    "local.tomcat.port.isolation": "listeners=0; bad=0; for p in \"$tomcat_port\" \"$tomcat_https_port\" \"$tomcat_shutdown_port\"; do line=$(ss -H -lntp 2>/dev/null | grep -E :$p$); if [ -n \"$line\" ]; then listeners=$((listeners+1)); if ! printf '%s\\n' \"$line\" | grep -q '\"java\"'; then bad=$((bad+1)); fi; fi; done; if [ -r \"$tomcat_conf_file\" ] && [ \"$listeners\" -gt 0 ] 2>/dev/null && [ \"$bad\" -eq 0 ] 2>/dev/null; then printf 'TOMCAT_PORT_ISOLATION_OK=true\\n'; else printf 'TOMCAT_PORT_ISOLATION_OK=false\\n'; fi",
+    "local.tomcat.port.isolation": "listeners=0; bad=0; for p in \"$tomcat_port\" \"$tomcat_shutdown_port\"; do line=$(ss -H -lntp 2>/dev/null | grep -E :$p$); if [ -n \"$line\" ]; then listeners=$((listeners+1)); if ! printf '%s\\n' \"$line\" | grep -q '\"java\"'; then bad=$((bad+1)); fi; fi; done; if [ \"$tomcat_https_enabled\" = true ]; then line=$(ss -H -lntp 2>/dev/null | grep -E :$tomcat_https_port$); if [ -n \"$line\" ]; then listeners=$((listeners+1)); if ! printf '%s\\n' \"$line\" | grep -q '\"java\"'; then bad=$((bad+1)); fi; fi; fi; if [ -r \"$tomcat_conf_file\" ] && [ \"$listeners\" -gt 0 ] 2>/dev/null && [ \"$bad\" -eq 0 ] 2>/dev/null; then printf 'TOMCAT_PORT_ISOLATION_OK=true\\n'; else printf 'TOMCAT_PORT_ISOLATION_OK=false\\n'; fi",
 }
 # Tighten the two collectors whose command result can otherwise look healthy
 # merely because an error message contains a RocketMQ keyword.
@@ -953,6 +953,7 @@ _ADDITIONAL_PLACEHOLDER_DEFAULTS = {
     "tomcat_port": "8080",
     "tomcat_https_port": "8443",
     "tomcat_shutdown_port": "8005",
+    "tomcat_https_enabled": "false",
     "tomcat_version": "9.0.110",
     "tomcat_old_log_days": "1",
     "tomcat_large_log_size": "1G",
@@ -1214,6 +1215,7 @@ def _tomcat_runtime_prefix(profile: Dict[str, Any]) -> str:
         f"tomcat_port={shlex.quote(_additional_profile_value(profile, 'tomcat_port'))}; "
         f"tomcat_https_port={shlex.quote(_additional_profile_value(profile, 'tomcat_https_port'))}; "
         f"tomcat_shutdown_port={shlex.quote(_additional_profile_value(profile, 'tomcat_shutdown_port'))}; "
+        f"tomcat_https_enabled={shlex.quote(_additional_profile_value(profile, 'tomcat_https_enabled'))}; "
         "tomcat_conf_file=\"$tomcat_conf_dir/server.xml\""
     )
 

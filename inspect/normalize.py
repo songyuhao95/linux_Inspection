@@ -3021,7 +3021,7 @@ _MIDDLEWARE_NUMERIC_THRESHOLDS = {
     "local.nacos.cluster.nodes": (2, 1),
     "local.nacos.core_ports.health": (4, 2),
     "local.rocketmq.core_ports.health": (4, 2),
-    "local.tomcat.http.health": (3, 2),
+    "local.tomcat.http.health": (2, 1),
     "local.nacos.error_log": (0, 10),
     "local.nacos.http.errors": (0, 10),
     "local.nacos.thread.fd.pressure": (10000, 50000),
