@@ -72,11 +72,11 @@ REAL_EXEC_ENABLED = "1"
 
 # 结构化 stdout callback 与本地重试文件关闭，避免把不可解析的默认文本当事实源。
 ANSIBLE_STDOUT_CALLBACK = "json"
-# 密码 inventory 的首次 SSH 连接不能依赖人工预先写入 known_hosts：Ansible
-# 自身的 host-key 检查会在 sshpass 介入前直接拒绝。关闭 Ansible 的重复检查，
-# 同时让 OpenSSH 采用 accept-new：首次连接自动记录，已知密钥变更仍拒绝。
+# SSH 主机密钥只读校验不能为了首次连接自动修改控制端 known_hosts。
+# 将 known_hosts 指向空设备，避免巡检留下或覆盖控制端主机密钥文件；真实
+# 环境如需严格主机密钥校验，应由调用方在巡检前自行提供 SSH 配置。
 ANSIBLE_HOST_KEY_CHECKING = "False"
-ANSIBLE_SSH_COMMON_ARGS = "-o StrictHostKeyChecking=accept-new"
+ANSIBLE_SSH_COMMON_ARGS = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 REAL_PROCESS_TIMEOUT_GRACE_SEC = 30
 MAX_CAPTURED_ERROR_CHARS = 1200
 
@@ -977,6 +977,55 @@ _ADDITIONAL_UNSAFE_GENERATED_TOKENS = re.compile(
     r"\b(?:rm|rmdir|mkfs|dd|shutdown|reboot|poweroff|sudo|ssh|scp|wget|"
     r"python|perl|ruby|php|eval|exec|source|chmod|chown|mount|umount)\b"
 )
+
+# 受控端只读边界：命令来自代码注册表，但仍必须在最终展开后再次检查。
+# 这层检查专门防止后续新增指标误把合法的程序名（systemctl、mysql、
+# redis-cli、curl 等）用于写操作；它不是 allow-list 的替代品。
+_READONLY_FORBIDDEN_EXECUTABLES = frozenset(
+    {
+        "rm", "rmdir", "mv", "cp", "install", "ln", "mkdir", "touch",
+        "truncate", "shred", "dd", "tee", "kill", "pkill", "pgrep-kill",
+        "reboot", "shutdown", "poweroff", "mount", "umount", "useradd",
+        "userdel", "groupadd", "groupdel", "passwd", "chown", "chmod",
+        "setenforce", "iptables", "nft", "firewall-cmd", "crontab",
+    }
+)
+_READONLY_SYSTEMCTL_SUBCOMMANDS = frozenset(
+    {
+        "start", "stop", "restart", "try-restart", "reload", "force-reload",
+        "enable", "disable", "mask", "unmask", "preset", "revert",
+        "edit", "link", "unlink", "daemon-reload", "reset-failed",
+    }
+)
+_READONLY_SERVICE_SUBCOMMANDS = frozenset(
+    {"start", "stop", "restart", "reload", "force-reload", "status"}
+)
+_READONLY_REDIS_COMMANDS = re.compile(
+    r"(?i)\b(?:set|setnx|setex|psetex|append|del|unlink|incr|decr|"
+    r"lpush|rpush|lpop|rpop|sadd|srem|hset|hdel|xadd|expire|persist|"
+    r"rename|renamenx|mset|msetnx|flushdb|flushall|config\s+set|"
+    r"replicaof|slaveof|cluster\s+(?:meet|forget|failover|reset)|"
+    r"acl\s+(?:setuser|deluser|save|load)|script\s+(?:load|flush)|"
+    r"eval(?:sha)?)\b"
+)
+_READONLY_SQL_COMMANDS = re.compile(
+    r"(?i)\b(?:insert|update|delete|replace|drop|alter|create|truncate|"
+    r"grant|revoke|rename|load\s+data|set\s+global|shutdown)\b"
+)
+_READONLY_KAFKA_FLAGS = re.compile(
+    r"(?i)(?:^|\s)--(?:create|alter|delete|delete-config|add-config|remove-config)\b"
+)
+_READONLY_RABBITMQ_COMMANDS = re.compile(
+    r"(?i)\b(?:add_user|delete_user|change_password|set_user_tags|"
+    r"clear_password|set_permissions|clear_permissions|set_parameter|"
+    r"clear_parameter|set_policy|clear_policy|set_topic_permissions|"
+    r"clear_topic_permissions|start_app|stop_app|reset|rotate_logs|"
+    r"join_cluster|forget_cluster_node|force_reset|stop|shutdown)\b"
+)
+_READONLY_CURL_MUTATION = re.compile(
+    r"(?i)(?:^|\s)(?:-X|--request)\s*(?:POST|PUT|PATCH|DELETE)\b"
+)
+_NACOS_AUTH_LOGIN_PATH = re.compile(r"/nacos/v1/auth/login(?:[/?\s]|$)")
 _PRIVATE_TASK_ENVIRONMENT_KEYS = frozenset(
     {
         "INSPECT_ES_API_USER",
@@ -2012,8 +2061,10 @@ def _build_elasticsearch_metric_command(
         repos = _elasticsearch_shell_words(_elasticsearch_candidates(profile, "elasticsearch_snapshot_repo")) or ""
         repo = repos.split()[0] if repos else ""
         status = " -w '\\nINSPECT_ELASTICSEARCH_HTTP_STATUS=%{http_code}\\n'"
-        verify = api(f"/{repo}/_verify?pretty", "-X POST") + status
-        return prefix + f"; if test -z \"$es_endpoint\" || test -z \"{repos}\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND; else " + api("/_snapshot/_all?pretty") + status + "; " + verify + "; fi"
+        # _verify is POST and may cause repository side effects.  A read-only
+        # inspection only checks repository registration/configuration with GET.
+        repository = api(f"/_snapshot/{repo}?pretty") + status
+        return prefix + f"; if test -z \"$es_endpoint\" || test -z \"{repos}\"; then printf '%s\\n' INSPECT_ELASTICSEARCH_SNAPSHOT_NOT_FOUND; else " + api("/_snapshot/_all?pretty") + status + "; " + repository + "; fi"
     if metric_id == "local.elasticsearch.system.parameters":
         return prefix + "; printf 'ES_MAX_MAP_COUNT=%s\\n' \"$(cat /proc/sys/vm/max_map_count 2>/dev/null)\"; free -m; if test -n \"$es_pid\" && test -r \"/proc/$es_pid/limits\"; then printf 'ES_ULIMIT_NOFILE=%s\\n' \"$(sed -nE 's/^Max open files[[:space:]]+([0-9]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; printf 'ES_ULIMIT_NPROC=%s\\n' \"$(sed -nE 's/^Max processes[[:space:]]+([0-9]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; printf 'ES_ULIMIT_MEMLOCK=%s\\n' \"$(sed -nE 's/^Max locked memory[[:space:]]+([^[:space:]]+).*/\\1/p' \"/proc/$es_pid/limits\" | head -n 1)\"; else printf 'ES_ULIMIT_NOFILE=\\nES_ULIMIT_NPROC=\\nES_ULIMIT_MEMLOCK=\\n'; fi"
     if metric_id == "local.elasticsearch.process.present":
@@ -2546,6 +2597,131 @@ def _allowed_binaries(metric_id: str) -> List[str]:
     return parse_binaries(entry["command"])
 
 
+def _readonly_command_violation(command: str) -> Optional[str]:
+    """Return a reason when a managed-host command can change state.
+
+    Pipelines, assignments and ``2>/dev/null`` are normal for inspection.
+    This check focuses on mutating programs/subcommands, HTTP writes and
+    redirects to real files. Nacos ``/auth/login`` is the sole POST exception:
+    it is only the authentication handshake needed to obtain a read token.
+    """
+    redirect_target = _readonly_redirect_target(command)
+    if redirect_target:
+        return f"禁止重定向写入目标文件: {redirect_target}"
+
+    segments: List[List[str]] = [[]]
+    for token in _tokenize(command):
+        if token is None:
+            segments.append([])
+        else:
+            segments[-1].append(token.strip("'\""))
+
+    for words in segments:
+        if not words:
+            continue
+        executable_index = 0
+        while executable_index < len(words):
+            word = words[executable_index]
+            if (
+                not word
+                or word in _SHELL_KEYWORDS
+                or re.fullmatch(r"\d+", word)
+                or re.fullmatch(r"(?:[0-9]+)?[<>].*", word)
+                or ("=" in word and not word.startswith("="))
+            ):
+                executable_index += 1
+                continue
+            break
+        if executable_index >= len(words):
+            continue
+        executable = Path(words[executable_index]).name
+        args = words[executable_index + 1 :]
+        segment = " ".join(words[executable_index:])
+
+        if executable in _READONLY_FORBIDDEN_EXECUTABLES:
+            return f"禁止执行状态变更程序: {executable}"
+        if executable == "systemctl" and any(
+            arg in _READONLY_SYSTEMCTL_SUBCOMMANDS for arg in args
+        ):
+            return "禁止 systemctl 服务/系统状态变更子命令"
+        if executable == "service" and any(
+            arg in _READONLY_SERVICE_SUBCOMMANDS - {"status"} for arg in args
+        ):
+            return "禁止 service 服务状态变更子命令"
+        if executable == "redis-cli":
+            # COMMAND INFO FLUSHDB/FLUSHALL/KEYS only describes commands.
+            if not re.search(r"(?i)\bCOMMAND\s+INFO\b", segment) and _READONLY_REDIS_COMMANDS.search(segment):
+                return "禁止 Redis 写入或管理子命令"
+        if executable in {"mysql", "mysqldump"} and _READONLY_SQL_COMMANDS.search(segment):
+            return "禁止 MySQL 写入或管理 SQL"
+        if executable in {"kafka-topics.sh", "kafka-configs.sh", "kafka-acls.sh"} and _READONLY_KAFKA_FLAGS.search(segment):
+            return "禁止 Kafka 写入管理参数"
+        if executable in {"rabbitmqctl", "rabbitmq-diagnostics"} and _READONLY_RABBITMQ_COMMANDS.search(segment):
+            return "禁止 RabbitMQ 管理/服务变更命令"
+        if executable == "curl":
+            has_mutating_method = bool(_READONLY_CURL_MUTATION.search(segment))
+            has_body = bool(re.search(r"(?i)(?:^|\s)(?:-d|--data(?:-raw|binary|urlencode)?)(?:\s|=)", segment))
+            is_nacos_login = bool(_NACOS_AUTH_LOGIN_PATH.search(segment))
+            if (has_mutating_method or (has_body and " -G" not in f" {segment}")) and not is_nacos_login:
+                return "禁止 HTTP 写请求"
+
+    return None
+
+
+def _readonly_redirect_target(command: str) -> Optional[str]:
+    """Find a real-file output redirect outside shell quotes.
+
+    A regex cannot distinguish ``>300`` in SQL/awk from ``> /tmp/file``.
+    Scan the small shell subset while honoring single/double quotes instead;
+    the inspection commands intentionally allow only ``/dev/null`` redirects.
+    """
+    quote: Optional[str] = None
+    escaped = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif quote == '"' and char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+            index += 1
+            continue
+        if char != ">":
+            index += 1
+            continue
+        index += 2 if index + 1 < len(command) and command[index + 1] == ">" else 1
+        while index < len(command) and command[index].isspace():
+            index += 1
+        if index < len(command) and command[index] == "&":
+            # File-descriptor duplication (for example 2>&1) is not a file
+            # write and is safe for an inspection command.
+            index += 1
+            while index < len(command) and command[index].isdigit():
+                index += 1
+            continue
+        start = index
+        while index < len(command) and not command[index].isspace() and command[index] not in ";|()":
+            index += 1
+        target = command[start:index]
+        if target and target != "/dev/null":
+            return target
+    return None
+
+
+def validate_read_only_command(command: str) -> None:
+    """Fail closed if a final expanded managed-host command is not read-only."""
+    reason = _readonly_command_violation(command)
+    if reason:
+        raise CommandNotAllowedError(f"只读巡检命令校验失败: {reason}")
+
+
 def validate_command_specs(
     specs: Sequence[CommandSpec], *, require_script_path: bool = True
 ) -> None:
@@ -2595,6 +2771,9 @@ def validate_command_specs(
                     f"allow-list 拒绝：命令缺失且非 UNSUPPORTED_PROFILE: {spec.metric_id}"
                 )
             continue
+        # Check the final expanded command, including trusted generated
+        # middleware shells that intentionally contain variables.
+        validate_read_only_command(spec.command)
         if spec.trusted_generated_shell:
             if not (
                 spec.metric_id.startswith("local.nginx.")
@@ -2796,6 +2975,9 @@ def generate_playbook(
     probe_command = probe_command or probe_mod.build_probe_command(
         timeout_sec=collection_timeout_sec
     )
+    # The capability probe is also executed on managed hosts.  Keep it under
+    # the same fail-closed read-only policy as metric commands.
+    validate_read_only_command(probe_command)
     lines = [
         "---",
         "# inspect 采集 playbook（T-103 ansible_runner 生成；ansible-execution v1）",

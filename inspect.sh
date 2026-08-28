@@ -14,25 +14,6 @@ fi
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_ROOT="$SCRIPT_DIR/runtime"
 
-# A wrapper-owned sentinel proves that normal/error/signal exits all pass
-# through cleanup. It contains no environment, command line, or secret.
-SESSION_FILE="$(mktemp "${TMPDIR:-/tmp}/inspect-wrapper.XXXXXX")" || {
-  echo "inspect.sh: execution failed: cannot create cleanup sentinel" >&2
-  exit 10
-}
-cleanup() {
-  status=$?
-  trap - EXIT HUP INT TERM
-  if ! rm -f -- "$SESSION_FILE"; then
-    echo "inspect.sh: cleanup diagnostic: wrapper sentinel removal failed" >&2
-  fi
-  exit "$status"
-}
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
 is_query=0
 is_local=0
 is_remote=0
@@ -96,7 +77,8 @@ unset ANSIBLE_PASSWORD ANSIBLE_NET_PASSWORD SSHPASS
 export INSPECT_RUNTIME_ROOT="$RUNTIME_ROOT"
 export PYTHONPATH="$SCRIPT_DIR"
 
-# Do not use exec: EXIT cleanup must run after normal and failed child exits.
+# Keep the child exit code unchanged.  The wrapper has no temporary sentinel
+# and therefore has no local cleanup/delete operation.
 if [[ "$PY" == *.exe ]]; then
   # The Windows embeddable runtime puts stdlib inspect.py in python312.zip.
   # Load this project's inspect package explicitly so its compatibility layer

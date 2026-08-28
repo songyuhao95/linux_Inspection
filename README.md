@@ -646,7 +646,7 @@ elasticsearch_cert = /opt/elasticsearch/conf/certs/http_ca.crt|/opt/elasticsearc
 elasticsearch_snapshot_repo = backup
 ```
 
-快照仓库名称，用于调用 `/_snapshot/<repo>/_verify` 检查仓库。未配置或目标不存在时，该项可能显示为 UNKNOWN；巡检不会创建、删除或修改快照。
+快照仓库名称，用于只读查询 `/_snapshot/<repo>` 检查仓库注册和配置。未配置或目标不存在时，该项可能显示为 UNKNOWN；巡检不会调用 `_verify`，也不会创建、删除或修改快照。
 
 #### `elasticsearch_whitelist`
 

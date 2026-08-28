@@ -8,7 +8,8 @@
   - `--local` → 临时 inventory：`localhost ansible_connection=local`
     （控制端兼受控端，TD §10.1 / 兼容矩阵 C1）；
   - `-i PATH` → 解析已有 inventory（严格 INI 子集），`--limit PATTERN` /
-    `--all` 选择主机（同 ansible 语义子集）；inventory 文件本身不改写；
+    `--all` 选择主机（同 ansible 语义子集）；仅 `hosts.local.ini` 会自动
+    收紧权限为 600，inventory 内容本身不改写；
   - 输出：HostSelection（inventory 文件路径 + 主机列表 + limit），
     供 cli 编排 → ansible_runner 执行。
 
@@ -194,6 +195,13 @@ def parse_inventory(
     - 任何格式错误 → InventoryError（exit_code=10）。
     """
     source = str(path)
+    if path.name == "hosts.local.ini" and os.name != "nt" and path.is_file():
+        try:
+            path.chmod(0o600)
+        except OSError as exc:
+            raise InventoryError(
+                f"本地私有 inventory 权限无法设置为 600: {source}（{exc}）"
+            ) from exc
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:

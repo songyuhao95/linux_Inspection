@@ -1157,17 +1157,13 @@ def _split_conf_values(value: str, *, source: str, lineno: int) -> List[str]:
 
 
 def _ensure_private_runtime_config(path: Path) -> None:
-    """确保现场运行配置不是组/其他用户可读写（Linux 要求 700）。"""
+    """将包含中间件凭据的运行配置权限收紧为仅所有者可读写。"""
     if os.name == "nt":
         return
     try:
-        mode = path.stat().st_mode & 0o777
-        if mode != 0o700:
-            path.chmod(0o700)
-        if path.stat().st_mode & 0o077:
-            raise ConfigError(f"inspect.conf 权限必须为 700: {path}")
+        path.chmod(0o600)
     except OSError as exc:
-        raise ConfigError(f"inspect.conf 权限无法设置为 700: {path}（{exc}）") from exc
+        raise ConfigError(f"inspect.conf 权限无法设置为 600: {path}（{exc}）") from exc
 
 
 def load_inspect_conf(path: Optional[Union[str, Path]] = None) -> Dict[str, List[str]]:

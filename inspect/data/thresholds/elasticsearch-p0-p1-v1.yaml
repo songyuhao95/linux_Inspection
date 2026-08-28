@@ -150,10 +150,10 @@ metrics:
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "证书路径无法发现或 openssl 不可用" }
   local.elasticsearch.snapshot.repository:
     name: 快照仓库
-    source_anchor: "P1 快照仓库：/_snapshot/_all、/_snapshot/<repo>/_verify"
+    source_anchor: "P1 快照仓库：只读查询 /_snapshot/_all、/_snapshot/<repo>"
     boundaries:
-      OK: { rule: "至少一个已注册仓库且 _verify 成功", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.snapshot.repository.ok", reason: null, note: null }
-      WARN: { rule: "仓库缺失、verify 失败或没有近期成功快照证据", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.snapshot.repository.warn", reason: null, note: null }
+      OK: { rule: "至少一个已注册仓库且仓库配置可读取", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.snapshot.repository.ok", reason: null, note: null }
+      WARN: { rule: "仓库缺失、配置读取失败或没有近期成功快照证据", rule_id: "elasticsearch-p0-p1-v1.elasticsearch.snapshot.repository.warn", reason: null, note: null }
       CRIT: { rule: null, rule_id: null, reason: missing, note: "文档未定义" }
       UNKNOWN: { rule: null, rule_id: null, reason: missing, note: "API 未授权、仓库名未配置或返回非 JSON" }
   local.elasticsearch.system.parameters:
