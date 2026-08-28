@@ -290,7 +290,7 @@ _ELASTICSEARCH_DISCOVERY_COMMAND = (
 # 仅含 `grep`（egrep 为 grep 家族，G0 预检项），required_commands 记 grep。
 _COMMAND_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "local.process.present": {
-        "command": "pgrep -fa '{process_pattern}' || ps -ef | grep '{grep_pattern}'",
+        "command": "ps -ww -eo pid=,comm=,args= | grep -E '{grep_pattern}'",
         "profile_keys": ("process_pattern",),
         "become": False,
         "anchor": "MR §5.1 服务/进程行（9 份巡检手册）+ TD §5.2 local.process.present",
@@ -529,7 +529,7 @@ _ADDITIONAL_COMMANDS = {
     "local.keepalived.vip.present": "ip -brief addr; grep -E 'virtual_ipaddress|interface' <KEEPALIVED_CONF>",
     "local.keepalived.vrrp.role": "grep -E 'state|priority|virtual_router_id|interface' <KEEPALIVED_CONF>",
     "local.keepalived.health_check.status": "grep -E 'track_script|script' <KEEPALIVED_CONF>; test -x <HEALTHCHECK_SCRIPT>",
-    "local.kafka.broker.health": "test -r <KAFKA_CONF>; pgrep -fa '[k]afka.Kafka' | grep -v 'INSPECT_MIDDLEWARE_NOT_RUNNING='; ss -tlnp | grep ':9093'",
+    "local.kafka.broker.health": "test -r <KAFKA_CONF>; ps -ww -eo comm=,args= | awk '$1 == \"java\" && $0 ~ /kafka[.]Kafka/ { print }'; ss -tlnp | grep ':9093'",
     "local.kafka.controller.health": "$kafka_bin_dir/zookeeper-shell.sh \"$kafka_zookeeper_root\" get \"$kafka_zookeeper_path/controller\"",
     "local.kafka.broker.registration": "BROKER_ID=$(awk -F= '$1 ~ /^[[:space:]]*broker[.]id[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, \"\", $2); print $2; exit}' \"$kafka_conf\"); \"$kafka_bin_dir/zookeeper-shell.sh\" \"$kafka_zookeeper_root\" get \"$kafka_zookeeper_path/brokers/ids/${BROKER_ID}\"",
     "local.kafka.under_replicated_partitions": "out=$(\"$kafka_topics\" --bootstrap-server \"$kafka_bootstrap\" --command-config \"$kafka_ssl_config\" --describe --under-replicated-partitions); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'KAFKA_COMMAND_FAILED=true\\n'; elif [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; else printf 'KAFKA_NO_UNDER_REPLICATED=true\\n'; fi",
@@ -539,14 +539,14 @@ _ADDITIONAL_COMMANDS = {
     "local.kafka.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|UnderReplicated|IOException|Session expired' <KAFKA_LOG> 2>/dev/null | tail -30; grep_rc=${PIPESTATUS[0]}; if [ \"$grep_rc\" -eq 1 ]; then printf 'KAFKA_LOG_OK=true\\n'; elif [ \"$grep_rc\" -gt 1 ]; then printf 'KAFKA_LOG_PARSE_FAILED=true\\n'; fi",
     "local.kafka.config.baseline": "grep -E '^(listeners|advertised.listeners|inter.broker.listener.name|log.dirs|zookeeper.connect|default.replication.factor|min.insync.replicas|unclean.leader.election.enable|auto.create.topics.enable)' <KAFKA_CONF>",
     "local.kafka.ssl.certificate": "cert=$(find <KAFKA_CERTS> -type f \\( -name '*.crt' -o -name '*.pem' \\) -print 2>/dev/null | head -1); if [ -z \"$cert\" ]; then printf 'KAFKA_SSL_CERT_NOT_FOUND=true\\n'; elif openssl x509 -in \"$cert\" -noout -dates -checkend 2592000 >/dev/null 2>&1; then printf 'KAFKA_SSL_CERT_OK=true\\n'; else printf 'KAFKA_SSL_CERT_FAILED=true\\n'; fi; ls -l <KAFKA_CERTS>/*.p12 2>/dev/null",
-    "local.kafka.system.parameters": "KAFKA_PID=$(pgrep -f '[k]afka\\.Kafka' | head -1); nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$KAFKA_PID/limits\"); nproc=$(awk '$1==\"Max\" && $2==\"processes\" {print $4; exit}' \"/proc/$KAFKA_PID/limits\"); swap_used=$(free -b | awk '/^Swap:/ {print $3}'); swappiness=$(cat /proc/sys/vm/swappiness); printf 'nofile=%s\\nnproc=%s\\nswap_used=%s\\nswappiness=%s\\n' \"$nofile\" \"$nproc\" \"$swap_used\" \"$swappiness\"",
+    "local.kafka.system.parameters": "KAFKA_PID=$(ps -ww -eo pid=,comm=,args= | awk '$2 == \"java\" && $0 ~ /kafka[.]Kafka/ {print $1; exit}'); nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$KAFKA_PID/limits\"); nproc=$(awk '$1==\"Max\" && $2==\"processes\" {print $4; exit}' \"/proc/$KAFKA_PID/limits\"); swap_used=$(free -b | awk '/^Swap:/ {print $3}'); swappiness=$(cat /proc/sys/vm/swappiness); printf 'nofile=%s\\nnproc=%s\\nswap_used=%s\\nswappiness=%s\\n' \"$nofile\" \"$nproc\" \"$swap_used\" \"$swappiness\"",
     "local.zookeeper.node.health": "echo ruok | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT>; echo stat | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT> | egrep 'Mode|Node count|Connections'",
     "local.zookeeper.ports.health": "ss -tlnp | grep -E ':<ZOOKEEPER_CLIENT_PORT>|:<ZOOKEEPER_PEER_PORT>|:<ZOOKEEPER_ELECTION_PORT>'",
     "local.zookeeper.error_log": "grep -R -iE 'ERROR|FATAL|OutOfMemory|NotLeader|IOException|Session expired' <ZOOKEEPER_LOG> 2>/dev/null | tail -30; grep_rc=${PIPESTATUS[0]}; if [ \"$grep_rc\" -eq 1 ]; then printf 'ZK_LOG_OK=true\\n'; elif [ \"$grep_rc\" -gt 1 ]; then printf 'ZK_LOG_PARSE_FAILED=true\\n'; fi",
     "local.zookeeper.mntr.health": "echo mntr | nc -w 3 127.0.0.1 <ZOOKEEPER_CLIENT_PORT> | egrep 'zk_avg_latency|zk_max_latency|zk_outstanding_requests|zk_num_alive_connections|zk_znode_count|zk_watch_count'",
     "local.zookeeper.data.retention": "du -sh <ZOOKEEPER_DATA> <ZOOKEEPER_DATALOG> 2>/dev/null; ls -lt <ZOOKEEPER_DATA>/version-2 2>/dev/null | head -10; ls -lt <ZOOKEEPER_DATALOG>/version-2 2>/dev/null | head -10",
     "local.zookeeper.config.baseline": "grep -E '^(dataDir|dataLogDir|clientPort|server\\.|autopurge|4lw.commands.whitelist|admin.enableServer|standaloneEnabled|reconfigEnabled)' <ZOOKEEPER_CONF>; cat <ZOOKEEPER_DATA>/myid",
-    "local.mysql.service.health": "pgrep -fa '[m]ysqld'; ss -tlnp | grep ':3306'",
+    "local.mysql.service.health": "ps -ww -eo comm=,args= | awk '$1 == \"mysqld\" { print }'; ss -tlnp | grep ':3306'",
     "local.mysql.login.version": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT @@version,@@hostname,@@port;\"",
     "local.mysql.role.gtid": "<MYSQL_BIN> --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch --skip-column-names -u<USER> -e \"SELECT CONCAT('server_id=',@@server_id),CONCAT('gtid_mode=',@@gtid_mode),CONCAT('enforce_gtid_consistency=',@@enforce_gtid_consistency),CONCAT('read_only=',@@read_only),CONCAT('super_read_only=',@@super_read_only);\"",
     "local.mysql.replica.threads": "replica_status=$(\"$mysql_bin\" --defaults-file=<MYSQL_CONF> --socket=<MYSQL_SOCKET> --protocol=SOCKET --connect-timeout=3 --batch -u<USER> -e \"SHOW REPLICA STATUS\\G\" 2>&1); replica_rc=$?; if [ \"$replica_rc\" -ne 0 ]; then printf '%s\\n' \"$replica_status\"; exit \"$replica_rc\"; elif [ -z \"$replica_status\" ]; then printf '%s\\n' MYSQL_REPLICA_NOT_CONFIGURED=true; else printf '%s\\n' \"$replica_status\" | egrep 'Replica_IO_Running|Replica_SQL_Running|Last_IO_Errno|Last_SQL_Errno'; fi",
@@ -571,13 +571,13 @@ _ADDITIONAL_COMMANDS = {
     "local.nacos.auth.config": "auth=$(grep -E '^nacos.core.auth.enabled=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); system=$(grep -E '^nacos.core.auth.system.type=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); key=$(grep -E '^nacos.core.auth.server.identity.key=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); value=$(grep -E '^nacos.core.auth.server.identity.value=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); secret=$(grep -E '^nacos.core.auth.plugin.nacos.token.secret.key=' <NACOS_CONF> 2>/dev/null | head -1 | cut -d= -f2-); if [ \"$auth\" = true ] && [ \"$system\" = nacos ] && [ -n \"$key\" ] && [ -n \"$value\" ] && [ -n \"$secret\" ]; then printf 'NACOS_AUTH_CONFIG_OK=true\\n'; else printf 'NACOS_AUTH_CONFIG_OK=false\\n'; fi",
     "local.nacos.http.errors": "if [ ! -d <NACOS_LOG> ] || ! find <NACOS_LOG> -maxdepth 1 -type f -name 'access_log.*' -print 2>/dev/null | grep -q .; then printf 'NACOS_ACCESS_LOG_UNAVAILABLE=true\\n'; else hits=$(grep -R -h -E ' 5[0-9][0-9] ' <NACOS_LOG>/access_log.* 2>/dev/null | wc -l); printf 'NACOS_HTTP_5XX_COUNT=%s\\n' \"$hits\"; fi",
     "local.nacos.jvm.parameters": "if grep -Eqs 'JAVA_HOME|NACOS_HOME|JAVA_OPT|Xms|Xmx|Xmn|server.port' /home/nacos/.bash_profile <NACOS_BIN> <NACOS_CONF> 2>/dev/null && grep -Eq 'server.port[=:][[:space:]]*<NACOS_HTTP_PORT>|/opt/nacos|NACOS_HOME' <NACOS_BIN> <NACOS_CONF> 2>/dev/null; then printf 'NACOS_JVM_CONFIG_OK=true\\n'; else printf 'NACOS_JVM_CONFIG_OK=false\\n'; fi",
-    "local.nacos.thread.fd.pressure": "PID=$(pgrep -f 'com.alibaba.nacos|nacos.home|/opt/nacos' | head -1); if [ -z \"$PID\" ]; then printf 'NACOS_PROCESS_FACT_UNAVAILABLE=true\\n'; else fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); threads=$(awk '/^Threads:/ {print $2; exit}' /proc/$PID/status 2>/dev/null); printf 'NACOS_FD_COUNT=%s\\nNACOS_THREADS=%s\\n' \"$fd\" \"$threads\"; fi",
+    "local.nacos.thread.fd.pressure": "PID=$(ps -ww -eo pid=,comm=,args= | awk '$2 == \"java\" && $0 ~ /(com[.]alibaba[.]nacos|nacos[.]home)/ {print $1; exit}'); if [ -z \"$PID\" ]; then printf 'NACOS_PROCESS_FACT_UNAVAILABLE=true\\n'; else fd=$(ls /proc/$PID/fd 2>/dev/null | wc -l); threads=$(awk '/^Threads:/ {print $2; exit}' /proc/$PID/status 2>/dev/null); printf 'NACOS_FD_COUNT=%s\\nNACOS_THREADS=%s\\n' \"$fd\" \"$threads\"; fi",
     "local.nacos.config.baseline": "count=$(grep -Ec '^(nacos.server.ip|spring.sql.init.platform|db.num|db.url.0|db.user.0|server.tomcat.accesslog.enabled|nacos.istio.mcp.server.enabled)=' <NACOS_CONF> 2>/dev/null || printf 0); if [ -r <NACOS_CONF> ] && [ \"$count\" -ge 5 ]; then printf 'NACOS_CONFIG_BASELINE_OK=true\\n'; else printf 'NACOS_CONFIG_BASELINE_OK=false\\n'; fi",
     "local.nacos.log.data.retention": "if [ ! -d <NACOS_LOG> ] || [ ! -d <NACOS_DATA> ]; then printf 'NACOS_RETENTION_PATH_UNAVAILABLE=true\\n'; else old=$(find <NACOS_LOG> -type f -mtime +30 -print 2>/dev/null | wc -l); printf 'NACOS_OLD_LOG_FILES=%s\\n' \"$old\"; fi",
     "local.nacos.metrics.collection": "out=$(curl -sS --connect-timeout 3 <NACOS_ENDPOINT>/nacos/actuator/prometheus 2>/dev/null); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'NACOS_METRICS_LINES=0\\n'; else lines=$(printf '%s\\n' \"$out\" | egrep -c 'jvm_memory|system_cpu|nacos' || printf 0); printf 'NACOS_METRICS_LINES=%s\\n' \"$lines\"; fi",
     "local.nacos.database.errors": "if [ ! -d <NACOS_LOG> ]; then printf 'NACOS_DATABASE_LOG_UNAVAILABLE=true\\n'; else hits=$(grep -R -iE 'SQLException|Communications link failure|Access denied|connectionTimeout|No DataSource|HikariPool' <NACOS_LOG> 2>/dev/null | tail -80 | wc -l); printf 'NACOS_DATABASE_ERROR_COUNT=%s\\n' \"$hits\"; fi",
-    "local.nacos.system.parameters": "PID=$(pgrep -f 'com.alibaba.nacos|nacos.home|/opt/nacos' | head -1); if [ -z \"$PID\" ]; then printf 'NACOS_PROCESS_FACT_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' /proc/$PID/limits); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; swap=$(free -b | awk '/^Swap:/ {print $3}'); printf 'NACOS_NOFILE=%s\\nNACOS_SWAP_USED=%s\\n' \"$nofile\" \"$swap\"; fi",
-    "local.rabbitmq.service.health": "if test -r <RABBITMQ_CONF> && test -x <RABBITMQ_BIN> && pgrep -fa 'beam.smp|rabbitmq-server' >/dev/null 2>&1; then printf 'RABBITMQ_SERVICE_OK=true\\n'; else printf 'RABBITMQ_SERVICE_OK=false\\n'; fi",
+    "local.nacos.system.parameters": "PID=$(ps -ww -eo pid=,comm=,args= | awk '$2 == \"java\" && $0 ~ /(com[.]alibaba[.]nacos|nacos[.]home)/ {print $1; exit}'); if [ -z \"$PID\" ]; then printf 'NACOS_PROCESS_FACT_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' /proc/$PID/limits); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; swap=$(free -b | awk '/^Swap:/ {print $3}'); printf 'NACOS_NOFILE=%s\\nNACOS_SWAP_USED=%s\\n' \"$nofile\" \"$swap\"; fi",
+    "local.rabbitmq.service.health": "if test -r <RABBITMQ_CONF> && test -x <RABBITMQ_BIN> && ps -ww -eo comm=,args= | awk '$1 == \"beam.smp\" && $0 ~ /rabbit/ {found=1} END {exit(found ? 0 : 1)}'; then printf 'RABBITMQ_SERVICE_OK=true\\n'; else printf 'RABBITMQ_SERVICE_OK=false\\n'; fi",
     "local.rabbitmq.node.health": "ping=$('<RABBITMQ_DIAGNOSTICS>' ping 2>&1); ping_rc=$?; status=$('<RABBITMQ_DIAGNOSTICS>' status 2>&1); status_rc=$?; if [ \"$ping_rc\" -eq 0 ] && [ \"$status_rc\" -eq 0 ] && printf '%s\\n%s\\n' \"$ping\" \"$status\" | grep -Eqi 'Ping succeeded|pong|running_applications|rabbit'; then printf 'RABBITMQ_NODE_OK=true\\n'; else printf 'RABBITMQ_NODE_OK=false\\n'; fi",
     "local.rabbitmq.core_ports.health": "ports=$(ss -H -ltnp 2>/dev/null | egrep ':(<RABBITMQ_PORT>|<RABBITMQ_MANAGEMENT_PORT>|<RABBITMQ_CLUSTER_PORT>|<RABBITMQ_EPMD_PORT>)\\b' | wc -l); printf 'RABBITMQ_LISTENING_PORTS=%s\\n' \"$ports\"",
     "local.rabbitmq.cluster.nodes": "out=$(<RABBITMQCTL> cluster_status 2>&1); rc=$?; nodes=$(printf '%s\\n' \"$out\" | grep -Eo 'rabbit@[A-Za-z0-9_.-]+' | sort -u | wc -l); if [ \"$rc\" -eq 0 ] && [ \"$nodes\" -gt 0 ]; then printf 'RABBITMQ_RUNNING_NODES=%s\\n' \"$nodes\"; else printf 'RABBITMQ_CLUSTER_QUERY_FAILED=true\\n'; fi",
@@ -590,10 +590,10 @@ _ADDITIONAL_COMMANDS = {
     "local.rabbitmq.security.permissions": "users=$(<RABBITMQCTL> list_users 2>&1); users_rc=$?; permissions=$(<RABBITMQCTL> list_permissions -p / 2>&1); permissions_rc=$?; if [ \"$users_rc\" -eq 0 ] && [ \"$permissions_rc\" -eq 0 ]; then printf 'RABBITMQ_PERMISSIONS_OK=true\\n'; else printf 'RABBITMQ_PERMISSIONS_OK=false\\n'; fi",
     "local.rabbitmq.topology": "vhosts=$(<RABBITMQCTL> list_vhosts 2>&1); vhosts_rc=$?; exchanges=$(<RABBITMQCTL> list_exchanges -p / name type durable auto_delete --formatter=csv 2>&1); exchanges_rc=$?; bindings=$(<RABBITMQCTL> list_bindings -p / source_name destination_name destination_kind routing_key --formatter=csv 2>&1); bindings_rc=$?; if [ \"$vhosts_rc\" -eq 0 ] && [ \"$exchanges_rc\" -eq 0 ] && [ \"$bindings_rc\" -eq 0 ]; then printf 'RABBITMQ_TOPOLOGY_OK=true\\n'; else printf 'RABBITMQ_TOPOLOGY_OK=false\\n'; fi",
     "local.rabbitmq.queue.durability": "out=$(<RABBITMQCTL> list_queues -p / name durable auto_delete exclusive arguments consumers messages_ready messages_unacknowledged --formatter=csv 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'RABBITMQ_QUEUE_DURABILITY_OK=false\\n'; elif printf '%s\\n' \"$out\" | awk -F, 'NF > 1 && tolower($1) != \"name\" {gsub(/[\" ]/,\"\",$2); if (tolower($2) != \"true\") bad=1} END {exit bad}'; then printf 'RABBITMQ_QUEUE_DURABILITY_OK=true\\n'; else printf 'RABBITMQ_QUEUE_DURABILITY_OK=false\\n'; fi",
-    "local.rabbitmq.file_descriptor.limits": "PID=$(pgrep -f 'beam.smp' | head -1); if [ -z \"$PID\" ]; then printf 'RABBITMQ_FD_FACT_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' /proc/$PID/limits); nproc=$(awk '$1==\"Max\" && $2==\"processes\" {print $4; exit}' /proc/$PID/limits); [ \"$nofile\" = unlimited ] && nofile=999999; [ \"$nproc\" = unlimited ] && nproc=999999; if [ \"${nofile:-0}\" -ge 65535 ] 2>/dev/null && [ \"${nproc:-0}\" -ge 4096 ] 2>/dev/null; then printf 'RABBITMQ_NOFILE=%s\\n' \"$nofile\"; else printf 'RABBITMQ_NOFILE=%s\\n' \"${nofile:-0}\"; fi; fi",
+    "local.rabbitmq.file_descriptor.limits": "PID=$(ps -ww -eo pid=,comm=,args= | awk '$2 == \"beam.smp\" && $0 ~ /rabbit/ {print $1; exit}'); if [ -z \"$PID\" ]; then printf 'RABBITMQ_FD_FACT_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' /proc/$PID/limits); nproc=$(awk '$1==\"Max\" && $2==\"processes\" {print $4; exit}' /proc/$PID/limits); [ \"$nofile\" = unlimited ] && nofile=999999; [ \"$nproc\" = unlimited ] && nproc=999999; if [ \"${nofile:-0}\" -ge 65535 ] 2>/dev/null && [ \"${nproc:-0}\" -ge 4096 ] 2>/dev/null; then printf 'RABBITMQ_NOFILE=%s\\n' \"$nofile\"; else printf 'RABBITMQ_NOFILE=%s\\n' \"${nofile:-0}\"; fi; fi",
     "local.rabbitmq.systemd.unit": "unit=$(systemctl cat <RABBITMQ_UNIT> 2>/dev/null); if printf '%s\\n' \"$unit\" | grep -Eq 'User=rabbitmq|Group=rabbitmq|ExecStart=.*rabbitmq|Restart='; then printf 'RABBITMQ_SYSTEMD_OK=true\\n'; else printf 'RABBITMQ_SYSTEMD_OK=false\\n'; fi",
     "local.rabbitmq.log.data.retention": "if [ ! -d <RABBITMQ_LOG> ] || [ ! -d <RABBITMQ_DATA> ]; then printf 'RABBITMQ_RETENTION_PATH_UNAVAILABLE=true\\n'; else old=$(find <RABBITMQ_LOG> -type f -mtime +30 -print 2>/dev/null | wc -l); printf 'RABBITMQ_OLD_FILES=%s\\n' \"$old\"; fi",
-    "local.redis.service.health": "if test -e \"$redis_conf_path\" && test -x \"$redis_bin\" && pgrep -fa 'redis-server' >/dev/null 2>&1; then printf 'REDIS_SERVICE_OK=true\\n'; else printf 'REDIS_SERVICE_OK=false\\n'; fi",
+    "local.redis.service.health": "if test -e \"$redis_conf_path\" && test -x \"$redis_bin\" && ps -ww -eo comm=,args= | awk '$1 == \"redis-server\" {found=1} END {exit(found ? 0 : 1)}'; then printf 'REDIS_SERVICE_OK=true\\n'; else printf 'REDIS_SERVICE_OK=false\\n'; fi",
     "local.redis.ping.version": "ping=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning PING 2>&1); ping_rc=$?; info=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning INFO server 2>&1); info_rc=$?; if printf '%s\\n%s\\n' \"$ping\" \"$info\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_PING_FACT_UNAVAILABLE=true\\n'; elif [ \"$ping_rc\" -eq 0 ] && [ \"$info_rc\" -eq 0 ] && printf '%s\\n' \"$ping\" | grep -Eq '^PONG$' && printf '%s\\n' \"$info\" | grep -Eq '^redis_version:'; then printf 'REDIS_PING_OK=true\\n'; else printf 'REDIS_PING_OK=false\\n'; fi",
     "local.redis.core_ports.health": "case \"$redis_mode\" in cluster) expected=\"$redis_cluster_port|$redis_cluster_bus_port\";; sentinel) expected=\"$redis_replica_port|$redis_sentinel_port\";; *) expected=\"$redis_port\";; esac; count=$(ss -H -ltnp 2>/dev/null | egrep \"(:($expected))\\b\" | awk '{print $4}' | sed -E 's/.*:([0-9]+)$/\\1/' | sort -nu | wc -l); printf 'REDIS_LISTENING_PORTS=%s\\n' \"$count\"",
     "local.redis.replication.health": "out=$(\"$redis_cli\" -h \"$redis_host\" -p \"$redis_data_port\" --user \"$redis_user\" --no-auth-warning INFO replication 2>&1); rc=$?; if [ \"$rc\" -ne 0 ] || printf '%s\\n' \"$out\" | grep -Eqi 'NOAUTH|WRONGPASS|connection refused|Could not connect|timeout|ERR '; then printf 'REDIS_REPLICATION_FACT_UNAVAILABLE=true\\n'; elif printf '%s\\n' \"$out\" | grep -Eq 'role:(master|slave)' && ! printf '%s\\n' \"$out\" | grep -Eqi 'master_link_status:down|master_sync_in_progress:1|error'; then printf 'REDIS_REPLICATION_OK=true\\n'; else printf 'REDIS_REPLICATION_OK=false\\n'; fi",
@@ -614,8 +614,8 @@ _ADDITIONAL_COMMANDS = {
     # commands live in metrics.py for report provenance; these commands are
     # the target-side, read-only implementations consumed by normalize.py.
     "local.rocketmq.java.environment": "java_bin=\"$rocketmq_jdk_home/bin/java\"; javac_bin=\"$rocketmq_jdk_home/bin/javac\"; if [ ! -x \"$java_bin\" ]; then java_bin=java; fi; if [ ! -x \"$javac_bin\" ]; then javac_bin=javac; fi; if \"$java_bin\" -version 1>/dev/null 2>&1 && \"$javac_bin\" -version 1>/dev/null 2>&1 && [ -n \"$rocketmq_home_dir\" ]; then printf 'ROCKETMQ_JAVA_OK=true\\n'; else printf 'ROCKETMQ_JAVA_OK=false\\n'; fi",
-    "local.rocketmq.namesrv.health": "if pgrep -fa 'NamesrvStartup|mqnamesrv' 1>/dev/null 2>&1; then printf 'ROCKETMQ_NAMESRV_OK=true\\n'; else printf 'ROCKETMQ_NAMESRV_OK=false\\n'; fi",
-    "local.rocketmq.broker.health": "if pgrep -fa 'BrokerStartup|mqbroker' 1>/dev/null 2>&1; then printf 'ROCKETMQ_BROKER_OK=true\\n'; else printf 'ROCKETMQ_BROKER_OK=false\\n'; fi",
+    "local.rocketmq.namesrv.health": "if ps -ww -eo comm=,args= | awk '$1 == \"java\" && $0 ~ /(NamesrvStartup|mqnamesrv)/ {found=1} END {exit(found ? 0 : 1)}'; then printf 'ROCKETMQ_NAMESRV_OK=true\\n'; else printf 'ROCKETMQ_NAMESRV_OK=false\\n'; fi",
+    "local.rocketmq.broker.health": "if ps -ww -eo comm=,args= | awk '$1 == \"java\" && $0 ~ /(BrokerStartup|mqbroker)/ {found=1} END {exit(found ? 0 : 1)}'; then printf 'ROCKETMQ_BROKER_OK=true\\n'; else printf 'ROCKETMQ_BROKER_OK=false\\n'; fi",
     "local.rocketmq.core_ports.health": "expected=\"$rocketmq_namesrv_port|$rocketmq_controller_port|$rocketmq_broker_port|$rocketmq_broker_ha_port\"; if [ \"$rocketmq_mode\" != cluster ]; then expected=\"$rocketmq_namesrv_port|$rocketmq_broker_port|$rocketmq_broker_ha_port\"; fi; ports=$(ss -H -ltn 2>/dev/null | awk -v p=\"$expected\" '$4 ~ \"(:|\\\\.)\"p\"$\" {n=$4; sub(/^.*:/,\"\",n); print n}' | sort -u | wc -l); printf 'ROCKETMQ_LISTENING_PORTS=%s\\n' \"$ports\"",
     "local.rocketmq.cluster.registration": "out=$(timeout 5 \"$rocketmq_mqadmin\" clusterList -n \"$rocketmq_namesrv_addr\" 2>&1 | grep -m 1 -E 'Broker[[:space:]]+Name|brokerName|#Cluster[[:space:]]+Name'); if printf '%s\\n' \"$out\" | grep -Eqi 'Broker[[:space:]]+Name|brokerName|#Cluster[[:space:]]+Name'; then printf 'ROCKETMQ_CLUSTER_OK=true\\n'; else printf 'ROCKETMQ_CLUSTER_UNAVAILABLE=true\\n'; fi",
     "local.rocketmq.controller.sync_set": "if [ \"$rocketmq_mode\" != cluster ]; then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; else meta=$(\"$rocketmq_mqadmin\" getControllerMetaData -a \"$rocketmq_controller_addr\" 2>&1); sync=$(\"$rocketmq_mqadmin\" getSyncStateSet -a \"$rocketmq_controller_addr\" -b \"$rocketmq_broker\" 2>&1); if printf '%s\\n%s\\n' \"$meta\" \"$sync\" | grep -Eqi 'leader|Controller|SyncStateSet'; then printf 'ROCKETMQ_CONTROLLER_OK=true\\n'; else printf 'ROCKETMQ_CONTROLLER_OK=false\\n'; fi; fi",
@@ -628,19 +628,19 @@ _ADDITIONAL_COMMANDS = {
     "local.rocketmq.consumer.groups": "out=$(\"$rocketmq_mqadmin\" consumerProgress -n \"$rocketmq_namesrv_addr\" 2>&1); rc=$?; if [ \"$rc\" -eq 0 ]; then printf 'ROCKETMQ_GROUPS_OK=true\\n'; else printf 'ROCKETMQ_GROUPS_OK=false\\n'; fi",
     "local.rocketmq.broker.runtime": "out=$(\"$rocketmq_mqadmin\" brokerStatus -n \"$rocketmq_namesrv_addr\" -b \"$rocketmq_broker\" 2>&1); rc=$?; if [ \"$rc\" -ne 0 ]; then printf 'ROCKETMQ_BROKER_RUNTIME_UNAVAILABLE=true\\n'; else value=$(printf '%s\\n' \"$out\" | awk -F= '/sendThreadPoolQueueSize|pullThreadPoolQueueSize/ {if ($2+0>m)m=$2+0} END{if(m!="")print m}'); case \"$value\" in ''|*[!0-9]*) printf 'ROCKETMQ_BROKER_RUNTIME_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_BROKER_QUEUE_MAX=%s\\n' \"$value\";; esac; fi",
     "local.rocketmq.jvm.gc": "if [ -d \"$rocketmq_log_dir\" ]; then hits=$(grep -R -iE 'Full GC|OutOfMemory|GC overhead' \"$rocketmq_log_dir\" --include='*.log' 2>/dev/null | wc -l); printf 'ROCKETMQ_JVM_GC_EVENTS=%s\\n' \"$hits\"; else printf 'ROCKETMQ_JVM_GC_UNAVAILABLE=true\\n'; fi",
-    "local.rocketmq.system.parameters": "pid=$(pgrep -f 'NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker' | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$pid/limits\"); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; case \"$nofile\" in ''|*[!0-9]*) printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_NOFILE=%s\\n' \"$nofile\";; esac; fi",
+    "local.rocketmq.system.parameters": "pid=$(ps -ww -eo pid=,comm=,args= | awk '$2 == \"java\" && $0 ~ /(NamesrvStartup|BrokerStartup|mqnamesrv|mqbroker)/ {print $1; exit}'); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n'; else nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$pid/limits\"); if [ \"$nofile\" = unlimited ]; then nofile=999999; fi; case \"$nofile\" in ''|*[!0-9]*) printf 'ROCKETMQ_SYSTEM_UNAVAILABLE=true\\n';; *) printf 'ROCKETMQ_NOFILE=%s\\n' \"$nofile\";; esac; fi",
     "local.rocketmq.systemd.unit": "units=$(systemctl cat rocketmq-namesrv rocketmq-broker 2>&1); if printf '%s\\n' \"$units\" | grep -Eq 'ExecStart=.*(mqnamesrv|mqbroker)|User=|Restart='; then printf 'ROCKETMQ_SYSTEMD_OK=true\\n'; else printf 'ROCKETMQ_SYSTEMD_OK=false\\n'; fi",
     "local.rocketmq.log.data.retention": "if [ -d \"$rocketmq_log_dir\" ]; then old=$(find \"$rocketmq_log_dir\" -type f -mtime +\"$rocketmq_old_log_days\" -print 2>/dev/null | wc -l); printf 'ROCKETMQ_OLD_FILES=%s\\n' \"$old\"; else printf 'ROCKETMQ_RETENTION_UNAVAILABLE=true\\n'; fi",
-    # Build the pgrep expression from fragments.  Keeping the complete
-    # Bootstrap class out of the shell command line prevents pgrep from
-    # matching the inspection command itself on hosts without Tomcat.
-    "local.tomcat.service.health": "tomcat_pattern='org'; tomcat_pattern=\"${tomcat_pattern}.apache\"; tomcat_pattern=\"${tomcat_pattern}.catalina\"; tomcat_pattern=\"${tomcat_pattern}.startup\"; tomcat_pattern=\"${tomcat_pattern}.Bootstrap\"; if pgrep -fa \"$tomcat_pattern\" >/dev/null 2>&1; then printf 'TOMCAT_PROCESS_PRESENT=true\\n'; else printf 'TOMCAT_PROCESS_PRESENT=false\\n'; fi; if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && pgrep -fa \"$tomcat_pattern\" >/dev/null 2>&1; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
+    # Build the process expression from fragments.  Keeping the complete
+    # Bootstrap class out of the shell command line prevents a process-list
+    # check from matching the inspection command itself on hosts without Tomcat.
+    "local.tomcat.service.health": "tomcat_pattern='org'; tomcat_pattern=\"${tomcat_pattern}.apache\"; tomcat_pattern=\"${tomcat_pattern}.catalina\"; tomcat_pattern=\"${tomcat_pattern}.startup\"; tomcat_pattern=\"${tomcat_pattern}.Bootstrap\"; if ps -ww -eo comm=,args= | awk '$1 == \"java\" && $0 ~ /org[.]apache[.]catalina[.]startup[.]Bootstrap/ {found=1} END {exit(found ? 0 : 1)}'; then printf 'TOMCAT_PROCESS_PRESENT=true\\n'; else printf 'TOMCAT_PROCESS_PRESENT=false\\n'; fi; if [ -x \"$tomcat_bin_dir/catalina.sh\" ] && ps -ww -eo comm=,args= | awk '$1 == \"java\" && $0 ~ /org[.]apache[.]catalina[.]startup[.]Bootstrap/ {found=1} END {exit(found ? 0 : 1)}'; then printf 'TOMCAT_SERVICE_OK=true\\n'; else printf 'TOMCAT_SERVICE_OK=false\\n'; fi",
     "local.tomcat.http.health": "ports=0; for p in \"$tomcat_port\" \"$tomcat_shutdown_port\"; do n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$p\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); done; if [ \"$tomcat_https_enabled\" = true ]; then n=$(ss -H -lnt 2>/dev/null | awk -v p=\":$tomcat_https_port\" '$4 ~ p\"$\" {n++} END {print n+0}'); ports=$((ports+n)); fi; printf 'TOMCAT_LISTENING_PORTS=%s\\n' \"$ports\"",
     "local.tomcat.http.reachability": "status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 \"http://$tomcat_address:$tomcat_port/\" 2>/dev/null); case \"$status\" in 2??|3??|4??) printf 'TOMCAT_HTTP_OK=true\\n';; *) printf 'TOMCAT_HTTP_OK=false\\n';; esac",
     "local.tomcat.access_log.errors": "if [ -r \"$tomcat_log_dir/catalina.out\" ]; then hits=$(tail -200 \"$tomcat_log_dir/catalina.out\" | grep -Eic 'SEVERE|Exception|OutOfMemoryError|Address already in use'); printf 'TOMCAT_STARTUP_ERROR_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_STARTUP_FACT_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.error_log.key_evidence": "if [ -d \"$tomcat_log_dir\" ]; then hits=0; for file in $(find \"$tomcat_log_dir\" -type f -mtime -1 \\( -name '*.log' -o -name 'catalina.out' \\) -print 2>/dev/null); do n=$(grep -HniE 'SEVERE|ERROR|Exception|OutOfMemoryError|StackOverflowError' \"$file\" 2>/dev/null | tail -50 | wc -l); hits=$((hits+n)); done; if [ \"$hits\" -gt 50 ] 2>/dev/null; then hits=50; fi; printf 'TOMCAT_ERROR_LOG_HITS=%s\\n' \"$hits\"; else printf 'TOMCAT_ERROR_LOG_UNAVAILABLE=true\\n'; fi",
-    "local.tomcat.jvm.memory": "pid=$(pgrep -f \"$tomcat_process_pattern\" | head -1); rss=$(ps -o rss= -p \"$pid\" 2>/dev/null | awk '{print $1}'); case \"$rss\" in ''|*[!0-9]*) printf 'TOMCAT_JVM_MEMORY_UNAVAILABLE=true\\n';; *) mb=$(awk -v r=\"$rss\" 'BEGIN {printf \"%.2f\", r/1024}'); printf 'TOMCAT_RSS_MB=%s\\n' \"$mb\";; esac",
-    "local.tomcat.thread_pool.pressure": "pid=$(pgrep -f \"$tomcat_process_pattern\" | head -1); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'TOMCAT_THREAD_FACT_UNAVAILABLE=true\\n'; else fd=$(ls /proc/$pid/fd 2>/dev/null | wc -l); threads=$(ls /proc/$pid/task 2>/dev/null | wc -l); printf 'TOMCAT_FD_COUNT=%s\\n' \"$fd\"; printf 'TOMCAT_THREAD_COUNT=%s\\n' \"$threads\"; fi",
+    "local.tomcat.jvm.memory": "pid=$(ps -ww -eo pid=,comm=,args= | awk '$2 == \"java\" && $0 ~ /org[.]apache[.]catalina[.]startup[.]Bootstrap/ {print $1; exit}'); rss=$(ps -o rss= -p \"$pid\" 2>/dev/null | awk '{print $1}'); case \"$rss\" in ''|*[!0-9]*) printf 'TOMCAT_JVM_MEMORY_UNAVAILABLE=true\\n';; *) mb=$(awk -v r=\"$rss\" 'BEGIN {printf \"%.2f\", r/1024}'); printf 'TOMCAT_RSS_MB=%s\\n' \"$mb\";; esac",
+    "local.tomcat.thread_pool.pressure": "pid=$(ps -ww -eo pid=,comm=,args= | awk '$2 == \"java\" && $0 ~ /org[.]apache[.]catalina[.]startup[.]Bootstrap/ {print $1; exit}'); if [ -z \"$pid\" ] || [ ! -r \"/proc/$pid/limits\" ]; then printf 'TOMCAT_THREAD_FACT_UNAVAILABLE=true\\n'; else fd=$(ls /proc/$pid/fd 2>/dev/null | wc -l); threads=$(ls /proc/$pid/task 2>/dev/null | wc -l); printf 'TOMCAT_FD_COUNT=%s\\n' \"$fd\"; printf 'TOMCAT_THREAD_COUNT=%s\\n' \"$threads\"; fi",
     "local.tomcat.security.baseline": "if [ ! -r \"$tomcat_conf_file\" ]; then printf 'TOMCAT_CONFIG_FACT_UNAVAILABLE=true\\n'; elif grep -Eqi 'autoDeploy[[:space:]]*=[[:space:]]*\"?true|deployOnStartup[[:space:]]*=[[:space:]]*\"?true' \"$tomcat_conf_file\"; then printf 'TOMCAT_CONFIG_OK=false\\n'; else printf 'TOMCAT_CONFIG_OK=true\\n'; fi",
     "local.tomcat.default_apps": "if [ -d \"$tomcat_webapps_dir\" ]; then count=$(find \"$tomcat_webapps_dir\" -maxdepth 1 -type d \\( -name docs -o -name examples -o -name manager -o -name host-manager \\) -print | wc -l); printf 'TOMCAT_DEFAULT_APP_COUNT=%s\\n' \"$count\"; else printf 'TOMCAT_DEFAULT_APP_FACT_UNAVAILABLE=true\\n'; fi",
     "local.tomcat.java.environment": "if [ -x \"$tomcat_java_home/bin/java\" ] && \"$tomcat_java_home/bin/java\" -version 1>/dev/null 2>&1; then printf 'TOMCAT_JAVA_OK=true\\n'; else printf 'TOMCAT_JAVA_OK=false\\n'; fi",
@@ -970,7 +970,7 @@ _ADDITIONAL_GENERATED_ALLOWED_BINARIES = (
     "awk", "bash", "cat", "cut", "curl", "echo", "egrep", "find", "free", "grep", "head",
     "hostname", "ip", "jcmd", "jstat", "kafka-consumer-groups.sh", "kafka-topics.sh", "ls", "mqadmin", "mysql", "nc",
     "openssl",
-    "pgrep", "ps", "rabbitmq-diagnostics", "rabbitmqctl", "redis-cli", "sed",
+    "ps", "rabbitmq-diagnostics", "rabbitmqctl", "redis-cli", "sed",
     "sort", "ss", "stat", "su", "systemctl", "tail", "test", "timeout", "wc", "zookeeper-shell.sh", "zkServer.sh",
 )
 _ADDITIONAL_UNSAFE_GENERATED_TOKENS = re.compile(
@@ -1405,7 +1405,7 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
             )
         elif metric_id == "local.redis.system.parameters":
             command = (
-                "redis_pid=$(pgrep -f '[r]edis-server' | head -1); "
+                "redis_pid=$(ps -ww -eo pid=,comm=,args= | awk '$2 == \"redis-server\" {print $1; exit}'); "
                 "if [ -z \"$redis_pid\" ] || [ ! -r \"/proc/$redis_pid/limits\" ]; then "
                 "printf 'REDIS_SYSTEM_FACT_UNAVAILABLE=true\\n'; else "
                 "nofile=$(awk '$1==\"Max\" && $2==\"open\" {print $4; exit}' \"/proc/$redis_pid/limits\"); "
@@ -1470,8 +1470,8 @@ def _build_additional_command(metric_id: str, profile: Dict[str, Any]) -> str:
         _additional_profile_value(profile, config_key)
         # Match the process executable (comm) before inspecting Java args.
         # The Ansible timeout/bash wrapper contains the complete bundle in its
-        # argv, so pgrep -fa can otherwise discover the inspection command as
-        # the middleware it is trying to detect.
+        # argv, so a process-list check must not discover the inspection
+        # command as the middleware it is trying to detect.
         gate = (
             "if ! ps -ww -eo comm=,args= 2>/dev/null | "
             f"awk '{process_predicate} {{ found=1 }} "
@@ -1614,13 +1614,18 @@ def _substitute_template(
     for key, value in values.items():
         placeholder = "{" + key + "}"
         if placeholder not in out:
+            if key == "process_pattern" and "{grep_pattern}" in template:
+                # The process pattern is consumed through the derived
+                # self-excluding grep pattern, so do not inject the literal
+                # pattern into the shell command itself.
+                continue
             raise CommandConfigError(f"注册表模板缺少占位符 {placeholder}: {template!r}")
         out = out.replace(placeholder, value)
     return out
 
 
 _NGINX_GENERATED_ALLOWED_BINARIES = (
-    "pgrep", "ps", "sed", "head", "tail", "grep", "netstat", "ss", "curl", "ls",
+    "ps", "sed", "head", "tail", "grep", "netstat", "ss", "curl", "ls",
     "openssl",
 )
 _NGINX_UNSAFE_GENERATED_TOKENS = re.compile(
@@ -1629,7 +1634,7 @@ _NGINX_UNSAFE_GENERATED_TOKENS = re.compile(
 )
 
 _KEEPALIVED_GENERATED_ALLOWED_BINARIES = (
-    "pgrep", "ps", "sed", "head", "tail", "grep", "egrep", "ls", "ip",
+    "ps", "sed", "head", "tail", "grep", "egrep", "ls", "ip",
     "curl", "awk", "getcap", "systemctl", "test",
 )
 _KEEPALIVED_UNSAFE_GENERATED_TOKENS = re.compile(
@@ -1638,7 +1643,7 @@ _KEEPALIVED_UNSAFE_GENERATED_TOKENS = re.compile(
 )
 
 _ELASTICSEARCH_GENERATED_ALLOWED_BINARIES = (
-    "pgrep", "ps", "sed", "head", "tail", "grep", "egrep", "curl", "ls",
+    "ps", "sed", "head", "tail", "grep", "egrep", "curl", "ls",
     "ss", "cat", "free", "su", "openssl", "test", "printf", "awk",
 )
 _ELASTICSEARCH_UNSAFE_GENERATED_TOKENS = re.compile(
@@ -3222,7 +3227,7 @@ def classify_metric_result(
     优先级：preset_error（UNSUPPORTED_PROFILE）> 命令缺失
     （COMMAND_NOT_FOUND，AE §3）> 超时（TIMEOUT，AE §7）> 权限
     （PERMISSION_DENIED，AE §5）> 正常（rc/stdout 原样回传，
-    rc 非零属业务语义数据——如 pgrep/grep 无匹配——由 normalize 解析）。
+    rc 非零属业务语义数据——如 grep 无匹配——由 normalize 解析）。
 
     命令缺失判定仅对**探测集合内**（TD §5.1，probe.PROBE_COMMANDS）的
     命令生效：探测集合是该判定唯一可测来源；head/cat 等指标命令中
@@ -3422,7 +3427,7 @@ def select_middleware_metrics(
 
 
 def _nginx_process_present(metric_result: Dict[str, Any]) -> bool:
-    """进程发现结果是否命中 Nginx（rc=0 且 stdout 非空 = pgrep 有匹配）。"""
+    """进程发现结果是否命中 Nginx（rc=0 且 stdout 非空 = 有匹配）。"""
     return (
         metric_result.get("error") is None
         and metric_result.get("rc") == 0

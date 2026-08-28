@@ -143,7 +143,7 @@ def probe_status(matrix: Dict[str, bool]) -> str:
 # 注：local.logs.key_evidence 模板按 TD §5.2 使用 `egrep`，探测集合（TD §5.1）
 # 仅含 `grep`（egrep 为 grep 家族，G0 预检项），故所需命令记 grep。
 _METRIC_REQUIRED_COMMANDS: Dict[str, Tuple[str, ...]] = {
-    "local.process.present": ("bash", "pgrep", "ps", "grep"),
+    "local.process.present": ("bash", "ps", "grep"),
     "local.service.active": ("bash", "systemctl"),
     "local.port.listening": ("bash", "ss", "grep"),
     "local.cpu.utilization": ("bash", "top", "grep", "tail", "ps", "head"),
